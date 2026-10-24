@@ -1,3 +1,4 @@
+import { legacyPackingCheckpoint } from '../fixtures/legacy-packing-checkpoint.mjs'
 import { test, expect } from './extension-fixture.mjs'
 import {
   editOrderProduct,
@@ -40,6 +41,9 @@ function snapshot(orderId) {
 async function openTestDatabase(extension) {
   const page = await extension.context.newPage()
   await page.goto(`${extension.origin}/unsupported`)
+  await page.addScriptTag({
+    content: `window.legacyPackingCheckpoint = ${legacyPackingCheckpoint.toString()}`,
+  })
   await page.evaluate(async () => {
     const { openDatabase } = await import('/src/database.js')
     window.openOrderDatabase = openDatabase
@@ -74,7 +78,7 @@ async function openTestDatabase(extension) {
         [],
         { snapshot: source }
       ).preparation
-      initial.defaultPacking = packingModel.packingCheckpoint(initial)
+      initial.defaultPacking = window.legacyPackingCheckpoint(initial)
       const plan = packingModel.planSelectedPreparations(
           [{ snapshot: source, preparation: initial, entryIds: ['2'] }],
           '2026-12'
@@ -86,10 +90,10 @@ async function openTestDatabase(extension) {
           { snapshot: source }
         ),
         moved = allocation.preparation
-      moved.previousPacking = packingModel.packingCheckpoint(initial, {
+      moved.previousPacking = window.legacyPackingCheckpoint(initial, {
         includeDefaults: true,
       })
-      moved.defaultPacking = packingModel.packingCheckpoint(moved)
+      moved.defaultPacking = window.legacyPackingCheckpoint(moved)
       await library.restoreBackup({
         format: '1688-order-library',
         version: 4,
@@ -542,7 +546,7 @@ test('legacy backups discard retired reservations after merge and split while re
       })
     legacy.allocations[0].groups[0].nextItem = 99
     for (const entry of legacy.issuedCodes) delete entry.ownerSnapshot
-    legacy.preparations[0].defaultPacking = packingModel.packingCheckpoint(
+    legacy.preparations[0].defaultPacking = window.legacyPackingCheckpoint(
       legacy.preparations[0]
     )
     const restored = await openOrderDatabase({
@@ -594,7 +598,7 @@ test('legacy backups discard retired reservations after merge and split while re
   })
 })
 
-test('checkpoint restores survive backup round trips without reserving retired codes and active restore conflicts are atomic', async ({
+test('legacy checkpoints survive backup round trips without restoring retired assignments and conflicts stay atomic', async ({
   extension,
 }) => {
   const page = await openTestDatabase(extension)
@@ -607,80 +611,56 @@ test('checkpoint restores survive backup round trips without reserving retired c
     edited = packingModel.regeneratePreparationCode(edited, edited.groups[0].id)
     edited.groups[0].spanishName = 'NOMBRE MANUAL'
     edited = await library.savePreparation(edited)
-    const reset = await library.savePreparation(
-      packingModel.restoreDefaultPacking(edited)
-    )
     const backup = await library.exportBackup()
-    const restoredLibrary = await openOrderDatabase({
-      name: `${databaseName}-restored`,
-    })
-    await restoredLibrary.restoreBackup(backup)
-    const restored = await restoredLibrary.getPreparation(source.orderId)
-    const restoredPrevious = await restoredLibrary.savePreparation(
-      packingModel.restorePreviousPacking(restored)
-    )
+    const target = await openOrderDatabase({ name: databaseName + '-restored' })
+    await target.restoreBackup(backup)
+    const restored = await target.getPreparation(source.orderId)
     const otherSource = {
       ...source,
       orderId: '2002',
       purchasedAt: '2026-12-01T10:00:00+08:00',
       sourceUrl: source.sourceUrl.replace(source.orderId, '2002'),
     }
-    await saveSyntheticSource(otherSource, restoredLibrary)
+    await saveSyntheticSource(otherSource, target)
     const other = packingModel.createPreparation(otherSource, '2026-12')
-    other.groups[0].baseCode = moved.groups.find(
-      (group) => group.month === '2026-12'
-    ).baseCode
-    await restoredLibrary.savePreparation(other)
-    const beforeFailure = await restoredLibrary.exportBackup()
+    other.groups[0].baseCode = 'CE26120199'
+    await target.savePreparation(other)
+    const before = await target.exportBackup()
     const colliding = structuredClone(backup)
+    colliding.preparations[0].groups.find(
+      (group) => group.month === '2026-12'
+    ).baseCode = 'CE26120199'
     colliding.preparations[0].updatedAt = new Date(
       Date.now() + 1000
     ).toISOString()
+    const candidate = packingModel.activePackingState(
+      colliding.preparations,
+      [],
+      []
+    )
+    colliding.allocations = candidate.allocations
+    colliding.issuedCodes = candidate.issuedCodes
     let failure
     try {
-      await restoredLibrary.restoreBackup(colliding)
+      await target.restoreBackup(colliding)
     } catch (error) {
       failure = error.code
     }
-    const afterFailure = await restoredLibrary.exportBackup()
-    const unchanged = await restoredLibrary.getPreparation(source.orderId)
-    restoredLibrary.close()
-    return {
-      moved,
-      reset,
-      restored,
-      restoredPrevious,
-      unchanged,
-      failure,
-      beforeFailure,
-      afterFailure,
-    }
+    const after = await target.exportBackup()
+    const unchanged = await target.getPreparation(source.orderId)
+    target.close()
+    library.close()
+    return { moved, edited, restored, before, after, unchanged, failure }
   }, snapshot('1001'))
-  expect(
-    result.reset.groups.map((entry) => [entry.id, entry.baseCode])
-  ).toEqual(
-    result.moved.defaultPacking.groups.map((entry) => [
-      entry.id,
-      entry.baseCode,
-    ])
-  )
-  expect(result.reset.groups[2].spanishName).toBe('NOMBRE MANUAL')
-  expect(result.restored.defaultPacking).toEqual(result.reset.defaultPacking)
-  expect(result.restoredPrevious.groups).toHaveLength(2)
-  expect(result.restoredPrevious.groups[0].baseCode).toBe('CE26100101')
-  expect(result.restoredPrevious.groups[0].variants).toHaveLength(2)
+  expect(result.restored.groups).toEqual(result.edited.groups)
+  expect(result.restored.defaultPacking).toEqual(result.moved.defaultPacking)
+  expect(result.restored.previousPacking).toEqual(result.moved.previousPacking)
   expect(result.failure).toBe('PACKING_CODE_CONFLICT')
-  expect(result.unchanged).toEqual(result.restoredPrevious)
-  for (const field of [
-    'orders',
-    'history',
-    'images',
-    'preparations',
-    'allocations',
-    'issuedCodes',
-    'packingPreferences',
-  ])
-    expect(result.afterFailure[field]).toEqual(result.beforeFailure[field])
+  expect(result.unchanged).toEqual(result.restored)
+  for (const field of Object.keys(result.before).filter(
+    (key) => key !== 'exportedAt'
+  ))
+    expect(result.after[field], field).toEqual(result.before[field])
 })
 
 test('packing-only backups keep complete included preparations and only their current code reservations', async ({
@@ -763,7 +743,7 @@ test('scoped packing restore preserves saved automatic label values and arrangem
       first,
       first.groups.map((group) => group.id).reverse()
     )
-    edited.previousPacking = packingModel.packingCheckpoint(first, {
+    edited.previousPacking = window.legacyPackingCheckpoint(first, {
       includeDefaults: true,
     })
     for (const group of edited.groups) {
@@ -904,7 +884,7 @@ test('scoped packing restore preserves saved automatic label values and arrangem
   }
 })
 
-test('new memberships extend defaults without reserving old barcodes until those defaults are restored', async ({
+test('new memberships save without creating retired recovery checkpoints', async ({
   extension,
 }) => {
   const page = await openTestDatabase(extension)
@@ -932,36 +912,25 @@ test('new memberships extend defaults without reserving old barcodes until those
       '2026-10'
     )
     const [added] = await library.savePreparations(plan.preparations)
-    const beforeResetOwner = await library.queryCodeOwnership('CE26100101A')
-    const reset = await library.savePreparation(
-      packingModel.restoreDefaultPacking(added),
-      { preserveNaming: true }
-    )
-    return {
-      first,
-      extended,
-      added,
-      reset,
-      beforeResetOwner,
-      originalCodeOwner: await library.queryCodeOwnership('CE26100101A'),
-    }
+    library.close()
+    const reopened = await openOrderDatabase({ name: databaseName })
+    const saved = await reopened.getPreparation(source.orderId)
+    const originalCodeOwner = await reopened.queryCodeOwnership('CE26100101A')
+    reopened.close()
+    return { first, extended, added, saved, originalCodeOwner }
   }, snapshot('1001'))
+  for (const value of [result.first, result.extended, result.added]) {
+    expect(value.defaultPacking).toBeUndefined()
+    expect(value.previousPacking).toBeUndefined()
+  }
   expect(result.extended.groups[0].baseCode).toBe('CE26100102')
-  expect(result.extended.defaultPacking.groups[0].baseCode).toBe('CE26100101')
   expect(
-    result.extended.defaultPacking.groups[0].variants.map(
-      (entry) => entry.entryIds
-    )
-  ).toEqual([['1'], ['2']])
-  expect(result.added.defaultPacking.groups).toHaveLength(2)
-  expect(result.beforeResetOwner.owners).toEqual([])
-  expect(result.reset.groups[0].baseCode).toBe('CE26100101')
-  expect(
-    result.reset.groups.flatMap((group) =>
+    result.added.groups.flatMap((group) =>
       group.variants.flatMap((variant) => variant.entryIds)
     )
   ).toEqual(['1', '2', '3'])
-  expect(result.originalCodeOwner.owners[0].status).toBe('active')
+  expect(result.saved).toEqual(result.added)
+  expect(result.originalCodeOwner.owners).toEqual([])
 })
 
 test('v2 databases migrate to current ownership without changing source records, settings, images or import jobs', async ({
@@ -1149,4 +1118,28 @@ test('v2 databases migrate to current ownership without changing source records,
     groupTitle: 'Bowl',
     entryIds: ['3'],
   })
+})
+
+test('retired packing workflows expose no execution entry points', async ({
+  extension,
+}) => {
+  const page = await openTestDatabase(extension)
+  const state = await page.evaluate(() => ({
+    model: [
+      'packingCheckpoint',
+      'restoreDefaultPacking',
+      'restorePreviousPacking',
+      'defaultPackingChanges',
+      'hasDefaultPackingChanges',
+      'extendDefaultPacking',
+    ].filter((key) => key in packingModel),
+    repository: [
+      'setCartonConfirmation',
+      'setCartonMeasurements',
+      'setCartonDetails',
+      'removeCartonBatch',
+      'removeCartonBatches',
+    ].filter((key) => key in library),
+  }))
+  expect(state).toEqual({ model: [], repository: [] })
 })

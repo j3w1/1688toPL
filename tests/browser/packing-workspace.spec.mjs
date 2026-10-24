@@ -340,7 +340,7 @@ test('label editor saves repeated text edits and copies barcode and carton image
   expect(extension.unexpectedRequests).toEqual([])
 })
 
-test('Copy Excel image freezes selected rows with current-language headings, supplier fields and prepared values', async ({
+test('Excel output freezes selected rows with current-language headings, linked cartons and prepared values', async ({
   extension,
 }, testInfo) => {
   const { page, record } = await openWorkspace(extension, { previews: false })
@@ -444,7 +444,7 @@ test('Copy Excel image freezes selected rows with current-language headings, sup
   const drawing = await page.evaluate(() => tableImageDrawing)
   const headings = drawing.text.slice(0, drawing.text.indexOf('1')).join(' ')
   expect(headings).toBe(
-    'No. Photo Product description Carton mark Barcode code Category & material Price (元) Quantity Carton dimensions Weight (kg) Carton no.'
+    'CE唛头 · List No. Photo Product description Carton mark Barcode code Category & material Price (元) Quantity Carton dimensions Weight (kg) Carton no.'
   )
   // Codes, including their endings, draw as one centered badge per variant.
   // The merged carton artwork has no redundant text caption beneath it.
@@ -1671,7 +1671,7 @@ test('Pcs/box-only order proposes 45+45 and prefills 10 once, confirms once and 
 })
 
 for (const [action, id] of [
-  ['Copy Excel image', 'copy-excel-image'],
+  ['Excel...', 'copy-excel-image'],
   ['Copy group codes', 'copy-group-codes'],
   ['Copy preparation columns', 'copy-preparation'],
 ])

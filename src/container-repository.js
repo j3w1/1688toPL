@@ -276,6 +276,63 @@ export function createContainerRepository({
     container.updatedAt = nextEditTimestamp(container.updatedAt)
     return container
   }
+  // Shared by ordinary membership removal and the atomic source/carton cascade.
+  function detachOrders(container, references) {
+    requireDraft(container)
+    const keys = new Set(references.map(orderKey)),
+      matches = (value) => keys.has(orderKey(value)),
+      removed = container.draft.orders.filter(matches),
+      removedBatchIds = new Set(
+        removed.flatMap((member) => member.cartons.map((unit) => unit.batchId))
+      )
+    container.draft.orders = container.draft.orders.filter(
+      (member) => !matches(member)
+    )
+    for (const unit of removed.flatMap((member) => member.cartons))
+      delete container.draft.decisions[unit.id]
+    for (const field of ['orderChanges', 'preparationChanges'])
+      if (container.draft[field])
+        container.draft[field] = container.draft[field].filter(
+          (change) => !matches(change.after.snapshot || change.after)
+        )
+    if (container.draft.cartonChanges)
+      container.draft.cartonChanges = container.draft.cartonChanges.filter(
+        (change) =>
+          !removedBatchIds.has(change.after.id) &&
+          !batchOrderIds(change.after).some((orderId) =>
+            matches({ accountId: change.after.accountId, orderId })
+          )
+      )
+    if (container.draft.reportChanges)
+      container.draft.reportChanges = container.draft.reportChanges.filter(
+        (report) => !matches(report.orderKey)
+      )
+    return bump(container)
+  }
+  async function detachOrdersForRemoval(tx, loaded, references) {
+    for (const container of loaded.containers) {
+      if (!container.draft) continue
+      const keys = new Set(references.map(orderKey)),
+        matches = (value) => keys.has(orderKey(value))
+      if (
+        container.draft.orders.some(matches) ||
+        ['orderChanges', 'preparationChanges'].some((field) =>
+          (container.draft[field] || []).some((change) =>
+            matches(change.after.snapshot || change.after)
+          )
+        ) ||
+        (container.draft.reportChanges || []).some((report) =>
+          matches(report.orderKey)
+        ) ||
+        (container.draft.cartonChanges || []).some((change) =>
+          batchOrderIds(change.after).some((orderId) =>
+            matches({ accountId: change.after.accountId, orderId })
+          )
+        )
+      )
+        tx.objectStore('containers').put(detachOrders(container, references))
+    }
+  }
   async function mutate(name, input, operation) {
     return write(OPERATIONAL_STORES, async (tx) => {
       const signature = stableValue({
@@ -1130,6 +1187,84 @@ export function createContainerRepository({
     getOrderReconciliation(input) {
       return read(OPERATIONAL_STORES, (tx) => context(tx, ref(input), input))
     },
+    getOrdersExcelEvidence(references) {
+      if (!Array.isArray(references) || !references.length)
+        fail('OUTPUT_SCOPE_MISSING', 'Choose products before opening Excel.')
+      return read(OPERATIONAL_STORES, async (tx) => {
+        const loaded = await state(tx),
+          orders = new Map()
+        for (const reference of references) {
+          const scope = ref(reference),
+            key = orderKey(scope)
+          const own = orderScopeState(loaded, scope)
+          if (
+            !own.record.snapshot.items.some(
+              (item) => item.entryId === reference.entryId
+            )
+          )
+            fail(
+              'OUTPUT_SOURCE_CHANGED',
+              'The selected products changed. Reopen Excel.',
+              scope
+            )
+          const revisions = reconciliationRevisions(loaded, scope)
+          if (
+            (reference.observedAt !== undefined &&
+              reference.observedAt !== revisions.observedAt) ||
+            (reference.preparationRevision !== undefined &&
+              reference.preparationRevision !== revisions.preparation)
+          )
+            fail(
+              'OUTPUT_SOURCE_CHANGED',
+              'The selected products changed. Reopen Excel.',
+              scope
+            )
+          if (!orders.has(key))
+            orders.set(key, {
+              ...scope,
+              ...own,
+              revisions,
+              selectedEntryIds: [],
+            })
+          const selected = orders.get(key).selectedEntryIds
+          if (!selected.includes(reference.entryId))
+            selected.push(reference.entryId)
+        }
+        const included = (member) => orders.has(orderKey(member))
+        const containers = loaded.containers.filter(
+          (container) =>
+            container.draft?.orders.some(included) ||
+            container.revisions?.some(
+              (revision) =>
+                revision.orders?.some(included) ||
+                revision.products?.some(included) ||
+                revision.cartons?.some(
+                  (carton) =>
+                    included({
+                      ...carton,
+                      accountId: carton.accountId || container.accountId,
+                    }) ||
+                    carton.contents?.some((content) =>
+                      included({
+                        ...content,
+                        accountId: carton.accountId || container.accountId,
+                      })
+                    )
+                )
+            )
+        )
+        return clone({
+          orders: [...orders.values()],
+          containers,
+          preferences: loaded.preferences,
+          containerRevisions: containers.map((container) => ({
+            id: container.id,
+            revision: container.revision,
+            effectiveRevisionId: container.effectiveRevisionId,
+          })),
+        })
+      })
+    },
     saveOrderCartonDraft(input) {
       return mutate('saveOrderCartonDraft', input, async (tx, loaded) => {
         const container = amendmentFor(loaded, input),
@@ -1598,16 +1733,9 @@ export function createContainerRepository({
       return mutate('removeContainerOrder', input, async (tx, loaded) => {
         const container = containerFor(loaded, input.id, input.expectedRevision)
         requireDraft(container)
-        const removed = container.draft.orders.filter(
-          (member) => orderKey(member) === orderKey(input.orderRef)
+        tx.objectStore('containers').put(
+          detachOrders(container, [input.orderRef])
         )
-        container.draft.orders = container.draft.orders.filter(
-          (member) => !removed.includes(member)
-        )
-        for (const unit of removed.flatMap((member) => member.cartons))
-          delete container.draft.decisions[unit.id]
-        bump(container)
-        tx.objectStore('containers').put(container)
         return view(loaded, container)
       })
     },
@@ -2069,5 +2197,6 @@ export function createContainerRepository({
     draftId,
     draftRecovery,
     refreshedMember,
+    detachOrdersForRemoval,
   }
 }

@@ -4,7 +4,7 @@
 
 ## Choose scope and format
 
-Orders provides source/product copying and **Excel image**. Orders copies selected source rows, or all filtered rows when none are selected. Packing copies or prints an explicit selection from a container revision; a partial selection is labelled as partial. **Ctrl+A** includes offscreen rows in the current logical display scope. The container workbook always covers the complete loaded revision, independently of that selection and display filters. Restorable backups are separate from both outputs.
+Orders provides source/product copying and **Excel...**. Orders outputs selected source rows, or all filtered rows when none are selected. Packing copies, prints or opens **Excel...** for an explicit selection from a container revision; a partial selection is labelled as partial. **Ctrl+A** includes offscreen rows in the current logical display scope. **Export packing list** always covers the complete loaded container revision, independently of that selection and display filters. Restorable backups are separate from both outputs.
 
 The preview freezes its source rows or container revision when opened; later selection/filter changes do not replace it. Packing products, label text and photos are read-only revision evidence. Use **Edit in Orders** for current product authoring. Every copy control confirms success only after writing the clipboard. Failed image loads or validation leave the clipboard unchanged.
 
@@ -16,9 +16,9 @@ The preview freezes its source rows or container revision when opened; later sel
 | Chosen columns / Copy preparation columns | Selected packing/source fields in your chosen order.                            |
 | Group codes                               | One base code per product group.                                                |
 | Barcodes / Carton marks                   | Generated label pictures with physical dimensions.                              |
-| Excel image                               | One table picture per preview batch.                                            |
+| Excel...                                  | Copy a table picture or export the same configured table as one editable sheet. |
 
-**Headers** starts off and is remembered. Text-column choices/order are shared between views and survive reloads. They are separate from image columns and workbook export options. **Chosen columns** groups searchable fields under Codes & packing, Product details, Amounts, Order & supplier, and Tags & links. Use arrows in **Paste order** to arrange checked columns. New fields start unchecked.
+**Headers** starts off and is remembered. Text-column choices/order are shared between views and survive reloads. **Chosen columns** has its own layout, separate from **Excel...** and the complete-container packing-list export. It groups searchable fields under Codes & packing, Product details, Amounts, Order & supplier, and Tags & links. Use arrows in **Paste order** to arrange checked columns. New fields start unchecked.
 
 **Size** is the saved packing size or original unprepared size/specification; **Size code** is only an assigned barcode ending. Measurements, units and leading zeroes stay intact. Product tags belong to their source product. Whole-order money repeated on product rows must not be summed as product subtotals. Source-value copying retains original text; translated display helpers are presentation only.
 
@@ -32,15 +32,29 @@ Photos paste as floating pictures. Standard-height Excel rows are the verified b
 
 <a href="../screenshots/copy-label-batches.png"><img src="../screenshots/copy-label-batches.png" alt="Synthetic carton-mark batch preview with copy and navigation controls" width="800" /></a>
 
-## Excel table images
+## One Excel preview, two outputs
 
-**Excel image columns** sits beside the preview and collapses on narrow screens. Check fields, drag or use arrows to reorder, and inspect the updated preview. Changes save automatically for both views. A column change starts new batches and clears copied markers. **Supplier details** adds blank dimension, kg and carton-number cells for your supplier; these start enabled.
+Open **Excel...** to configure one table for **Copy image** and **Export Excel (.xlsx)**. The image column picker sits beside the preview and collapses on narrow screens. Check fields, drag or use arrows to reorder, and inspect the updated preview. Choices save automatically for both views. A column change regenerates the output and clears copied markers. Existing selections/order survive the upgrade; newly added optional columns start unchecked.
+
+The column choices retain the existing picture columns and add product names, article number, source size, pieces per carton, carton references/counts, retained received/loading evidence, measurement fields and adjusted price/discount/subtotal. Equivalent photo, code, quantity and source-price fields appear once. Unselected financial columns are omitted from the worksheet. **Carton no.** is an optional blank column for manual completion after export or annotation of the copied image; no supplier-placeholder dimension/weight columns remain.
 
 **Image details** independently controls store/order identity, date, status, order tags, title, specifications, article number and product tags. Unavailable fields explain why. Resetting details preserves columns; hiding all store/order details retains purchase separators.
 
 Headings and recognized categories/materials/attributes follow the popup's **EN / ES / 中文** choice. Source titles, unknown seller wording and saved label text stay intact. **Category & material** puts material in bold below category. Spreadsheet descriptions use larger, fuller wrapping; 1688 descriptions retain compact text. Photos fill square cells without stretching. Consecutive variants with the same carton mark share its actual image; it repeats at batch boundaries. Included CE carton marks need a Chinese category. Omitted photos/marks do not need loading.
 
-The image uses the selected workspace theme's light palette, with saved light tag/status colors. Code badges retain the black/white design and product-number underline. Scroll to zoom, drag to inspect, or use **− / + / Fit image**; zoom never changes output dimensions. The copied picture remains resizable in Excel. Shaded store/order headings separate purchases without entering source data.
+Both outputs use the selected workspace theme's light palette, with saved light tag/status colors. Code badges retain the black/white design and product-number underline. Scroll to zoom, drag to inspect, or use **− / + / Fit image**; zoom never changes output dimensions. The copied picture remains resizable in Excel. Shaded store/order headings separate purchases without entering source data.
+
+The centered title follows the popup language: **CE唛头 · List**, **CE唛头 · Lista** or **CE唛头 · 清单**. The editable worksheet follows the same typography, bold quantities, description hierarchy, emphasized material, row colors and column/row sizing as the image. Source 1688 descriptions remain left-aligned; spreadsheet descriptions remain centered. The title and column headings occupy the first two rows without spacer rows.
+
+Measurements come from confirmed cartons linked to each source row and account, including individual-carton overrides. Identical dimensions, weight, volume and bases collapse into one compact entry. Differing sets use aligned multiline groups with carton references/counts. Product quantities and prices remain on one source row. Shared cartons are identified, physical totals count each identity once, and whole-batch weight/volume is never divided to invent individual measurements. Missing facts remain unknown; physical product sizes never supply carton dimensions.
+
+**Export Excel (.xlsx)** includes every product captured when the popup opened, even across multiple image batches. It contains one worksheet with the same selected columns/order, details, language and grouped measurements. Text and numbers remain editable; photos and carton marks are embedded in their cells. Uniform numeric measurements stay numeric, while differing grouped values remain editable multiline text. Calculations retain formulas when their visible dependencies support them, otherwise their exact computed values. Workbook edits do not change the library. **Copy current image** copies only the displayed batch. Preview/configuration changes write neither the clipboard nor the library.
+
+Barcode cells retain their editable code value beneath the same black-and-white badge artwork used by the image preview. Embedded artwork is fixed: changing a workbook cell does not redraw its badge. Make code changes in Orders and export again to regenerate matching artwork.
+
+For a single named supplier, the workbook filename is `<store name>_货清单.xlsx` in every popup language. For multiple stores, use the local export date with the popup's language: `2026-10-24-list.xlsx` in English, `2026-10-24-lista.xlsx` in Spanish or `2026-10-24-货清单.xlsx` in Chinese. A missing store name uses the same date-based fallback. Order IDs and joined store names are not added.
+
+<a href="../screenshots/excel-workbook.png"><img src="../screenshots/excel-workbook.png" alt="Synthetic workbook rendered in native Excel with the localized CE title, matching code badges, bold descriptions and quantities, linked measurements and merged carton marks" width="800" /></a>
 
 <a href="../screenshots/excel-image-columns.png"><img src="../screenshots/excel-image-columns.png" alt="Excel-image preview with column choices and ordering controls" width="800" /></a>
 

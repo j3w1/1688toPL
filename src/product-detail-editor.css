@@ -1,0 +1,49 @@
+.product-detail-dialog {
+  inline-size: min(600px, calc(100vw - 32px));
+}
+.product-detail-fields {
+  display: grid;
+  gap: 16px;
+  min-inline-size: 0;
+  border: 0;
+  padding: 0;
+}
+.product-detail-fields > legend {
+  margin-block-end: 14px;
+  font-weight: 600;
+}
+.product-detail-field {
+  display: grid;
+  gap: 6px;
+  min-inline-size: 0;
+}
+.product-detail-field > label:first-child,
+.product-detail-policy label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-block-size: 32px;
+}
+.product-detail-field input:not([type='checkbox']),
+.product-detail-field textarea {
+  inline-size: 100%;
+  box-sizing: border-box;
+  min-inline-size: 0;
+}
+.product-detail-policy {
+  display: grid;
+  gap: 4px;
+  min-inline-size: 0;
+}
+.product-detail-status {
+  overflow-wrap: anywhere;
+}
+.product-detail-status[data-error='true'] {
+  color: var(--error);
+}
+@media (pointer: coarse) {
+  .product-detail-field > label:first-child,
+  .product-detail-policy label {
+    min-block-size: 48px;
+  }
+}

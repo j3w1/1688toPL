@@ -14,6 +14,7 @@ import { copyTable, copySingleImage, pngThumbnail } from './clipboard.js'
 import { openDatabase, storeIdentity } from './database.js'
 import { downloadBackup, readBackupFile } from './backup-file.js'
 import { openOtherOrderDialog } from './other-order-dialog.js'
+import { openOrderRemovalDialog } from './order-removal-dialog.js'
 import { orderSource } from './other-orders.js'
 import {
   confirmScope,
@@ -873,6 +874,10 @@ export async function startLibrary(
           jobs: (await repository.listJobs()).map(importJobView),
         }
       if (type === 'LIBRARY_HISTORY') return repository.getHistory(data.orderId)
+      if (type === 'LIBRARY_REVIEW_REMOVAL')
+        return repository.reviewOrderRemoval(data.orderIds, {
+          accountId: data.accountId || 'local',
+        })
       if (type === 'BACKUP_EXPORT') return repository.exportBackup()
       if (
         [
@@ -918,7 +923,9 @@ export async function startLibrary(
             { accountId: data.accountId || 'local' }
           )
         if (type === 'LIBRARY_REMOVE')
-          result = await repository.removeOrders(data.orderIds)
+          result = await repository.removeOrders(data.orderIds, {
+            accountId: data.accountId || 'local',
+          })
         // Persistence is already committed; a sleeping/updated worker must not
         // turn a successful local write into a false failure message.
         try {
@@ -1887,6 +1894,21 @@ export async function startLibrary(
             'order-section-count'
           )
         )
+        if (packing?.preparedRows([row])[0]?.baseCode) {
+          const details = node('button', uiMessage('Edit order details'))
+          details.type = 'button'
+          details.dataset.action = 'edit-order-details'
+          details.addEventListener('click', () => {
+            void packing
+              .openDetails({
+                accountId:
+                  row.accountId || row.record.snapshot.accountId || 'local',
+                orderId: row.orderId,
+              })
+              .catch((error) => feedback(error.message, true))
+          })
+          band.append(details)
+        }
         operationsStrip(band, row.record)
         cell.append(band)
         heading.append(cell)
@@ -3134,7 +3156,7 @@ export async function startLibrary(
       'columns',
     ],
     ['copy-group-codes', 'Copy group codes', 'Group codes', 'copy'],
-    ['copy-excel-image', 'Copy Excel image', 'Excel image', 'image'],
+    ['copy-excel-image', 'Excel...', 'Excel...', 'excel'],
   ]) {
     bindText($(id), uiMessage(short))
     bindAttribute($(id), 'aria-label', uiMessage(full))
@@ -3361,25 +3383,25 @@ export async function startLibrary(
     renderJobs()
   })
   action('remove-orders', async () => {
-    if (
-      !selectedOrders.size ||
-      !confirm(
-        t(
-          'Remove {count} orders and their history from this browser? A saved backup can restore them.',
-          { count: selectedOrders.size }
-        )
-      )
-    )
-      return
+    if (!selectedOrders.size) return
     const refs = [...selectedOrders].map((key) => JSON.parse(key))
     if (new Set(refs.map(([accountId]) => accountId)).size > 1)
       throw new Error(
         'Select orders from one buyer account before removing sources.'
       )
-    await send('LIBRARY_REMOVE', {
+    const request = {
       orderIds: refs.map(([, orderId]) => orderId),
       accountId: refs[0]?.[0] || 'local',
+    }
+    const frozenSelection = new Set(selectedOrders)
+    const removed = await openOrderRemovalDialog({
+      orders: records.filter((record) =>
+        frozenSelection.has(orderSelectionKey(record))
+      ),
+      review: () => send('LIBRARY_REVIEW_REMOVAL', request),
+      remove: () => send('LIBRARY_REMOVE', request),
     })
+    if (!removed) return
     orderSelection.reset()
     productSelection.reset()
     await refresh()

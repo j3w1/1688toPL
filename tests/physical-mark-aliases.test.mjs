@@ -872,7 +872,12 @@ test('native current alias reserves through carton retirement, releases after al
           currentConflict = error.code || error.message
         }
         const afterCurrentRefusal = await aliasDb.exportBackup({})
-        await aliasDb.removeCartonBatch(live.batches[0])
+        await aliasDb.saveCartonBatches([
+          {
+            after: { ...live.batches[0], deletedAt: new Date().toISOString() },
+            expectedRevision: live.batches[0].revision,
+          },
+        ])
         const retiredBoxes = await aliasDb.getOperationalState({})
         const dispositions = Object.fromEntries(
           ['2001', '2002'].map((id) => [
@@ -2165,7 +2170,12 @@ test('native deleted purchase reimports with fresh codes after a released alias 
       async ({ original, foreignRecord, foreign, fresh }) => {
         const backupState = () => aliasDb.exportBackup({})
         let rc = await aliasDb.getOrderReconciliation({ orderId: '1001' })
-        await aliasDb.removeCartonBatch(rc.batches[0])
+        await aliasDb.saveCartonBatches([
+          {
+            after: { ...rc.batches[0], deletedAt: new Date().toISOString() },
+            expectedRevision: rc.batches[0].revision,
+          },
+        ])
         await aliasDb.removeOrders(['1001'])
         const removed = await backupState()
         await aliasDb.restoreBackup({
@@ -3355,7 +3365,12 @@ async function recoveryArchiveFixture(
             storedAt: '2026-10-23T05:00:00.000Z',
           })
       let ctx = await aliasDb.getOrderReconciliation({ orderId: '1001' })
-      await aliasDb.removeCartonBatch(ctx.batches[0])
+      await aliasDb.saveCartonBatches([
+        {
+          after: { ...ctx.batches[0], deletedAt: new Date().toISOString() },
+          expectedRevision: ctx.batches[0].revision,
+        },
+      ])
       await aliasDb.removeOrders(['1001'])
       await aliasDb.restoreBackup({
         format: '1688-order-library',

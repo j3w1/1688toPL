@@ -336,7 +336,7 @@ test('copy batch feedback waits for clipboard completion, stays in the active di
   await page.evaluate(() => window.finishFeedbackWrite())
   await expect(copy).toHaveText('Copiado')
   await expect(dialog.getByRole('alert')).toHaveCount(0)
-  await expect(copy).toHaveText('Copiar lote actual', { timeout: 4500 })
+  await expect(copy).toHaveText('Copiar imagen', { timeout: 4500 })
   await expect(copy).toHaveAttribute('data-icon', 'copy')
   await expect(copy).not.toHaveClass(/copied/)
   expect(await page.evaluate(() => window.feedbackWrites)).toBe(3)
@@ -563,11 +563,11 @@ test('Excel preview matches copied bytes, errors retry in place, columns refresh
   }
   const before = await page.evaluate(() => window.batchWrites.length)
   await dialog
-    .locator('[data-column="supplierWeight"] .excel-column-toggle')
+    .locator('[data-column="cartonWeight"] .excel-column-toggle')
     .click()
   await expect(primary).toBeEnabled()
   await expect(dialog.locator('.is-copied')).toHaveCount(0)
-  await expect(primary).toHaveText('Copy current batch')
+  await expect(primary).toHaveText('Copy current image')
   expect(await page.evaluate(() => window.batchWrites.length)).toBe(before)
   const lastUrl = await dialog.locator('.copy-preview img').getAttribute('src')
   await dialog.getByRole('button', { name: 'Done', exact: true }).click()

@@ -1,3 +1,4 @@
+import { legacyPackingCheckpoint } from './fixtures/legacy-packing-checkpoint.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
@@ -7,7 +8,6 @@ import {
 import {
   allocatePreparation,
   createPreparation,
-  packingCheckpoint,
   validatePreparation,
 } from '../src/packing-model.js'
 
@@ -38,7 +38,7 @@ function fixture() {
     [],
     []
   ).preparation
-  baseline.defaultPacking = packingCheckpoint(baseline)
+  baseline.defaultPacking = legacyPackingCheckpoint(baseline)
   return baseline
 }
 
@@ -110,7 +110,7 @@ test('discarding an existing product does not resurrect a sibling previously rem
 test('partial shared-source discard preserves material values belonging to remaining rows', () => {
   const baseline = fixture()
   baseline.groups[0].variants[0].entryIds.push('4')
-  baseline.defaultPacking = packingCheckpoint(baseline)
+  baseline.defaultPacking = legacyPackingCheckpoint(baseline)
   const current = structuredClone(baseline)
   current.groups[0].variants[0].material = 'changed all'
   current.groups[0].variants[0].materialSource = 'manual'

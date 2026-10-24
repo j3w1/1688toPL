@@ -57,24 +57,6 @@ export function cartonConfirmationForItem(record, entryId, month) {
   return record.cartonConfirmations?.[batch.entryId]?.[month] || {}
 }
 
-/** Preserve other months and the other independent confirmation. */
-export function editCartonConfirmation(record, entryId, month, field, value) {
-  packingMonth(month)
-  cartonConfirmationField(field)
-  const count = normalizeCartonConfirmation(value)
-  const batch = cartonBatchForItem(record, entryId)
-  const confirmations = { ...record.cartonConfirmations }
-  const months = { ...confirmations[batch.entryId] }
-  const counts = { ...months[month] }
-  if (count === null) delete counts[field]
-  else counts[field] = count
-  if (Object.keys(counts).length) months[month] = counts
-  else delete months[month]
-  if (Object.keys(months).length) confirmations[batch.entryId] = months
-  else delete confirmations[batch.entryId]
-  return { entryId: batch.entryId, cartonConfirmations: confirmations }
-}
-
 /** Backups contain canonical batch owners and numeric confirmations only. */
 function validateBatchOwner(record, entryId, sourceSnapshots) {
   if (!/^[1-9]\d*$/.test(entryId))

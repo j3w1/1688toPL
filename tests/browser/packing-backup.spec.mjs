@@ -1,3 +1,4 @@
+import { legacyPackingCheckpoint } from '../fixtures/legacy-packing-checkpoint.mjs'
 import { test, expect } from './extension-fixture.mjs'
 
 function snapshot() {
@@ -37,6 +38,9 @@ function snapshot() {
 async function databasePage(extension) {
   const page = await extension.context.newPage()
   await page.goto(`${extension.origin}/unsupported`)
+  await page.addScriptTag({
+    content: `window.legacyPackingCheckpoint = ${legacyPackingCheckpoint.toString()}`,
+  })
   await page.evaluate(async (source) => {
     window.openDatabase = (await import('/src/database.js')).openDatabase
     window.createPackingBackup = (
@@ -178,6 +182,7 @@ test('same-revision monthly packing restores combine disjoint products and remai
   const page = await databasePage(extension)
   const result = await page.evaluate(async () => {
     const prepared = await library.getPreparation('1001')
+    prepared.defaultPacking = window.legacyPackingCheckpoint(prepared)
     for (const checkpoint of [
       prepared,
       prepared.defaultPacking,

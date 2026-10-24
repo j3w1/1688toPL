@@ -1,4 +1,6 @@
 import * as purchaseCodes from './purchase-codes.js'
+import { reviewStoreImportCodes } from './store-import-codes.js'
+import { planOrderRemoval } from './order-removal.js'
 import { createLibraryChanges } from './library-changes.js'
 import { createMaterialSuggester } from './material-vocabulary.js'
 import {
@@ -70,7 +72,6 @@ import {
 } from './repeat-products.js'
 import { createRepeatProductsRepository } from './repeat-products-repository.js'
 import {
-  editCartonConfirmation,
   validateCartonConfirmationMetadata,
   mergeCartonConfirmations,
 } from './carton-confirmations.js'
@@ -1459,10 +1460,11 @@ export async function openDatabase({ name = '1688-order-library' } = {}) {
     write,
     requested,
     nextEditTimestamp,
-    guardChanges: async (tx, changes) =>
+    guardChanges: async (tx, changes, options) =>
       containerRepository.guardChanges(
         await containerRepository.state(tx),
-        changes
+        changes,
+        options
       ),
   })
   containerRepository = createContainerRepository({
@@ -1746,84 +1748,6 @@ export async function openDatabase({ name = '1688-order-library' } = {}) {
     }
   }
 
-  function validateCartonMeasurementEdits(edits) {
-    if (!Array.isArray(edits))
-      throw new Error('Carton measurement edits must be an array')
-    const seen = new Set()
-    return edits.map((edit) => {
-      object(edit, 'Carton measurement edit')
-      const entryId = identifier(edit.entryId, 'Carton measurement entryId')
-      if (seen.has(entryId))
-        throw new Error('Edit each product carton measurement only once')
-      seen.add(entryId)
-      const before = object(edit.before, 'Previous carton measurements')
-      const after = object(edit.after, 'New carton measurements')
-      const fields = Object.keys(before)
-      if (
-        !fields.length ||
-        fields.some(
-          (field) => !['kg', 'cbm', 'len', 'wid', 'ht'].includes(field)
-        ) ||
-        fields.length !== Object.keys(after).length ||
-        fields.some((field) => !Object.hasOwn(after, field))
-      )
-        throw new Error('Edit matching carton measurement fields only')
-      for (const field of fields) {
-        string(before[field], `Previous carton ${field}`)
-        string(after[field], `New carton ${field}`)
-      }
-      return {
-        entryId,
-        before: { ...before },
-        after: { ...after },
-      }
-    })
-  }
-
-  // Build a complete validated result before either standalone edits or a
-  // preparation/history batch writes it. Comparing only edited effective fields
-  // permits unrelated concurrent product edits without overwriting them.
-  async function cartonMeasurementResult(tx, orderId, accountId, edits) {
-    const order = await requested(
-      tx.objectStore('orders').get([accountId, orderId])
-    )
-    if (!order) throw new Error('Order was not found')
-    const cartonDetails = { ...order.cartonDetails }
-    const changedIds = []
-    for (const { entryId, before, after } of edits) {
-      const item = order.snapshot.items.find((item) => item.entryId === entryId)
-      if (!item) throw new Error('Product was not found in this order')
-      const current = productCartonDetails(item, order)
-      const fields = Object.keys(before)
-      if (fields.some((field) => (current[field] ?? '') !== before[field])) {
-        const error = new Error(
-          'Carton measurements changed in another tab. Reload before saving your edits.'
-        )
-        error.code = 'CARTON_MEASUREMENTS_CONFLICT'
-        throw error
-      }
-      const next = { ...current, ...after }
-      const validated = validateCartonDetails(next)
-      if (
-        fields.some(
-          (field) => (current[field] ?? '') !== (validated[field] ?? '')
-        )
-      ) {
-        cartonDetails[entryId] = validated
-        changedIds.push(entryId)
-      }
-    }
-    if (!changedIds.length) return { order, changed: false }
-    return {
-      changed: true,
-      order: {
-        ...order,
-        cartonDetails,
-        ...annotationEditClock(order, 'cartonDetails', changedIds),
-      },
-    }
-  }
-
   async function syncTagCatalogs(
     tx,
     value,
@@ -1938,11 +1862,8 @@ export async function openDatabase({ name = '1688-order-library' } = {}) {
     inputs,
     {
       expectedRevisions = inputs.map((entry) => entry.revision),
-      capturePrevious = false,
-      resetDefaults = false,
       preview = false,
       preserveNaming = false,
-      cartonMeasurements = [],
       cartonBatchChanges = [],
       allowCartonReview = false,
       suffixBaselines = [],
@@ -1984,7 +1905,6 @@ export async function openDatabase({ name = '1688-order-library' } = {}) {
     if (new Set(keys).size !== keys.length)
       throw new Error('Save each order preparation only once in a batch')
     const selectedKeys = new Set(keys)
-    const selectedOrderIds = new Set(drafts.map((draft) => draft.orderId))
     if (!Array.isArray(suffixBaselines))
       throw new Error('Suffix restoration baselines must be an array')
     const restoredByKey = new Map()
@@ -2001,43 +1921,6 @@ export async function openDatabase({ name = '1688-order-library' } = {}) {
         )
       restoredByKey.set(key, baseline)
     }
-    if (!Array.isArray(cartonMeasurements))
-      throw new Error('Carton measurement batches must be an array')
-    const measurementKeys = new Set()
-    const measurementBatches = cartonMeasurements.map((batch) => {
-      object(batch, 'Carton measurement batch')
-      const orderId = identifier(batch.orderId, 'Carton measurement orderId')
-      const accountId = string(batch.accountId ?? 'local', 'accountId', {
-        empty: false,
-      })
-      const key = JSON.stringify([accountId, orderId])
-      if (!selectedKeys.has(key))
-        throw new Error(
-          'Carton measurements contain an order outside this preparation batch'
-        )
-      if (measurementKeys.has(key))
-        throw new Error(
-          'Edit each order carton measurement only once in a batch'
-        )
-      measurementKeys.add(key)
-      return {
-        orderId,
-        accountId,
-        edits: validateCartonMeasurementEdits(batch.edits),
-      }
-    })
-    function checkpointScope(value, label) {
-      if (typeof value === 'boolean')
-        return value ? selectedOrderIds : new Set()
-      const orderIds = strings(value, label)
-      if (orderIds.some((orderId) => !selectedOrderIds.has(orderId)))
-        throw new Error(
-          `${label} contains an order outside this preparation batch`
-        )
-      return new Set(orderIds)
-    }
-    const previousOrderIds = checkpointScope(capturePrevious, 'capturePrevious')
-    const defaultOrderIds = checkpointScope(resetDefaults, 'resetDefaults')
     return (
       txOverride ? (_stores, run) => run(txOverride) : preview ? read : write
     )(
@@ -2184,11 +2067,6 @@ export async function openDatabase({ name = '1688-order-library' } = {}) {
             )
           )
         }
-        const measurementResults = []
-        for (const { orderId, accountId, edits } of measurementBatches)
-          measurementResults.push(
-            await cartonMeasurementResult(tx, orderId, accountId, edits)
-          )
         validateSharedProducts(
           [
             ...previousPreparations.filter(
@@ -2282,7 +2160,6 @@ export async function openDatabase({ name = '1688-order-library' } = {}) {
         const results = []
         for (let index = 0; index < drafts.length; index += 1) {
           const draft = drafts[index]
-          const resetOrderDefaults = defaultOrderIds.has(draft.orderId)
           const expectedRevision = expectedRevisions[index]
           const previous = previousByKey.get(keys[index])
           const order = ordersByKey.get(keys[index])
@@ -2326,20 +2203,6 @@ export async function openDatabase({ name = '1688-order-library' } = {}) {
             updatedAt: new Date(
               Math.max(Date.now(), Date.parse(previous?.updatedAt || 0) + 1)
             ).toISOString(),
-          }
-          if (previousOrderIds.has(draft.orderId) && previous)
-            preparation.previousPacking = packingCheckpoint(previous, {
-              includeDefaults: true,
-            })
-          if (resetOrderDefaults || !preparation.defaultPacking)
-            preparation.defaultPacking = packingCheckpoint(
-              resetPreparationOrder(preparation, order.snapshot)
-            )
-          else {
-            preparation.defaultPacking = extendDefaultPacking(
-              preparation,
-              order.snapshot
-            )
           }
           validatePreparationReservations(
             { ...preparation, revision: 1 },
@@ -2412,32 +2275,6 @@ export async function openDatabase({ name = '1688-order-library' } = {}) {
                   ?.revision || 0,
             })),
           ]
-          for (const result of measurementResults)
-            if (result.changed) {
-              const before = rawState.records.find(
-                  (record) =>
-                    record.snapshot.accountId ===
-                      result.order.snapshot.accountId &&
-                    record.snapshot.orderId === result.order.snapshot.orderId
-                ),
-                prep = rawState.preparations.find(
-                  (prep) =>
-                    prep.accountId === before.snapshot.accountId &&
-                    prep.orderId === before.snapshot.orderId
-                )
-              activeContext.draft.orderChanges = [
-                ...(activeContext.draft.orderChanges || []).filter(
-                  (change) =>
-                    change.after.snapshot.orderId !== before.snapshot.orderId ||
-                    change.after.snapshot.accountId !==
-                      before.snapshot.accountId
-                ),
-                {
-                  after: result.order,
-                  expectedSource: sourceRevision(before, prep),
-                },
-              ]
-            }
           let effective = containerRepository.overlay(rawState, activeContext)
           for (const owner of [
             ...new Set(
@@ -2504,8 +2341,6 @@ export async function openDatabase({ name = '1688-order-library' } = {}) {
               preparations: nextPreparations,
               allowReview: allowCartonReview,
             })
-          for (const result of measurementResults)
-            if (result.changed) tx.objectStore('orders').put(result.order)
           tx.objectStore('packingAllocations').clear()
           tx.objectStore('issuedCodes').clear()
           for (const allocation of allocations)
@@ -2517,6 +2352,72 @@ export async function openDatabase({ name = '1688-order-library' } = {}) {
         return results
       }
     )
+  }
+
+  async function newStoreImportCandidate(input) {
+    const random = new Uint32Array(2)
+    crypto.getRandomValues(random)
+    const orderId = `9${Date.now()}${String(random[0]).padStart(10, '0')}${String(random[1]).padStart(10, '0')}`
+    return validateStoreImportCandidate(
+      await createStoreOrder(input, { orderId })
+    )
+  }
+
+  function validateStoreImportCandidate(input) {
+    object(input, 'Spreadsheet import candidate')
+    const snapshot = validateSnapshot(input.snapshot)
+    if (snapshot.sourceType !== 'spreadsheet')
+      throw new Error('Choose a validated spreadsheet purchase to review.')
+    if (!Array.isArray(input.images))
+      throw new Error('Spreadsheet original images must be an array.')
+    const images = input.images.map(validateImage),
+      urls = new Set(images.map((image) => image.url))
+    if (urls.size !== images.length)
+      throw new Error(
+        'Spreadsheet original images must have unique identities.'
+      )
+    for (const url of collectImageReferences({ orders: [{ snapshot }] }))
+      if (localImageReference.test(url) && !urls.has(url))
+        throw new Error(
+          'The spreadsheet original photo is missing from this import.'
+        )
+    object(input.unitsPerCarton, 'Spreadsheet Pcs/box')
+    const expected = Object.fromEntries(
+      snapshot.items.flatMap((item) => {
+        const row = snapshot.spreadsheet.rows.find(
+          (row) => row.row === item.sourceRow
+        )
+        return row?.perbox ? [[item.entryId, Number(row.perbox)]] : []
+      })
+    )
+    if (stableValue(expected) !== stableValue(input.unitsPerCarton))
+      throw new Error(
+        'Keep the validated spreadsheet carton capacities with this import.'
+      )
+    return { snapshot, images, unitsPerCarton: { ...input.unitsPerCarton } }
+  }
+
+  async function storeImportCandidate(
+    tx,
+    { snapshot, images, unitsPerCarton }
+  ) {
+    const orders = tx.objectStore('orders')
+    if (await requested(orders.get(keyFor(snapshot))))
+      throw new Error('Import identity collision; retry this import')
+    let record = reconcile(snapshot).order
+    record = await inheritStoreWechat(tx, record)
+    record.unitsPerCarton = unitsPerCarton
+    record.unitsPerCartonUpdatedAt = snapshot.observedAt
+    const preferences = await packingPreferencesFor(tx)
+    record.namingSuggestions = orderNamingSuggestions(
+      snapshot,
+      createNameSuggester(preferences.vocabulary)
+    )
+    for (const image of images) tx.objectStore('images').put(image)
+    orders.add(record)
+    for (const batch of sourceSpreadsheetBatches(record))
+      tx.objectStore('cartonBatches').add(batch)
+    return record
   }
 
   return {
@@ -2694,32 +2595,68 @@ export async function openDatabase({ name = '1688-order-library' } = {}) {
       replaceActiveCodes,
       storeIdentity,
     }),
-    async importStoreOrder(input) {
-      const random = new Uint32Array(2)
-      crypto.getRandomValues(random)
-      const orderId = `9${Date.now()}${String(random[0]).padStart(10, '0')}${String(random[1]).padStart(10, '0')}`
-      const prepared = await createStoreOrder(input, { orderId })
-      const snapshot = validateSnapshot(prepared.snapshot)
-      const images = prepared.images.map(validateImage)
-      return write(['orders', 'images', 'packingPreferences'], async (tx) => {
-        const orders = tx.objectStore('orders')
-        if (await requested(orders.get(keyFor(snapshot))))
-          throw new Error('Import identity collision; retry this import')
-        let record = reconcile(snapshot).order
-        record = await inheritStoreWechat(tx, record)
-        record.unitsPerCarton = prepared.unitsPerCarton
-        record.unitsPerCartonUpdatedAt = snapshot.observedAt
-        const preferences = await packingPreferencesFor(tx)
-        record.namingSuggestions = orderNamingSuggestions(
-          snapshot,
-          createNameSuggester(preferences.vocabulary)
+    async reviewStoreOrderImport(input) {
+      const candidate = input.candidate
+        ? input.candidate
+        : await newStoreImportCandidate(input)
+      if (input.candidate) validateStoreImportCandidate(candidate)
+      return read(OPERATIONAL_STORES, async (tx) => {
+        const state = await containerRepository.state(tx)
+        return reviewStoreImportCodes(
+          {
+            ...state,
+            preferences: initializedPackingPreferences(state.preferences),
+          },
+          {
+            candidate,
+            preparation: input.preparation,
+            resetCodes: input.resetCodes,
+          }
         )
-        for (const image of images) tx.objectStore('images').put(image)
-        orders.add(record)
-        for (const batch of sourceSpreadsheetBatches(record))
-          tx.objectStore('cartonBatches').add(batch)
-        return record
       })
+    },
+
+    async importStoreOrder(input) {
+      if (input.candidate !== undefined) {
+        const candidate = validateStoreImportCandidate(input.candidate)
+        if (!input.preparation)
+          throw new Error(
+            'Review the spreadsheet product codes before importing.'
+          )
+        return containerRepository.mutate(
+          'importStoreOrder',
+          input,
+          async (tx, state) => {
+            const reviewed = reviewStoreImportCodes(
+              {
+                ...state,
+                preferences: initializedPackingPreferences(state.preferences),
+              },
+              { candidate, preparation: input.preparation }
+            )
+            if (reviewed.issues.some((issue) => issue.severity === 'error')) {
+              const first = reviewed.issues[0]
+              throw Object.assign(new Error(first.message), {
+                code: first.code,
+                issues: reviewed.issues,
+                ...(first.conflict ? { conflict: first.conflict } : {}),
+                packingIssue: first,
+              })
+            }
+            const record = await storeImportCandidate(tx, candidate)
+            await savePreparations(
+              [reviewed.preparation],
+              { expectedRevisions: [0] },
+              tx
+            )
+            return record
+          }
+        )
+      }
+      const candidate = await newStoreImportCandidate(input)
+      return write(['orders', 'images', 'packingPreferences'], (tx) =>
+        storeImportCandidate(tx, candidate)
+      )
     },
 
     async renameStore(orderId, name, { accountId = 'local' } = {}) {
@@ -2779,28 +2716,6 @@ export async function openDatabase({ name = '1688-order-library' } = {}) {
       })
     },
 
-    async setCartonDetails(
-      orderId,
-      entryId,
-      details,
-      { accountId = 'local' } = {}
-    ) {
-      const value = validateCartonDetails(details)
-      return write(['orders'], async (tx) => {
-        const store = tx.objectStore('orders'),
-          order = await requested(store.get([accountId, orderId]))
-        if (!order?.snapshot.items.some((item) => item.entryId === entryId))
-          throw new Error('Product was not found in this order')
-        const result = {
-          ...order,
-          cartonDetails: { ...order.cartonDetails, [entryId]: value },
-          ...annotationEditClock(order, 'cartonDetails', [entryId]),
-        }
-        store.put(result)
-        return result
-      })
-    },
-
     async createOtherOrder(input) {
       const snapshot = validateSnapshot(otherOrderSnapshot(input))
       await validateOtherSnapshotPhotos(snapshot)
@@ -2820,22 +2735,6 @@ export async function openDatabase({ name = '1688-order-library' } = {}) {
         )
         orders.add(result.order)
         return result
-      })
-    },
-
-    async setCartonMeasurements(orderId, edits, { accountId = 'local' } = {}) {
-      identifier(orderId, 'Carton measurement orderId')
-      string(accountId, 'accountId', { empty: false })
-      const validated = validateCartonMeasurementEdits(edits)
-      return write(['orders'], async (tx) => {
-        const result = await cartonMeasurementResult(
-          tx,
-          orderId,
-          accountId,
-          validated
-        )
-        if (result.changed) tx.objectStore('orders').put(result.order)
-        return result.order
       })
     },
 
@@ -3029,51 +2928,6 @@ export async function openDatabase({ name = '1688-order-library' } = {}) {
           previousRecords: [order],
           touch: true,
         })
-        return result
-      })
-    },
-
-    async setCartonConfirmation(
-      orderId,
-      entryId,
-      month,
-      field,
-      value,
-      { accountId = 'local' } = {}
-    ) {
-      identifier(orderId, 'Order ID')
-      identifier(entryId, 'Carton confirmation entry ID')
-      return write(['orders'], async (tx) => {
-        const store = tx.objectStore('orders')
-        const order = await requested(store.get([accountId, orderId]))
-        if (!order) throw new Error('Order was not found')
-        const edited = editCartonConfirmation(
-          order,
-          entryId,
-          month,
-          field,
-          value
-        )
-        if (
-          JSON.stringify(order.cartonConfirmations || {}) ===
-            JSON.stringify(edited.cartonConfirmations) &&
-          order.cartonConfirmationClocks?.[edited.entryId]?.[month]
-        )
-          return order
-        const result = {
-          ...order,
-          cartonConfirmations: edited.cartonConfirmations,
-          cartonConfirmationClocks: {
-            ...order.cartonConfirmationClocks,
-            [edited.entryId]: {
-              ...order.cartonConfirmationClocks?.[edited.entryId],
-              [month]: nextEditTimestamp(
-                order.cartonConfirmationClocks?.[edited.entryId]?.[month]
-              ),
-            },
-          },
-        }
-        store.put(result)
         return result
       })
     },
@@ -3281,6 +3135,16 @@ export async function openDatabase({ name = '1688-order-library' } = {}) {
       })
     },
 
+    async reviewOrderRemoval(orderIds, { accountId = 'local' } = {}) {
+      const ids = strings(orderIds, 'orderIds')
+      return read(OPERATIONAL_STORES, async (tx) => {
+        const loaded = await containerRepository.state(tx)
+        // Project legacy physical evidence without materializing or reserving it.
+        await cartonBatchesRepository.seed(tx, loaded, { persist: false })
+        return planOrderRemoval(loaded, ids, { accountId })
+      })
+    },
+
     async removeOrders(orderIds, { accountId = 'local' } = {}) {
       const ids = strings(orderIds, 'orderIds')
       return write(
@@ -3292,71 +3156,27 @@ export async function openDatabase({ name = '1688-order-library' } = {}) {
           'issuedCodes',
           'packingAllocations',
           'cartonBatches',
+          'containers',
+          'orderCartonDrafts',
           'images',
         ],
         async (tx) => {
-          const allOrders = await requested(tx.objectStore('orders').getAll())
-          const removed = new Set(ids)
-          const shipments = await requested(
-            tx.objectStore('containers').getAll()
-          )
-          const shipmentLocks = await requested(
-            tx.objectStore('shipmentLocks').getAll()
-          )
-          if (
-            shipmentLocks.some(
-              (lock) =>
-                lock.accountId === accountId &&
-                (removed.has(lock.orderId) ||
-                  lock.lineages.some((lineage) =>
-                    lineage.members.some((member) =>
-                      removed.has(member.orderId)
-                    )
-                  ))
-            ) ||
-            shipments.some(
-              (container) =>
-                container.accountId === accountId &&
-                [
-                  ...(container.draft?.orders || []),
-                  ...(container.revisions || []).flatMap(
-                    (revision) => revision.orders || []
-                  ),
-                ].some((order) => removed.has(order.orderId))
+          const loaded = await containerRepository.state(tx)
+          await cartonBatchesRepository.seed(tx, loaded)
+          const review = planOrderRemoval(loaded, ids, { accountId }),
+            allOrders = loaded.records,
+            shipmentLocks = loaded.locks,
+            removed = new Set(ids)
+          if (!review.canRemove)
+            throw Object.assign(
+              new Error(
+                review.blockers.map((blocker) => blocker.message).join('\n')
+              ),
+              {
+                code: 'ORDER_REMOVAL_BLOCKED',
+                detail: { review },
+              }
             )
-          )
-            throw new Error(
-              'Historical shipments require these source purchases and originals; they cannot be deleted.'
-            )
-          const cartonBatches = await requested(
-            tx.objectStore('cartonBatches').getAll()
-          )
-          if (
-            cartonBatches.some(
-              (batch) =>
-                batch.accountId === accountId &&
-                !batch.deletedAt &&
-                (batch.contents.some((item) => removed.has(item.orderId)) ||
-                  batch.groups.some((group) => removed.has(group.orderId)) ||
-                  (batch.mark && removed.has(batch.mark.orderId)))
-            )
-          )
-            throw new Error(
-              'Remove this order’s active carton batches before deleting it.'
-            )
-          for (const record of allOrders)
-            if (
-              record.snapshot.accountId === accountId &&
-              removed.has(record.snapshot.orderId)
-            )
-              if (
-                (record.paymentLinks || []).some(
-                  (link) => !removed.has(link.sourceOrderId)
-                )
-              )
-                throw new Error(
-                  'Unlink this order’s payments before deleting it. The payment sources will stay in the library.'
-                )
           validatePaymentGraph(
             allOrders.filter(
               (record) =>
@@ -3364,6 +3184,31 @@ export async function openDatabase({ name = '1688-order-library' } = {}) {
                 !removed.has(record.snapshot.orderId)
             )
           )
+          await containerRepository.detachOrdersForRemoval(
+            tx,
+            loaded,
+            ids.map((orderId) => ({ accountId, orderId }))
+          )
+          const ownedBatches = loaded.batches.filter(
+            (batch) =>
+              batch.accountId === accountId &&
+              !batch.deletedAt &&
+              batchOrderIds(batch).some((id) => removed.has(id))
+          )
+          if (ownedBatches.length)
+            await cartonBatchesRepository.apply(
+              tx,
+              ownedBatches.map((batch) => ({
+                after: { ...batch, deletedAt: new Date().toISOString() },
+                expectedRevision: batch.revision,
+              })),
+              { removingOrders: true }
+            )
+          for (const draft of await requested(
+            tx.objectStore('orderCartonDrafts').getAll()
+          ))
+            if (draft.accountId === accountId && removed.has(draft.orderId))
+              tx.objectStore('orderCartonDrafts').delete(draft.id)
           const previousRecords = []
           const deletedRecords = []
           for (const id of ids) {
@@ -3420,6 +3265,8 @@ export async function openDatabase({ name = '1688-order-library' } = {}) {
             previousRecords,
             touch: true,
           })
+          containerRepository.graph(await containerRepository.state(tx))
+          return review
         }
       )
     },
@@ -4354,7 +4201,6 @@ import { upgradeWorkspaceColors } from './appearance.js'
 import { lineGrossCents, moneyToCents } from './money.js'
 import { purchaseTimestamp } from './order-date.js'
 import { normalizeUnitsPerCarton } from './carton-packing.js'
-import { productCartonDetails } from './carton-details.js'
 import {
   validateAdditionalCharges,
   mergeAdditionalCharges,
@@ -4396,10 +4242,7 @@ import {
   barcodeValue,
   codeOwnerEvidence,
   codeReservationMembers,
-  extendDefaultPacking,
   mergePackingState,
-  packingCheckpoint,
-  resetPreparationOrder,
   validateAllocation,
   validateIssuedCode,
   validatePackingPreferences,

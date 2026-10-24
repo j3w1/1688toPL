@@ -472,6 +472,10 @@ async function dispatch(message, sender, repository, controller) {
       return { jobs: (await repository.listJobs()).map(importJobView) }
     case 'LIBRARY_HISTORY':
       return repository.getHistory(message.orderId)
+    case 'LIBRARY_REVIEW_REMOVAL':
+      return repository.reviewOrderRemoval(message.orderIds, {
+        accountId: message.accountId || 'local',
+      })
     case 'IMAGE_GET':
       return loadThumbnail(message.url, repository)
     case 'BACKUP_EXPORT':
@@ -496,7 +500,9 @@ async function dispatch(message, sender, repository, controller) {
         )
       const result =
         message.type === 'LIBRARY_REMOVE'
-          ? await repository.removeOrders(message.orderIds)
+          ? await repository.removeOrders(message.orderIds, {
+              accountId: message.accountId || 'local',
+            })
           : await repository.restoreBackup(message.backup)
       await changed()
       return result
@@ -535,6 +541,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
         'READER_STATUS',
         'IMPORT_REPORT',
         'LIBRARY_HISTORY',
+        'LIBRARY_REVIEW_REMOVAL',
         'BACKUP_EXPORT',
       ].includes(message.type)
         ? await run()

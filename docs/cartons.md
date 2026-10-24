@@ -63,6 +63,8 @@ Known explicit dimensions supply the measured volume used in totals. Reconciliat
 
 Receipts and seller delivery remain independent. Container loading uses physical references and derives product quantities; it has no per-product loaded-quantity or capacity editor. A shared box counts/weighs once. Product participation differs from additive count attribution; mixed kg/CBM allocations are labelled allocated and conserve physical totals.
 
+The retired ordinary-batch dialog, arbitrary **Another carton** contents editor, manual received-carton counter and direct legacy count/basis editor are removed. Existing receipt, basis and count evidence remains readable in reports, backups and output. Current reconciliation, remainder placement, report review and amendments retain their own guarded physical-fact workflows.
+
 ## Review and output
 
 Loading starts Unconfirmed. Count selection is allowed only for proven interchangeability; different measured boxes need exact identities. Unknown loaded quantities block verified sealing. Missing kg/CBM alone may be disclosed when product quantities/counts are established. Full aggregate coverage may establish product totals without inventing per-box variants; a partial unresolved set cannot.
@@ -70,3 +72,5 @@ Loading starts Unconfirmed. Count selection is allowed only for proven interchan
 Source refresh preserves physical facts and flags targeted conflicts. Legacy uncertain/cross-order evidence stays review-held, retains original measurements and is not offered as confidently available. Capacity-only data never becomes physical inventory during migration. Source deletion/restore guards preserve historical references and tombstones.
 
 Packing exports lock complete container membership and revision, independent of display filters or product selection. Default sheets are Packing list, Cartons and Se quedó. Historical output resolves snapshot media and source-line prices. Optional detailed JSON starts off and discloses all cost/reason/identifier data independently of workbook columns.
+
+**Excel...** provides a separate selected-product table for copying an image or downloading one editable worksheet. Both use the same column/detail/language choices and linked physical measurements. Equal measurement sets collapse once; differing sets remain aligned within each product row. Shared-carton references do not duplicate physical totals, and whole-set measurements never become invented individual values. **Carton no.** remains an optional blank column for later annotation.

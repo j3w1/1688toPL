@@ -108,7 +108,7 @@ test('confirmed size handling and saved suffix edits undo and redo without chang
   await closeOrderProduct(editor(page))
   await editOrderProduct(page, 0)
   await editor(page)
-    .getByRole('button', { name: 'No size difference', exact: true })
+    .getByRole('button', { name: 'Do not add size endings', exact: true })
     .click()
   const review = page.getByRole('dialog', {
     name: 'Change size handling?',

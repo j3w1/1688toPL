@@ -135,6 +135,39 @@ test('downloadable template has every canonical marker, cached blank formulas an
   assert.match(xml, /<(?:\w+:)?pane\b[^>]*state="frozen"/)
 })
 
+test('template Guide explains editable grouped proposals and the final atomic import', async () => {
+  const workbook = await readStoreWorkbook(await readFile(templateUrl), {
+    filename: '7953.xlsx',
+  })
+  const guide = workbook.sheets.find((sheet) => sheet.name === 'Guide')
+  const guideText = guide.rows
+    .flatMap((row) => row.cells.map((cell) => cell.value))
+    .join('\n')
+  for (const required of [
+    'Review products and codes opens editable details and proposals',
+    'does not reserve codes',
+    'Import and assign codes revalidates the current library',
+    'A failure saves none of them',
+    'Equal group values stay together regardless of title or row position',
+    'group text is not assigned CE digits',
+    'Full barcodes update as you edit',
+    'Do not add size endings',
+    'A nonblank var is the complete suggested ending',
+    'Description measurements do not add extra size endings',
+    'Edit order details',
+    'Edit group details',
+    'Edit variant details',
+    'Keep custom values preserves manual exceptions and deliberate blanks',
+    'Replace all values',
+    'immutable shipment history',
+    'Reset to suggested restores proposals while preserving authored details',
+    'do not multiply cartons by four',
+    'original photos, marked descriptions, purchase quantities, prices and totals',
+  ])
+    assert.ok(guideText.includes(required), required)
+  assert.ok(guideText.includes('CE26100101A\nCE26100101B'))
+})
+
 test('a populated copy of the actual template imports photos, variants, leading-zero seller codes and calculated amounts', async () => {
   const source = await readFile(templateUrl)
   const workbook = await readStoreWorkbook(completedTemplate(source), {

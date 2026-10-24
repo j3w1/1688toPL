@@ -230,7 +230,7 @@ test('Excel image owned static errors have Spanish and Chinese mappings', () => 
   const keys = new Set()
   for (const file of [
     'excel-image.js',
-    'excel-image-copy.js',
+    'excel-output.js',
     'excel-image-options.js',
     'image-copy-dialog.js',
   ]) {
@@ -466,7 +466,7 @@ test('Excel image popup translates description, completion and empty-column feed
   const rows = [{ title: 'Product description', productNumber: '001-A' }]
   const original = structuredClone(rows)
   const completion = openImageCopyDialog({
-    title: 'Copy Excel image',
+    title: 'Excel...',
     count: 1,
     plan: async () => [],
     prepare: () => assert.fail('translation check must not render images'),

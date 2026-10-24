@@ -28,9 +28,13 @@ import { PAYMENT_LINK_MESSAGES } from './ui-messages-payment-links.js'
 import { REPEAT_PRODUCT_MESSAGES } from './ui-messages-repeat-products.js'
 import { ORGANIZE_MESSAGES } from './ui-messages-organize.js'
 import { OTHER_ORDER_MESSAGES } from './ui-messages-other-orders.js'
+import { ORDER_REMOVAL_MESSAGES } from './ui-messages-order-removal.js'
+import { PRODUCT_DETAIL_MESSAGES } from './ui-messages-product-details.js'
 
 // Explicit interface messages only; original seller, product and label values are never translated.
 export const UI_MESSAGES = {
+  ...PRODUCT_DETAIL_MESSAGES,
+  ...ORDER_REMOVAL_MESSAGES,
   ...SMART_CARTON_MESSAGES,
   ...OTHER_ORDER_MESSAGES,
   ...ORGANIZE_MESSAGES,
@@ -235,11 +239,6 @@ export const UI_MESSAGES = {
       zh: '将为 {month} 准备来自 {orders} 个订单的 {rows} 行所选商品。{detail}',
       es: 'Se prepararán {rows} filas seleccionadas de {orders} pedidos para {month}. {detail}',
     },
-  '{codes} group codes and their barcodes will change. {splits} partial groups will be split; unselected products keep their month and codes. Codes no longer in use become available. You can restore the previous packing later if its codes are available.':
-    {
-      zh: '将更改 {codes} 个组货号及其条码。{splits} 个部分选中的组将被拆分；未选商品保留原月份和货号。不再使用的货号将可重新分配。若原货号仍可用，您可以稍后恢复上次装箱设置。',
-      es: 'Cambiarán {codes} códigos de grupo y sus códigos de barras. Se dividirán {splits} grupos parcialmente seleccionados; los productos no seleccionados conservan su mes y códigos. Los códigos que dejen de usarse quedarán disponibles. Podrás restaurar el empaque anterior si sus códigos siguen disponibles.',
-    },
   'New codes will be assigned to the groups below. Orders without a seller remain editable and receive codes after you identify the seller.':
     {
       zh: '将为以下组分配新货号。缺少卖家信息的订单仍可编辑，确认卖家后再分配货号。',
@@ -306,7 +305,6 @@ export const UI_MESSAGES = {
   Copy: { zh: '复制', es: 'Copiar' },
   Columns: { zh: '列', es: 'Columnas' },
   'Group codes': { zh: '组货号', es: 'Códigos de grupo' },
-  'Excel image': { zh: 'Excel图片', es: 'Imagen de Excel' },
   Barcodes: { zh: '条码', es: 'Códigos de barras' },
   'Carton marks': { zh: '唛头', es: 'Marcas de caja' },
   'Remove group': { zh: '移除组', es: 'Quitar grupo' },
@@ -350,24 +348,6 @@ export const UI_MESSAGES = {
     zh: '分配货号并准备装箱',
     es: 'Asignar códigos y preparar',
   },
-  'Restore previous packing?': {
-    zh: '恢复上次装箱设置？',
-    es: '¿Restaurar el empaque anterior?',
-  },
-  'Reset order and codes?': {
-    zh: '重置排序和货号？',
-    es: '¿Restablecer orden y códigos?',
-  },
-  'This replaces this order’s current grouping, codes, names and variant settings with the setup saved before its last month move. Later edits will be lost. Other orders are unchanged. Restoration checks for codes currently used by other products.':
-    {
-      zh: '此操作会用上次更改装箱月份前的设置替换本订单当前的分组、货号、名称及款式设置。此后的修改将丢失。其他订单不变。恢复时会检查货号是否已被其他商品使用。',
-      es: 'Sustituye los grupos, códigos, nombres y ajustes de variantes de este pedido por la configuración guardada antes de su último cambio de mes. Se perderán los cambios posteriores. Los demás pedidos no cambian. Al restaurar se comprueba si otros productos usan esos códigos.',
-    },
-  'This restores this order’s default grouping, source order, product codes and barcode endings. Current names are retained where their groups still exist. Manual reordering and code edits will be replaced. Other orders are unchanged.':
-    {
-      zh: '恢复本订单的默认分组、原始顺序、商品货号及条码后缀。仍存在的分组保留当前名称。手动排序及货号修改将被替换。其他订单不变。',
-      es: 'Restaura los grupos, el orden original, los códigos de producto y las terminaciones de barras predeterminados de este pedido. Se conservan los nombres de los grupos que aún existen. Se reemplazan los cambios manuales de orden y códigos. Los demás pedidos no cambian.',
-    },
   'All {0} orders': {
     zh: '全部 {0} 个订单',
     es: 'Los {0} pedidos',
@@ -664,10 +644,6 @@ export const UI_MESSAGES = {
   'Copy selected rows as one picture with Chinese headings': {
     zh: '将所选行复制为带中文表头的图片',
     es: 'Copiar filas como imagen con encabezados chinos',
-  },
-  'Copy Excel image': {
-    zh: '复制 Excel 图片',
-    es: 'Copiar imagen de Excel',
   },
   'Copy packing values': {
     zh: '复制装箱数据',

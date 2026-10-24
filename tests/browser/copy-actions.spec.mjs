@@ -45,7 +45,7 @@ test('copy format helpers explain their output, translate and disappear after ho
   const { page } = await openLibrary(extension)
   await page.locator('#copy-excel-image').hover()
   await expect(page.getByRole('tooltip')).toHaveText(
-    /Choose and arrange columns.*one table picture per batch/
+    /Choose and arrange columns.*copy an image or export every selected product to one editable Excel sheet/
   )
   await page.mouse.move(2, 2)
   await expect(page.getByRole('tooltip')).toHaveCount(0)

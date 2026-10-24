@@ -17,6 +17,7 @@ import {
 import { validateColorVocabulary } from './color-vocabulary.js'
 import { normalizeAppearance } from './appearance.js'
 import { normalizeOrderTags, normalizeTags } from './order-tags.js'
+import { spreadsheetDeclaration } from './spreadsheet-properties.js'
 
 /** Material authoring follows source rows even when grouping is restored. */
 export function variantMaterial(variant, entryId = variant.entryIds[0]) {
@@ -226,19 +227,26 @@ export function createPreparation(
       }
       groups.set(groupKey, group)
     }
+    const declaration =
+      snapshot.sourceType === 'spreadsheet'
+        ? spreadsheetDeclaration(item)
+        : null
     const extracted = sizeClassifier.extract(item)
     const size = item.sourceSize || extracted.size
-    const variant = item.sourceVariant || extracted.variant
+    const variant = declaration ? declaration.variantSuffix : extracted.variant
     const variantProperties = extracted.variantProperties
     // Only identical complete attribute sets suggest a shared variant. No source
     // row or amount is combined; entry IDs remain individually addressable.
     const attributes = (entries) =>
       entries.map((property) => [property.label.trim(), property.value.trim()])
-    const variantIdentity =
-      snapshot.sourceType === 'spreadsheet' && item.sourceVariant
-        ? [['variant', item.sourceVariant]]
-        : attributes(variantProperties)
-    const key = JSON.stringify([groupKey, variantIdentity, size])
+    const variantIdentity = declaration
+      ? [['variant', declaration.variantSuffix]]
+      : attributes(variantProperties)
+    const key = JSON.stringify([
+      groupKey,
+      variantIdentity,
+      declaration ? declaration.sizeSuffix : size,
+    ])
     const existing = candidates.get(key)
     if (existing) existing.entryIds.push(item.entryId)
     else {
@@ -253,11 +261,7 @@ export function createPreparation(
       }
       candidates.set(key, candidate)
       variantKeys.set(candidate.id, JSON.stringify(variantIdentity))
-      if (snapshot.sourceType === 'spreadsheet')
-        sourceEndings.set(candidate.id, {
-          variant: item.sourceVariant,
-          size: item.sourceSize,
-        })
+      if (declaration) sourceEndings.set(candidate.id, declaration)
       group.variants.push(candidate)
     }
   }
@@ -265,18 +269,30 @@ export function createPreparation(
     const variants = [
       ...new Set(group.variants.map((variant) => variantKeys.get(variant.id))),
     ]
-    const sizeSuggestions = sizeClassifier.suggest(
-      group.variants.map((variant) => variant.size),
-      group.variants.map((variant) => variantKeys.get(variant.id))
+    const inferred = group.variants.filter(
+      (variant) => !sourceEndings.has(variant.id)
     )
-    for (const [index, variant] of group.variants.entries()) {
-      variant.variantSuffix =
-        sourceEndings.get(variant.id)?.variant ||
-        (variants.length > 1
+    const sizeSuggestions = new Map(
+      sizeClassifier
+        .suggest(
+          inferred.map((variant) => variant.size),
+          inferred.map((variant) => variantKeys.get(variant.id))
+        )
+        .map((suggestion, index) => [inferred[index].id, suggestion])
+    )
+    for (const variant of group.variants) {
+      const declaration = sourceEndings.get(variant.id)
+      variant.variantSuffix = declaration
+        ? declaration.variantSuffix
+        : variants.length > 1
           ? letters(variants.indexOf(variantKeys.get(variant.id)))
-          : '')
-      variant.sizeSuffix = sizeSuggestions[index].sizeSuffix
-      variant.needsSizeMapping = sizeSuggestions[index].needsSizeMapping
+          : ''
+      variant.sizeSuffix = declaration
+        ? declaration.sizeSuffix
+        : sizeSuggestions.get(variant.id).sizeSuffix
+      variant.needsSizeMapping = declaration
+        ? false
+        : sizeSuggestions.get(variant.id).needsSizeMapping
     }
   }
   return {
@@ -410,7 +426,11 @@ export function setGroupSizeMode(
   preparation,
   groupId,
   mode,
-  { snapshot, sizeVocabulary = DEFAULT_SIZE_VOCABULARY } = {}
+  {
+    snapshot,
+    sizeVocabulary = DEFAULT_SIZE_VOCABULARY,
+    inferDeclaredSizes = false,
+  } = {}
 ) {
   if (!['automatic', 'none'].includes(mode))
     throw new Error('Choose automatic size codes or no size difference')
@@ -437,17 +457,15 @@ export function setGroupSizeMode(
     const resolved = resolvePendingSizeMappings(
       { ...draft, groups: [group] },
       sizeVocabulary,
-      { snapshot }
+      { snapshot, inferDeclaredSizes }
     )
     draft.groups[draft.groups.indexOf(group)] = resolved.preparation.groups[0]
   }
   return draft
 }
 
-export function packingCheckpoint(
-  preparation,
-  { includeDefaults = false } = {}
-) {
+/** Normalize retained legacy evidence; current saves never create checkpoints. */
+function normalizeLegacyCheckpoint(preparation) {
   const checkpoint = {
     month: preparation.month,
     sellerId: preparation.sellerId,
@@ -457,232 +475,7 @@ export function packingCheckpoint(
       ? { restoreScopes: structuredClone(preparation.restoreScopes) }
       : {}),
   }
-  if (includeDefaults && preparation.defaultPacking)
-    checkpoint.defaults = packingCheckpoint(preparation.defaultPacking)
   return checkpoint
-}
-
-/** Extend defaults only for newly prepared source rows, never a manual split or merge. */
-export function extendDefaultPacking(preparation, snapshot) {
-  if (!preparation.defaultPacking)
-    return packingCheckpoint(resetPreparationOrder(preparation, snapshot))
-  const baseline = {
-    ...preparation,
-    ...structuredClone(preparation.defaultPacking),
-  }
-  const knownIds = new Set(
-    baseline.groups.flatMap((group) =>
-      group.variants.flatMap((variant) => variant.entryIds)
-    )
-  )
-  const byGroup = new Map(baseline.groups.map((group) => [group.id, group]))
-  const byVariant = new Map(
-    baseline.groups.flatMap((group) =>
-      group.variants.map((variant) => [variant.id, variant])
-    )
-  )
-  let changed = false
-  for (const group of preparation.groups) {
-    for (const variant of group.variants) {
-      const additions = variant.entryIds.filter(
-        (entryId) => !knownIds.has(entryId)
-      )
-      if (!additions.length) continue
-      changed = true
-      for (const entryId of additions) knownIds.add(entryId)
-      const oldVariant = byVariant.get(variant.id)
-      if (oldVariant) {
-        oldVariant.entryIds.push(...additions)
-        continue
-      }
-      let target = byGroup.get(group.id)
-      if (!target) {
-        target = {
-          ...structuredClone(group),
-          month: groupPackingMonth(preparation, group),
-          variants: [],
-        }
-        delete target.manualReordered
-        baseline.groups.push(target)
-        byGroup.set(target.id, target)
-      }
-      const added = { ...structuredClone(variant), entryIds: additions }
-      delete added.manualReordered
-      target.variants.push(added)
-      byVariant.set(added.id, added)
-    }
-  }
-  if (!changed) return structuredClone(preparation.defaultPacking)
-  baseline.updatedAt = preparation.updatedAt
-  return packingCheckpoint(resetPreparationOrder(baseline, snapshot))
-}
-
-/** Returns a previewable draft. The caller confirms before saving its revision. */
-export function restoreDefaultPacking(preparation) {
-  if (!preparation.defaultPacking)
-    throw new Error('This order has no saved default layout yet')
-  const draft = structuredClone(preparation)
-  const currentGroups = new Map(draft.groups.map((group) => [group.id, group]))
-  const currentVariants = new Map(
-    draft.groups.flatMap((group) =>
-      group.variants.map((variant) => [variant.id, variant])
-    )
-  )
-  const currentMaterials = new Map(
-    draft.groups.flatMap((group) =>
-      group.variants
-        .filter(
-          (variant) =>
-            Object.hasOwn(variant, 'material') || variant.materialOverrides
-        )
-        .flatMap((variant) =>
-          variant.entryIds.map((id) => [id, variantMaterial(variant, id)])
-        )
-    )
-  )
-  Object.assign(draft, structuredClone(preparation.defaultPacking))
-  draft.updatedAt = preparation.updatedAt
-  for (const group of draft.groups) {
-    const current = currentGroups.get(group.id)
-    if (current) {
-      for (const field of ['spanishName', 'category', 'naming'])
-        if (Object.hasOwn(current, field))
-          group[field] = structuredClone(current[field])
-    }
-    delete group.manualReordered
-    for (const variant of group.variants) {
-      const currentVariant = currentVariants.get(variant.id)
-      if (currentVariant) {
-        variant.variant = currentVariant.variant
-        if (Object.hasOwn(currentVariant, 'spanishName'))
-          variant.spanishName = currentVariant.spanishName
-      }
-      if (variant.entryIds.some((id) => currentMaterials.has(id)))
-        storeMaterials(variant, currentMaterials)
-      delete variant.manualReordered
-    }
-  }
-  return draft
-}
-
-/** Describe only changes Reset will make; revisions, timestamps and retained names are not changes. */
-export function defaultPackingChanges(preparation) {
-  if (!preparation.defaultPacking) return []
-  const restored = restoreDefaultPacking(preparation)
-  const beforeGroups = new Map(
-    preparation.groups.map((group, index) => [group.id, { group, index }])
-  )
-  const afterGroups = new Map(
-    restored.groups.map((group, index) => [group.id, { group, index }])
-  )
-  const changes = []
-  for (const groupId of new Set([
-    ...afterGroups.keys(),
-    ...beforeGroups.keys(),
-  ])) {
-    const old = beforeGroups.get(groupId)
-    const next = afterGroups.get(groupId)
-    const before = old?.group
-    const after = next?.group
-    const membership = (group) =>
-      group?.variants.map((variant) => [
-        variant.id,
-        [...variant.entryIds].sort(),
-      ]) || []
-    const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
-    const members = (group) =>
-      group?.variants.flatMap((variant) => variant.entryIds) || []
-    const beforeVariants = new Map(
-      before?.variants.map((variant) => [variant.id, variant]) || []
-    )
-    const afterVariants = new Map(
-      after?.variants.map((variant) => [variant.id, variant]) || []
-    )
-    const barcodeChanges = []
-    for (const variantId of new Set([
-      ...afterVariants.keys(),
-      ...beforeVariants.keys(),
-    ])) {
-      const previous = beforeVariants.get(variantId)
-      const current = afterVariants.get(variantId)
-      const fields = (variant) =>
-        variant && [
-          variant.variantSuffix,
-          variant.sizeSuffix,
-          variant.size,
-          variant.needsSizeMapping === true,
-        ]
-      if (same(fields(previous), fields(current))) continue
-      barcodeChanges.push({
-        variantId,
-        entryIds: [
-          ...new Set([
-            ...(previous?.entryIds || []),
-            ...(current?.entryIds || []),
-          ]),
-        ],
-        before: previous
-          ? `${before.baseCode}${previous.variantSuffix}${previous.sizeSuffix}`
-          : '',
-        after: current
-          ? `${after.baseCode}${current.variantSuffix}${current.sizeSuffix}`
-          : '',
-        beforeVariantSuffix: previous?.variantSuffix ?? '',
-        afterVariantSuffix: current?.variantSuffix ?? '',
-        beforeSizeSuffix: previous?.sizeSuffix ?? '',
-        afterSizeSuffix: current?.sizeSuffix ?? '',
-        beforeNeedsSizeMapping: previous?.needsSizeMapping === true,
-        afterNeedsSizeMapping: current?.needsSizeMapping === true,
-      })
-    }
-    const change = {
-      groupId,
-      before: before ? structuredClone(before) : null,
-      after: after ? structuredClone(after) : null,
-      entryIds: [...new Set([...members(before), ...members(after)])],
-      beforePosition: old ? old.index + 1 : null,
-      afterPosition: next ? next.index + 1 : null,
-      baseCodeChanged: before?.baseCode !== after?.baseCode,
-      monthChanged: Boolean(
-        before &&
-        after &&
-        groupPackingMonth(preparation, before) !==
-          groupPackingMonth(restored, after)
-      ),
-      groupingChanged: !same(
-        membership(before).sort(([a], [b]) => a.localeCompare(b)),
-        membership(after).sort(([a], [b]) => a.localeCompare(b))
-      ),
-      sizeModeChanged:
-        (before?.sizeMode || 'automatic') !== (after?.sizeMode || 'automatic'),
-      orderChanged: old?.index !== next?.index,
-      variantOrderChanged: !same(
-        before?.variants.map((variant) => variant.id) || [],
-        after?.variants.map((variant) => variant.id) || []
-      ),
-      clearedManualOrdering: Boolean(
-        before?.manualReordered ||
-        before?.variants.some((variant) => variant.manualReordered)
-      ),
-      barcodeChanges,
-    }
-    if (
-      change.baseCodeChanged ||
-      change.monthChanged ||
-      change.groupingChanged ||
-      change.sizeModeChanged ||
-      change.orderChanged ||
-      change.variantOrderChanged ||
-      change.clearedManualOrdering ||
-      barcodeChanges.length
-    )
-      changes.push(change)
-  }
-  return changes
-}
-
-export function hasDefaultPackingChanges(preparation) {
-  return defaultPackingChanges(preparation).length > 0
 }
 
 /** Remove only packing membership; source rows and the issued-code ledger are untouched. */
@@ -719,23 +512,8 @@ export function removeSelectedProducts(preparation, entryIds) {
       .filter((group) => group.variants.length)
   }
   remove(draft)
-  // Reset defaults describe the current packing membership. Previous packing
-  // remains a separate, explicit restore action and retains its original scope.
   if (draft.defaultPacking) remove(draft.defaultPacking)
   return draft
-}
-
-export function restorePreviousPacking(preparation) {
-  if (!preparation.previousPacking)
-    throw new Error('This order has no previous packing to restore')
-  const previous = preparation.previousPacking
-  return {
-    ...structuredClone(preparation),
-    ...packingCheckpoint(previous),
-    updatedAt: preparation.updatedAt,
-    previousPacking: packingCheckpoint(preparation, { includeDefaults: true }),
-    defaultPacking: packingCheckpoint(previous.defaults || previous),
-  }
 }
 
 /** Freeze source rows before planning. Allocation happens only in the database transaction. */
@@ -1211,7 +989,7 @@ export function validatePreparation(input) {
         ? { restoreScopes: checkpoint.restoreScopes }
         : {}),
     })
-    result[field] = packingCheckpoint(validated)
+    result[field] = normalizeLegacyCheckpoint(validated)
     if (checkpoint.defaults !== undefined) {
       const defaults = record(checkpoint.defaults, 'Previous packing defaults')
       if (
@@ -1232,7 +1010,7 @@ export function validatePreparation(input) {
           ? { restoreScopes: defaults.restoreScopes }
           : {}),
       })
-      result[field].defaults = packingCheckpoint(validatedDefaults)
+      result[field].defaults = normalizeLegacyCheckpoint(validatedDefaults)
     }
   }
   return result

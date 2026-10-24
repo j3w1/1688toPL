@@ -2771,7 +2771,7 @@ test('native seal freezes original image bytes, source snapshots, canonical labe
       return {
         imageDenied: !!imageDenied,
         restoreDenied: !!restoreDenied,
-        deletionDenied: /Historical shipments require/.test(
+        deletionDenied: /recorded in sealed containers/.test(
           deletionDenied || ''
         ),
         historic: JSON.stringify(saved) === original,

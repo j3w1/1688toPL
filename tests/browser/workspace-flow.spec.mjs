@@ -192,7 +192,7 @@ test.describe('copy progress and recovery', () => {
     )
     await dialog.getByRole('button', { name: 'Close', exact: true }).click()
     await page.evaluate(() => window.finishCopyTableImage())
-    await expect(button).toHaveText('Excel image')
+    await expect(button).toHaveText('Excel...')
     await expect(dialog).toHaveCount(0)
     await expect(button).toBeEnabled()
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(

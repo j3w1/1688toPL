@@ -445,14 +445,6 @@ export const VALIDATION_MESSAGES = {
     zh: '此月份组属于另一卖家',
     es: 'Este grupo mensual pertenece a otro vendedor',
   },
-  'This order has no previous packing to restore': {
-    zh: '此订单没有可恢复的先前装箱设置',
-    es: 'Este pedido no tiene un empaque anterior para restaurar',
-  },
-  'This order has no saved default layout yet': {
-    zh: '此订单尚未保存默认排序布局',
-    es: 'Este pedido aún no tiene una distribución predeterminada guardada',
-  },
   'This photo exceeds the image memory budget. Copy its values separately or use a smaller source photo.':
     {
       zh: '此图片超过图片内存限制。请单独复制数据，或使用更小的原图。',

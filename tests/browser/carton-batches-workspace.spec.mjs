@@ -452,8 +452,11 @@ test('numbered cartons retain exact cross-code minority contents and independent
     true
   )
   const grid = await openOrderReconciliation(page, ref, 'cartons')
-  await row(grid, batchId).locator('[data-column="label"]').click()
+  await row(grid, batchId)
+    .locator('[data-column="label"] .carton-reference-text')
+    .click()
   const details = page.locator('[data-action="inspect-order-carton"]')
+  await expect(details).toBeVisible()
   await details.locator('[data-carton-identity="reference"]').fill('0001')
   await details
     .locator('[data-carton-identity="mark"]')

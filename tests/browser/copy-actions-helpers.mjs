@@ -27,7 +27,7 @@ export async function clickGroupingAction(page, name) {
 export async function copyCurrentImageBatch(page) {
   const dialog = page.locator('.image-copy-dialog')
   const copy = dialog.getByRole('button', {
-    name: 'Copy current batch',
+    name: /^(?:Copy current batch|Copy image|Copy current image)$/,
     exact: true,
   })
   await expect(copy).toBeEnabled()

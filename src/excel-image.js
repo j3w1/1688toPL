@@ -36,6 +36,7 @@ const CODE_FONT_SIZE = 17
 const codeFont = (size) =>
   `${CE_CODE_DESIGN.fontWeight} ${size}px ${CE_CODE_DESIGN.fontFamily}`
 const TITLE_FONT = `600 16px ${FONT_FAMILY}`
+const OUTPUT_TITLE_FONT = `600 26px ${FONT_FAMILY}`
 const DETAIL_FONT = `14px ${FONT_FAMILY}`
 const ARTICLE_FONT = `600 14px ${FONT_FAMILY}`
 const DETAIL_LABEL_FONT = `600 13px ${FONT_FAMILY}`
@@ -95,23 +96,83 @@ export const excelImageColumns = Object.freeze(
       numeric: true,
     },
     {
-      key: 'supplierDimensions',
+      key: 'cartonDimensions',
       labels: ['Carton dimensions', 'Medidas de caja', '体积规格'],
       width: 130,
-      supplier: true,
     },
     {
-      key: 'supplierWeight',
+      key: 'cartonWeight',
       labels: ['Weight (kg)', 'Peso (kg)', '重量（KG）'],
       width: 105,
-      supplier: true,
+      numeric: true,
     },
     {
-      key: 'supplierCarton',
+      key: 'cartonNumberBlank',
       labels: ['Carton no.', 'N.º de caja', '箱号'],
       width: 100,
-      supplier: true,
+      blank: true,
     },
+    ...[
+      ['spanishName', 'Spanish name', 'Nombre en español', '西语品名', 160],
+      ['productNumber', 'Article number', 'Número de artículo', '货号', 105],
+      ['sourceSize', 'Source size', 'Tamaño original', '原始尺寸', 100],
+      ['unitsPerCarton', 'Pcs/box', 'Pzas/caja', '每箱件数', 95, true],
+      [
+        'cartonReferences',
+        'Carton references',
+        'Referencias de cajas',
+        '纸箱引用',
+        160,
+      ],
+      ['plannedBoxes', 'Cartons', 'Cajas', '箱数', 85, true],
+      [
+        'receivedBoxes',
+        'Received boxes',
+        'Cajas recibidas',
+        '实收箱数',
+        95,
+        true,
+      ],
+      ['loadedBoxes', 'Loaded boxes', 'Cajas cargadas', '装柜箱数', 95, true],
+      ['cartonLength', 'Length (cm)', 'Largo (cm)', '长（cm）', 110, true],
+      ['cartonWidth', 'Width (cm)', 'Ancho (cm)', '宽（cm）', 110, true],
+      ['cartonHeight', 'Height (cm)', 'Alto (cm)', '高（cm）', 110, true],
+      [
+        'cartonVolume',
+        'Volume (m³/box)',
+        'Volumen (m³/caja)',
+        '体积（m³/箱）',
+        120,
+        true,
+      ],
+      ['receivedWeight', 'Received kg', 'kg recibidos', '实收 kg', 110, true],
+      ['receivedVolume', 'Received m³', 'm³ recibidos', '实收 m³', 110, true],
+      ['loadedWeight', 'Loaded kg', 'kg cargados', '装柜 kg', 110, true],
+      ['loadedVolume', 'Loaded m³', 'm³ cargados', '装柜 m³', 110, true],
+      [
+        'effectiveUnitPrice',
+        'Price + charges (元)',
+        'Precio + cargos (元)',
+        '含费单价（元）',
+        120,
+        true,
+      ],
+      ['discount', 'Discount (元)', 'Descuento (元)', '折扣（元）', 105, true],
+      [
+        'effectiveAmount',
+        'Subtotal (元)',
+        'Subtotal (元)',
+        '小计（元）',
+        115,
+        true,
+      ],
+    ].map(([key, en, es, zh, width, numeric]) => ({
+      key,
+      labels: [en, es, zh],
+      width,
+      numeric,
+      optional: true,
+    })),
   ].map(({ labels: [en, es, zh], ...column }) =>
     Object.freeze({
       ...column,
@@ -122,7 +183,13 @@ export const excelImageColumns = Object.freeze(
 )
 
 const defaultColumnKeys = excelImageColumns
-  .filter((column) => !column.supplier)
+  .filter(
+    (column) =>
+      !column.optional &&
+      !['cartonDimensions', 'cartonWeight', 'cartonNumberBlank'].includes(
+        column.key
+      )
+  )
   .map((column) => column.key)
 
 function selectedColumns(keys, language, context) {
@@ -150,9 +217,9 @@ function selectedColumns(keys, language, context) {
   )
 }
 
-function canvasContext() {
+function canvasContext({ alpha = false } = {}) {
   const canvas = document.createElement('canvas')
-  const context = canvas.getContext('2d', { alpha: false })
+  const context = canvas.getContext('2d', { alpha })
   if (!context) throw new Error('This browser cannot create the Excel image.')
   return { canvas, context }
 }
@@ -265,6 +332,7 @@ function snapshot(row, index, columns) {
   const values = {}
   for (const key of [
     'orderId',
+    'accountId',
     'sourceType',
     'orderReference',
     'entryId',
@@ -283,6 +351,7 @@ function snapshot(row, index, columns) {
   ])
     values[key] = key === 'number' ? String(index + 1) : String(row[key] ?? '')
   values.manualReordered = row.manualReordered === true
+  values.cartonMeasurementGroupCount = row.cartonMeasurementGroups?.length || 0
   for (const field of ['orderTags', 'productTags'])
     values[field] = Object.freeze([
       ...new Set(
@@ -675,13 +744,207 @@ function codeCell(context, value, width, readingAid = false) {
   })
 }
 
+function codeBadgeBounds(context, cell) {
+  context.font = cell.font
+  const lines = cell.lines.map((value) => {
+    const metrics = context.measureText(value)
+    return {
+      value,
+      width: metrics.width,
+      ascent: metrics.actualBoundingBoxAscent ?? cell.codeFontSize * 0.8,
+      descent: metrics.actualBoundingBoxDescent ?? cell.codeFontSize * 0.2,
+    }
+  })
+  const design = codeDesignMetrics(cell.codeFontSize)
+  const ink = Math.max(...lines.map((line) => line.ascent + line.descent))
+  const bandHeight = ink + design.paddingBlock * 2
+  return {
+    lines,
+    design,
+    width:
+      Math.max(...lines.map((line) => line.width)) + design.paddingInline * 2,
+    height: bandHeight + (lines.length - 1) * cell.lineHeight,
+    offset: (cell.lineHeight - bandHeight) / 2,
+  }
+}
+
+/** One painter owns the preview and embedded workbook badge geometry/type. */
+function paintExcelCodeCell(context, cell, center, top) {
+  const bounds = codeBadgeBounds(context, cell)
+  context.fillStyle = CE_CODE_DESIGN.background
+  context.beginPath()
+  context.roundRect(
+    center - bounds.width / 2,
+    top + bounds.offset,
+    bounds.width,
+    bounds.height,
+    bounds.design.radius
+  )
+  context.fill()
+  context.font = cell.font
+  context.textAlign = 'left'
+  context.textBaseline = 'alphabetic'
+  let offset = 0
+  for (const [index, line] of bounds.lines.entries()) {
+    const left = center - line.width / 2
+    const baseline =
+      top +
+      index * cell.lineHeight +
+      (cell.lineHeight - line.ascent - line.descent) / 2 +
+      line.ascent
+    context.fillStyle = CE_CODE_DESIGN.foreground
+    context.fillText(line.value, left, baseline)
+    if (cell.codeProductRange) {
+      const start = Math.max(0, cell.codeProductRange[0] - offset)
+      const end = Math.min(line.value.length, cell.codeProductRange[1] - offset)
+      if (end > start)
+        context.fillRect(
+          left + context.measureText(line.value.slice(0, start)).width,
+          Math.round((baseline + cell.codeFontSize * 0.18) * SCALE) / SCALE,
+          context.measureText(line.value.slice(start, end)).width,
+          1
+        )
+    }
+    offset += line.value.length
+  }
+  return bounds
+}
+
+export async function renderExcelCodeImage(cell) {
+  if (!cell?.text) return undefined
+  const { canvas, context } = canvasContext({ alpha: true })
+  try {
+    const bounds = codeBadgeBounds(context, cell)
+    const scale = Math.min(SCALE, 512 / bounds.width, 128 / bounds.height)
+    canvas.width = Math.ceil(bounds.width * scale)
+    canvas.height = Math.ceil(bounds.height * scale)
+    context.scale(scale, scale)
+    paintExcelCodeCell(context, cell, bounds.width / 2, -bounds.offset)
+    const blob = await new Promise((resolve, reject) =>
+      canvas.toBlob(
+        (blob) =>
+          blob
+            ? resolve(blob)
+            : reject(new Error('The Excel image could not be encoded.')),
+        'image/png'
+      )
+    )
+    return {
+      blob,
+      mimeType: 'image/png',
+      displayWidth: bounds.width,
+      displayHeight: bounds.height,
+    }
+  } finally {
+    canvas.width = canvas.height = 0
+  }
+}
+
 /** Plan every selected row before choosing a numbered batch; does not load photos. */
+export function planExcelTable(rows, options = {}) {
+  return planExcelImage(rows, { ...options, imageLimits: false })[0]
+}
+
+/** Page the shared logical content without reinterpreting or measuring its cells. */
+export function excelTableImageBatches(table) {
+  if (table.width > MAX_EDGE)
+    throw new Error('The Excel image is too wide to render safely.')
+  const maxHeight = Math.floor(
+    Math.min(MAX_EDGE, MAX_PIXELS / table.width) / SCALE
+  )
+  const headings = new Map()
+  const orderKey = (entry) =>
+    JSON.stringify([entry.source.accountId, entry.source.orderId])
+  for (const entry of table.rows)
+    if (!headings.has(orderKey(entry)))
+      headings.set(orderKey(entry), entry.band)
+  const plans = []
+  let rows = [],
+    start = 0,
+    cssHeight = table.headerHeight + 2
+  const finish = () => {
+    const markSpans = []
+    if (table.columns.some(({ key }) => key === 'baseCode'))
+      for (const [index, entry] of rows.entries()) {
+        if (!entry.source.baseCode.trim()) continue
+        const last = markSpans.at(-1)
+        if (last && last.end === index && last.groupKey === entry.groupKey) {
+          last.end++
+          last.height += entry.height
+          last.manualReordered ||= entry.source.manualReordered
+        } else
+          markSpans.push({
+            start: index,
+            end: index + 1,
+            height: entry.height,
+            groupKey: entry.groupKey,
+            source: entry.source,
+            manualReordered: entry.source.manualReordered,
+          })
+      }
+    plans.push(
+      Object.freeze({
+        ...table,
+        start,
+        end: start + rows.length,
+        rowCount: rows.length,
+        height: cssHeight * SCALE,
+        cssHeight,
+        rows: Object.freeze(rows),
+        markSpans: Object.freeze(markSpans.map(Object.freeze)),
+      })
+    )
+    start += rows.length
+    rows = []
+    cssHeight = table.headerHeight + 2
+  }
+  const firstRow = (entry) => {
+    const heading = table.showOrderDetails
+      ? headings.get(orderKey(entry))
+      : null
+    const band =
+      heading?.lines?.length || heading?.tags?.height
+        ? Object.freeze({
+            ...heading,
+            kind:
+              entry.source.sellerName || entry.source.sellerMemberLogin
+                ? 'store'
+                : 'order',
+          })
+        : null
+    return Object.freeze({ ...entry, band, separator: 'none' })
+  }
+  for (const [index, original] of table.rows.entries()) {
+    let entry = rows.length ? original : firstRow(original)
+    if (
+      rows.length &&
+      cssHeight + entry.height + (entry.band?.height || 0) > maxHeight
+    ) {
+      finish()
+      entry = firstRow(original)
+    }
+    if (
+      table.headerHeight + 2 + entry.height + (entry.band?.height || 0) >
+      maxHeight
+    )
+      throw new Error(
+        `Product row ${index + 1} is too tall for one image. Shorten its description or copy its values instead.`
+      )
+    rows.push(entry)
+    cssHeight += entry.height + (entry.band?.height || 0)
+  }
+  if (rows.length) finish()
+  return Object.freeze(plans)
+}
+
 export function planExcelImage(
   rows,
   {
     columns: columnKeys = defaultColumnKeys,
     language = 'en',
     showOrderDetails = true,
+    imageLimits = true,
+    title = '',
     style,
     details: detailOptions,
     badges: badgeOptions,
@@ -708,16 +971,18 @@ export function planExcelImage(
     const maxHeight = Math.floor(
       Math.min(MAX_EDGE, Math.floor(MAX_PIXELS / width)) / SCALE
     )
-    if (width > MAX_EDGE)
+    if (imageLimits && width > MAX_EDGE)
       throw new Error('The Excel image is too wide to render safely.')
     context.font = HEADER_FONT
     const headers = columns.map((column) =>
       Object.freeze(wrap(context, column.label, column.width - PADDING * 2))
     )
-    const headerHeight = Math.max(
+    const columnHeaderHeight = Math.max(
       44,
       ...headers.map((lines) => lines.length * LINE_HEIGHT + PADDING * 2)
     )
+    const titleHeight = title ? 44 : 0
+    const headerHeight = columnHeaderHeight + titleHeight
     const plans = []
     let entries = []
     let start = 0
@@ -752,6 +1017,11 @@ export function planExcelImage(
           cssWidth,
           cssHeight,
           headerHeight,
+          columnHeaderHeight,
+          title,
+          titleHeight,
+          titleFont: OUTPUT_TITLE_FONT,
+          headerFont: HEADER_FONT,
           columns,
           language,
           ...display,
@@ -770,7 +1040,10 @@ export function planExcelImage(
       const sellerKey = source.sellerMemberLogin || source.sellerName
       const previousSeller =
         previous?.source.sellerMemberLogin || previous?.source.sellerName
-      const newOrder = !previous || previous.source.orderId !== source.orderId
+      const newOrder =
+        !previous ||
+        previous.source.orderId !== source.orderId ||
+        previous.source.accountId !== source.accountId
       const newStore =
         Boolean(sellerKey) && (!previous || sellerKey !== previousSeller)
       const band = (() => {
@@ -863,7 +1136,7 @@ export function planExcelImage(
             language
           )
         let text =
-          column.supplier ||
+          column.blank ||
           column.key === 'thumbnail' ||
           (column.key === 'baseCode' && previous?.groupKey === groupKey)
             ? ''
@@ -894,6 +1167,57 @@ export function planExcelImage(
           height: lines.length * (column.numeric ? 24 : 22),
         })
       })
+      if (source.cartonMeasurementGroupCount > 1) {
+        const fields = new Set([
+          'cartonDimensions',
+          'cartonWeight',
+          'cartonVolume',
+          'cartonLength',
+          'cartonWidth',
+          'cartonHeight',
+          'cartonReferences',
+        ])
+        const aligned = columns.flatMap((column, index) => {
+          if (!fields.has(column.key)) return []
+          context.font = cells[index].font
+          return [
+            {
+              index,
+              groups: cells[index].text
+                .split('\n')
+                .map((value) =>
+                  wrap(context, value, column.width - PADDING * 2)
+                ),
+            },
+          ]
+        })
+        const groupCount = Math.max(
+          0,
+          ...aligned.map(({ groups }) => groups.length)
+        )
+        const heights = Array.from({ length: groupCount }, (_, index) =>
+          Math.max(
+            1,
+            ...aligned.map(({ groups }) => groups[index]?.length || 0)
+          )
+        )
+        for (const { index, groups } of aligned) {
+          const lines = heights.flatMap((height, group) => [
+            ...(groups[group] || []),
+            ...Array(Math.max(0, height - (groups[group]?.length || 0))).fill(
+              ''
+            ),
+            ...(group < groupCount - 1 ? [''] : []),
+          ])
+          cells[index] = Object.freeze({
+            ...cells[index],
+            lines: Object.freeze(lines),
+            alignedText: lines.join('\n'),
+            lineHeight: 24,
+            height: lines.length * 24,
+          })
+        }
+      }
       const height = Math.max(
         hasPhotos || hasMarks ? PHOTO_SIZE + PHOTO_PADDING * 2 : 56,
         ...cells.map((cell) => cell.height + PADDING * 2)
@@ -907,7 +1231,8 @@ export function planExcelImage(
           ? 'none'
           : newStore
             ? 'store'
-            : previous.source.orderId !== source.orderId
+            : previous.source.orderId !== source.orderId ||
+                previous.source.accountId !== source.accountId
               ? 'order'
               : previous.groupKey !== groupKey
                 ? 'group'
@@ -921,6 +1246,7 @@ export function planExcelImage(
         source.groupId && source.baseCode
           ? JSON.stringify([
               source.orderId,
+              source.accountId,
               source.groupId,
               source.baseCode,
               source.chineseCategory,
@@ -928,13 +1254,14 @@ export function planExcelImage(
           : `row:${index}`
       let entry = prepare(source, groupKey)
       if (
-        entry.height + (entry.band?.height || 0) + headerHeight + 2 >
-        maxHeight
+        imageLimits &&
+        entry.height + (entry.band?.height || 0) + headerHeight + 2 > maxHeight
       )
         throw new Error(
           `Product row ${index + 1} is too tall for one image. Shorten its description or copy its values instead.`
         )
       if (
+        imageLimits &&
         entries.length &&
         cssHeight + entry.height + (entry.band?.height || 0) > maxHeight
       ) {
@@ -942,8 +1269,8 @@ export function planExcelImage(
         entry = prepare(source, groupKey)
       }
       if (
-        entry.height + (entry.band?.height || 0) + headerHeight + 2 >
-        maxHeight
+        imageLimits &&
+        entry.height + (entry.band?.height || 0) + headerHeight + 2 > maxHeight
       )
         throw new Error(
           `Product row ${index + 1} is too tall for one image. Shorten its description or copy its values instead.`
@@ -1117,60 +1444,16 @@ export async function renderExcelImage(
   function text(cell, x, y, column, rowHeight) {
     const top = y + (rowHeight - cell.height) / 2
     if (cell.codeBadge && cell.text) {
-      context.font = cell.font
-      const bounds = cell.lines.map((value) => context.measureText(value))
-      const design = codeDesignMetrics(cell.codeFontSize)
-      const inkHeight = Math.max(
-        ...bounds.map(
-          (metrics) =>
-            (metrics.actualBoundingBoxAscent ?? cell.codeFontSize * 0.8) +
-            (metrics.actualBoundingBoxDescent ?? cell.codeFontSize * 0.2)
-        )
-      )
-      const width =
-        Math.max(...bounds.map((metrics) => metrics.width)) +
-        2 * design.paddingInline
-      const lineHeight = inkHeight + 2 * design.paddingBlock
-      // A wrapped payload still belongs to one code, so keep one backing.
-      const height = lineHeight + (cell.lines.length - 1) * cell.lineHeight
-      context.fillStyle = CE_CODE_DESIGN.background
-      context.beginPath()
-      context.roundRect(
-        x + (column.width - width) / 2,
-        top + (cell.lineHeight - lineHeight) / 2,
-        width,
-        height,
-        design.radius
-      )
-      context.fill()
+      paintExcelCodeCell(context, cell, x + column.width / 2, top)
+      return
     }
-    let offset = 0
     for (const [index, value] of cell.lines.entries()) {
-      const placement = line(
+      line(
         cell.richLines?.[index] || [{ text: value, font: cell.font }],
         x + column.width / 2,
         top + index * cell.lineHeight,
         cell.lineHeight
       )
-      if (cell.codeProductRange) {
-        const start = Math.max(0, cell.codeProductRange[0] - offset)
-        const end = Math.min(value.length, cell.codeProductRange[1] - offset)
-        if (end > start) {
-          context.font = cell.font
-          context.fillStyle = CE_CODE_DESIGN.foreground
-          context.fillRect(
-            placement.left + context.measureText(value.slice(0, start)).width,
-            // A full CSS pixel, aligned to the output grid, remains opaque
-            // white instead of spreading a faint hairline over adjacent pixels.
-            Math.round(
-              (placement.baseline + cell.codeFontSize * 0.18) * SCALE
-            ) / SCALE,
-            context.measureText(value.slice(start, end)).width,
-            1
-          )
-        }
-      }
-      offset += value.length
     }
   }
   function tags(layout, center, top) {
@@ -1269,12 +1552,23 @@ export async function renderExcelImage(
     context.imageSmoothingQuality = 'high'
     context.fillStyle = palette.body
     context.fillRect(0, 0, plan.cssWidth, plan.cssHeight)
+    const titleHeight = plan.titleHeight || 0
+    const columnHeaderHeight = plan.columnHeaderHeight || plan.headerHeight
+    if (plan.title)
+      line(
+        [{ text: plan.title, font: plan.titleFont, color: palette.text }],
+        plan.cssWidth / 2,
+        1,
+        titleHeight
+      )
     context.fillStyle = palette.header
-    context.fillRect(1, 1, plan.cssWidth - 2, plan.headerHeight)
+    context.fillRect(1, 1 + titleHeight, plan.cssWidth - 2, columnHeaderHeight)
     let x = 1
     for (const [index, column] of columns.entries()) {
       const top =
-        1 + (plan.headerHeight - plan.headers[index].length * LINE_HEIGHT) / 2
+        1 +
+        titleHeight +
+        (columnHeaderHeight - plan.headers[index].length * LINE_HEIGHT) / 2
       for (const [lineIndex, value] of plan.headers[index].entries())
         line(
           [{ text: value, font: HEADER_FONT, color: palette.headerText }],
@@ -1298,7 +1592,7 @@ export async function renderExcelImage(
         ? await bitmapFor(row.source.thumbnail, row.source)
         : null
       aborted(signal)
-      if (index % 2) {
+      if ((plan.start + index) % 2) {
         context.fillStyle = palette.stripe
         context.fillRect(1, y, plan.cssWidth - 2, row.height)
       }
@@ -1364,7 +1658,7 @@ export async function renderExcelImage(
     x = 1
     context.beginPath()
     for (const column of columns) {
-      context.moveTo(x, 1)
+      context.moveTo(x, 1 + titleHeight)
       context.lineTo(x, plan.cssHeight - 1)
       x += column.width
     }

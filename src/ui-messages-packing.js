@@ -84,18 +84,18 @@ export const PACKING_MESSAGES = {
     zh: '请先包含商品描述列。',
     es: 'Incluye primero la columna Descripción del producto.',
   },
-  'Show this detail in the image. Source values stay unchanged.': {
-    zh: '在图片中显示此详情，原始数据保持不变。',
-    es: 'Muestra este detalle en la imagen. Los valores originales se conservan.',
+  'Show this detail in both outputs. Source values stay unchanged.': {
+    zh: '在图片和Excel中显示此详情，原始数据保持不变。',
+    es: 'Muestra este detalle en ambas salidas. Los valores originales se conservan.',
   },
   'Reset style & details': {
     zh: '重置样式与详情',
     es: 'Restablecer estilo y detalles',
   },
-  'Include the selected order details in the image. Turning this off hides store names, order numbers, dates, status and order tags, while keeping order separators.':
+  'Include the selected order details in both outputs. Turning this off hides store names, order numbers, dates, status and order tags, while keeping order separators.':
     {
-      zh: '在图片中显示所选订单详情。关闭后将隐藏店铺名称、订单号、日期、状态和订单标签，但保留订单分隔。',
-      es: 'Incluye los detalles elegidos del pedido en la imagen. Al desactivarlo se ocultan las tiendas, números, fechas, estados y etiquetas de pedido, pero se conservan los separadores.',
+      zh: '在图片和Excel中显示所选订单详情。关闭后将隐藏店铺名称、订单号、日期、状态和订单标签，但保留订单分隔。',
+      es: 'Incluye los detalles elegidos del pedido en ambas salidas. Al desactivarlo se ocultan las tiendas, números, fechas, estados y etiquetas de pedido, pero se conservan los separadores.',
     },
   'Codes & packing': { zh: '代码与装箱', es: 'Códigos y embalaje' },
   'Product details': { zh: '商品详情', es: 'Detalles del producto' },
@@ -807,14 +807,6 @@ export const PACKING_MESSAGES = {
   Redo: {
     zh: '重做',
     es: 'Rehacer',
-  },
-  'Reset order and codes': {
-    zh: '重置顺序和货号',
-    es: 'Restablecer orden y códigos',
-  },
-  'Restore previous packing': {
-    zh: '恢复上次装箱',
-    es: 'Restaurar empaque anterior',
   },
   Labels: {
     zh: '打印标签',

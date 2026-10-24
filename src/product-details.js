@@ -5,7 +5,6 @@ import { decorateIcon } from './icons.js'
 import { photoCopyTile } from './photo-copy.js'
 import { preparationHelp } from './preparation-help.js'
 import { mountProductTags } from './product-tags-ui.js'
-import { mountCartonDetails } from './carton-details-ui.js'
 import { setCodeText } from './code-display.js'
 import { showErrorNotice } from './error-notice.js'
 
@@ -76,7 +75,7 @@ export function openProductDetails(
   const dialog = el('dialog', undefined, 'product-details-dialog')
   dialog.dataset.productEntryId = item.entryId || ''
   dialog.dataset.mode = mode
-  let tagEditor, cartonEditor, closing
+  let tagEditor, closing
   // Dismissal and navigation share one transition: only its first callback runs.
   const closeDetails = (onClosed) => {
     if (closing) return closing
@@ -85,7 +84,6 @@ export function openProductDetails(
       tagEditor?.setBusy(true)
       try {
         await tagEditor?.flush()
-        await cartonEditor?.flush?.()
         dialog.close()
         onClosed?.()
         return true
@@ -248,14 +246,7 @@ export function openProductDetails(
     })
     panel.append(code, summary, edit)
     cartonHost.append(panel)
-  } else if (carton)
-    cartonEditor = mountCartonDetails(cartonHost, {
-      ...carton,
-      onBusyChange: (busy) => {
-        dialog.setAttribute('aria-busy', String(busy))
-        carton.onBusyChange?.(busy)
-      },
-    })
+  }
   const original = el('section', undefined, 'product-original-description')
   const originalHeading = el('div', undefined, 'product-original-heading')
   originalHeading.append(el('h3', message('Original description')), copyAll)
@@ -288,7 +279,6 @@ export function openProductDetails(
     'close',
     () => {
       tagEditor?.destroy()
-      cartonEditor?.destroy?.()
       dialog.remove()
     },
     { once: true }

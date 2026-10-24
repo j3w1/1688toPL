@@ -184,13 +184,21 @@ for (const language of ['en', 'es', 'zh']) {
             actionBarHeight: document
               .querySelector('.action-bar')
               .getBoundingClientRect().height,
+            bounds: {
+              pane: { top: p.top, bottom: p.bottom },
+              scroll: { top: s.top, bottom: s.bottom },
+              row: { top: r.top, bottom: r.bottom, height: r.height },
+              headerHeight: header.height,
+            },
           }
         })
         await test.info().attach('initial-phone-source-visibility', {
           body: Buffer.from(JSON.stringify(frame, null, 2)),
           contentType: 'application/json',
         })
-        expect(frame.visibleRow).toBeGreaterThanOrEqual(48)
+        expect(frame.visibleRow, JSON.stringify(frame)).toBeGreaterThanOrEqual(
+          48
+        )
         for (const selector of [
           '#review-purchase-codes',
           '#include-orders',

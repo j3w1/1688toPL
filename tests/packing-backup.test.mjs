@@ -1,3 +1,4 @@
+import { legacyPackingCheckpoint } from './fixtures/legacy-packing-checkpoint.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mergeProductAnnotations, validateBackup } from '../src/database.js'
@@ -10,7 +11,6 @@ import { initializeVocabulary } from '../src/product-vocabulary.js'
 import {
   allocatePreparation,
   createPreparation,
-  packingCheckpoint,
   validatePreparation,
   validatePreparationReservations,
 } from '../src/packing-model.js'
@@ -64,8 +64,8 @@ function fixture() {
     revision: 1,
     updatedAt: '2026-10-02T12:00:00.000Z',
   }
-  preparation.defaultPacking = packingCheckpoint(preparation)
-  preparation.previousPacking = packingCheckpoint(preparation, {
+  preparation.defaultPacking = legacyPackingCheckpoint(preparation)
+  preparation.previousPacking = legacyPackingCheckpoint(preparation, {
     includeDefaults: true,
   })
   const backup = {
@@ -1154,7 +1154,7 @@ test('partial restore keeps unselected group slots and applies only selected gro
       },
     ],
   })
-  preparation.defaultPacking = packingCheckpoint(preparation)
+  preparation.defaultPacking = legacyPackingCheckpoint(preparation)
   const incoming = selectPackingPreparation(preparation, ['1', '2', '4'])
   incoming.updatedAt = '2026-10-03T12:00:00.000Z'
   incoming.groups[0].variants[0].variant = 'Changed cup description'

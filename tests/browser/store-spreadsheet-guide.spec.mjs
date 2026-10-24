@@ -48,7 +48,9 @@ test('store spreadsheet format guide supports keyboard sections and exact marker
       return data
     })
   const before = await snapshot()
-  await expect(guide).toContainText('review its rows, photos and totals')
+  await expect(guide).toContainText(
+    'review its rows, photos, totals and editable code proposals'
+  )
   await expect(guide.locator('input[type=file]')).toHaveCount(0)
   const start = guide.getByRole('tab', { name: 'Setup', exact: true })
   const markers = guide.getByRole('tab', {
@@ -90,6 +92,20 @@ test('store spreadsheet format guide supports keyboard sections and exact marker
   await expect(review).toBeFocused()
   await expect(guide.getByRole('tabpanel', { name: 'Checks' })).toContainText(
     'never duplicate the totals or assume equal quantities'
+  )
+  const checks = guide.getByRole('tabpanel', { name: 'Checks' })
+  await expect(checks).toContainText(
+    'Review products and codes opens editable details and proposals without saving an order or reserving codes'
+  )
+  await expect(checks).toContainText('Edit the base once for the whole group')
+  await expect(checks).toContainText(
+    'a means A, s means size S, and as means AS'
+  )
+  await expect(checks).toContainText(
+    'Keep custom values preserves manual exceptions and deliberate blanks'
+  )
+  await expect(checks).toContainText(
+    'Final confirmation revalidates the current library'
   )
   for (const viewport of [
     { width: 1440, height: 1000 },
@@ -141,6 +157,11 @@ test('store spreadsheet guide translates its interface while preserving copyable
       guide: 'Guía de Excel de tiendas',
       markers: 'Marcadores',
       copy: 'Copiar marcador de importación: perbox',
+      checks: 'Revisar',
+      codes: 'Revisa productos y códigos antes de guardar',
+      grouped: 'Los valores group iguales comparten una base CE editable',
+      size: 'No añadir sufijos de talla',
+      ownership: 'historial inmutable de envíos',
     },
     {
       code: 'zh',
@@ -149,6 +170,11 @@ test('store spreadsheet guide translates its interface while preserving copyable
       guide: '门店表格格式指南',
       markers: '标记',
       copy: '复制导入标记：perbox',
+      checks: '核对',
+      codes: '保存前审核商品与货号',
+      grouped: '相同 group 值共用一个可编辑的 CE 商品基础货号',
+      size: '不添加尺码后缀',
+      ownership: '不可变更的出货历史',
     },
   ]) {
     await page.locator(`[data-language="${language.code}"]`).click()
@@ -181,6 +207,21 @@ test('store spreadsheet guide translates its interface while preserving copyable
       currentGuide.getByRole('button', { name: language.copy, exact: true })
     ).toHaveText('perbox')
     await expect(currentGuide).not.toContainText('Meaning and requirement')
+    await currentGuide
+      .getByRole('tab', { name: language.checks, exact: true })
+      .click()
+    const checks = currentGuide.getByRole('tabpanel', {
+      name: language.checks,
+      exact: true,
+    })
+    await expect(
+      checks.getByRole('heading', { name: language.codes, exact: true })
+    ).toBeVisible()
+    for (const text of [language.grouped, language.size, language.ownership])
+      await expect(checks).toContainText(text)
+    await expect(checks).not.toContainText(
+      'Review products and codes before saving'
+    )
     await page.keyboard.press('Escape')
     await expect(currentGuide).toHaveCount(0)
     await expect(currentSettings).toBeVisible()

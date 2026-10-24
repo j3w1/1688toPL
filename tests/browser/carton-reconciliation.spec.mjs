@@ -640,7 +640,12 @@ test('returned cartons retain original evidence but require a fresh label after 
     async ({ ref, foreignRecord, foreign, images }) => {
       const repository = await window.testRepository,
         context = await repository.getOrderReconciliation(ref)
-      await repository.removeCartonBatch(context.batches[0])
+      await repository.saveCartonBatches([
+        {
+          after: { ...context.batches[0], deletedAt: new Date().toISOString() },
+          expectedRevision: context.batches[0].revision,
+        },
+      ])
       await repository.removeOrders([ref.orderId])
       const removed = await repository.exportBackup({})
       await repository.restoreBackup({

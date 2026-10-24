@@ -1,6 +1,7 @@
 import { CE_CODE_DESIGN, codeDesignMetrics } from './code-design.js'
 import { codeParts } from './code-display.js'
 import { photoPlacement, drawPhotoVariantTags } from './product-photo.js'
+import { renderExcelCodeImage } from './excel-image.js'
 
 const imageBlob = (canvas, mime = 'image/png') =>
   new Promise((resolve, reject) =>
@@ -84,11 +85,14 @@ export function createPackingWorkbookImages(loadImage, renderCartonMark) {
         value,
         limits.code.maxWidth ?? 512,
         limits.code.maxHeight ?? 128,
+        limits.code.layout,
       ])
       let pending = codes.get(key)
       if (!pending) {
         if (codes.size >= 24) codes.delete(codes.keys().next().value)
-        pending = workbookCodeImage(value, limits.code)
+        pending = limits.code.layout
+          ? renderExcelCodeImage(limits.code.layout)
+          : workbookCodeImage(value, limits.code)
         codes.set(key, pending)
       }
       try {

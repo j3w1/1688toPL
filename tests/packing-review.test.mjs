@@ -540,7 +540,7 @@ test('a shared change review renders its complete scope continuously without pag
       after: `CE261014${String(index + 1).padStart(2, '0')}`,
     }))
     const result = reviewPackingChanges({
-      title: message('Restore previous packing?'),
+      title: message('Review packing changes'),
       explanation: message('Review the product codes in this order.'),
       changes,
     })

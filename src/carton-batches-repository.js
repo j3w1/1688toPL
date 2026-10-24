@@ -39,7 +39,7 @@ export function createCartonBatchesRepository({
         (await requested(tx.objectStore('issuedCodes').getAll())) || [],
     }
   }
-  async function seed(tx, loaded) {
+  async function seed(tx, loaded, { persist = true } = {}) {
     const value = loaded || (await state(tx))
     const identities = new Set(value.batches.map((batch) => batch.id))
     const known = new Set(
@@ -67,7 +67,7 @@ export function createCartonBatchesRepository({
         )
       )
         continue
-      tx.objectStore('cartonBatches').put(batch)
+      if (persist) tx.objectStore('cartonBatches').put(batch)
       value.batches.push(batch)
       identities.add(batch.id)
       for (const key of batch.legacyKeys) known.add(key)
@@ -81,7 +81,7 @@ export function createCartonBatchesRepository({
   async function apply(
     tx,
     changes,
-    { records, preparations, allowReview = false } = {}
+    { records, preparations, allowReview = false, removingOrders = false } = {}
   ) {
     const loaded = await state(tx)
     const previous = new Map(loaded.batches.map((batch) => [batch.id, batch]))
@@ -145,7 +145,8 @@ export function createCartonBatchesRepository({
     }
     await guardChanges(
       tx,
-      result.map((batch) => ({ after: batch }))
+      result.map((batch) => ({ after: batch })),
+      { legacyResolution: removingOrders }
     )
     assertCartonBatchEvidence([...next.values()], records || loaded.records, {
       history: loaded.history,
@@ -253,34 +254,6 @@ export function createCartonBatchesRepository({
       },
       async saveCartonBatches(changes) {
         return write(stores, (tx) => apply(tx, changes))
-      },
-      async removeCartonBatches(batches) {
-        return write(stores, (tx) =>
-          apply(
-            tx,
-            batches.map((batch) => ({
-              after: { ...batch, deletedAt: new Date().toISOString() },
-              expectedRevision: batch.revision,
-            }))
-          )
-        )
-      },
-      async removeCartonBatch(
-        batch,
-        { expectedRevision = batch.revision } = {}
-      ) {
-        return write(
-          stores,
-          async (tx) =>
-            (
-              await apply(tx, [
-                {
-                  after: { ...batch, deletedAt: new Date().toISOString() },
-                  expectedRevision,
-                },
-              ])
-            )[0]
-        )
       },
     },
   }

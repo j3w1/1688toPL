@@ -7,6 +7,7 @@ test('import popup downloads the real editable template and accepts it for revie
 }) => {
   const page = await extension.context.newPage()
   await page.goto(`${extension.extensionBaseUrl}/library.html`)
+  await expect(page.locator('#view-orders')).toBeEnabled()
   await page
     .getByRole('button', { name: 'Import spreadsheet', exact: true })
     .click()
@@ -61,7 +62,7 @@ test('import popup downloads the real editable template and accepts it for revie
   await expect(dialog.locator('select[name="sheet"]')).toHaveValue('Orders')
   await expect(dialog.locator('.store-import-product')).toHaveCount(0)
   await dialog
-    .getByRole('button', { name: 'Import order', exact: true })
+    .getByRole('button', { name: 'Review products and codes', exact: true })
     .click()
   await expect(dialog).toBeVisible()
   await expect(dialog.locator('.store-import-status')).toHaveClass(/is-error/)

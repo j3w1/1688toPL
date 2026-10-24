@@ -61,6 +61,7 @@ import { decorateIcon } from './icons.js'
 import { applyAppearance } from './appearance.js'
 import { openStoreSpreadsheetGuide } from './store-spreadsheet-guide.js'
 import { createVirtualList } from './virtual-list.js'
+import { openProductDetailsDialog } from './product-detail-editor.js'
 import { eligibleOrderItems } from './inventory-model.js'
 import { mountMaterialVocabulary } from './material-vocabulary-settings.js'
 import { mountColorVocabulary } from './color-vocabulary-settings.js'
@@ -151,7 +152,7 @@ function button(text, handler, className) {
     Redo: 'redo',
     'Apply to order': 'check',
     'Merge products': 'packing',
-    'Copy Excel image': 'table',
+    'Excel...': 'excel',
     'Copy barcode images': 'barcode',
     'Copy carton marks': 'carton',
     'Copy code': 'copy',
@@ -469,6 +470,7 @@ export async function createProductAuthoring({
       }
       const match = membership.get(entryKey(row)),
         suggestion = suggestions.get(entryKey(row))
+      row.preparationRevision = preparations.get(orderKey(row))?.revision || 0
       if (!match)
         return {
           ...row,
@@ -1584,6 +1586,33 @@ export async function createProductAuthoring({
     document.body.append(modal)
     modal.showModal()
   }
+  async function openDetails(ref, scope = { kind: 'order' }, opener) {
+    await ensureContext()
+    await flushSaves()
+    const session = getSession(ref)
+    if (session.stale && !(await reviewRecovered(session))) return false
+    const previouslyMounted = session.mounted
+    session.mounted = true
+    try {
+      return await openProductDetailsDialog({
+        preparation: structuredClone(session.draft),
+        scope,
+        opener,
+        async onApply(candidate) {
+          history().breakGroup()
+          editSession(session, () => {
+            session.draft = candidate
+          })
+          history().breakGroup()
+          await flushSession(session)
+        },
+        onEditGroupCategory: (source) =>
+          openDetails(ref, { kind: 'group', groupId: scope.groupId }, source),
+      })
+    } finally {
+      session.mounted = previouslyMounted
+    }
+  }
   async function openEditor(ref) {
     await ensureContext()
     for (const session of sessions.values())
@@ -1788,6 +1817,21 @@ export async function createProductAuthoring({
     add('Chinese category', group.category || '', (value) => {
       group.category = value
     })
+    content.append(
+      el(
+        'small',
+        uiMessage('Chinese category is shared by the CE product group.')
+      )
+    )
+    if (variant.entryIds.length > 1)
+      content.append(
+        el(
+          'small',
+          uiMessage(
+            'These source rows share one barcode identity. A Spanish-name edit affects all of them.'
+          )
+        )
+      )
     const materialPreparation = refreshPreparationMaterials(
         session.draft,
         recordFor(ref).snapshot
@@ -1828,15 +1872,33 @@ export async function createProductAuthoring({
       if (/code|ending/i.test(input.closest('label').textContent))
         decorateCodeInput(input)
     const tools = el('div', undefined, 'product-authoring-tools')
+    for (const [label, scope] of [
+      [
+        'Edit variant details',
+        { kind: 'variant', groupId: group.id, variantId: variant.id },
+      ],
+      ['Edit group details', { kind: 'group', groupId: group.id }],
+      ['Edit order details', { kind: 'order' }],
+    ]) {
+      const control = button(label, async () => {
+        await flushSession(session)
+        dismissEditor()
+        await openDetails(ref, scope, modal)
+        await openEditor(ref)
+      })
+      control.dataset.action = label.toLowerCase().replaceAll(' ', '-')
+      tools.append(control)
+    }
     for (const [title, mode] of [
-      ['Automatic sizes', 'automatic'],
-      ['No size difference', 'none'],
+      ['Suggest size endings from descriptions', 'automatic'],
+      ['Do not add size endings', 'none'],
     ]) {
       const control = button(title, async () => {
         await flushSession(session)
         const candidate = setGroupSizeMode(session.draft, group.id, mode, {
           snapshot: recordFor(ref)?.snapshot,
           sizeVocabulary: preferences.sizeVocabulary,
+          inferDeclaredSizes: mode === 'automatic',
         })
         const next = candidate.groups.find((entry) => entry.id === group.id)
         const changes = group.variants
@@ -1858,8 +1920,8 @@ export async function createProductAuthoring({
             title: uiMessage('Change size handling?'),
             explanation: uiMessage(
               mode === 'none'
-                ? 'These variants have no size difference. Remove only their size endings and keep their variant letters, source descriptions and other products unchanged. This choice is remembered for this product.'
-                : 'Use automatic size recognition for this product again. Blank size endings will be checked against its source descriptions; unclear sizes remain for review.'
+                ? 'Remove only the size endings from these barcodes. Keep variant letters, physical measurements, source descriptions and other products unchanged.'
+                : 'Review size endings suggested from the descriptions. Applying them is an explicit code edit; workbook declarations and physical measurements remain unchanged.'
             ),
             changes,
             proceed: uiMessage('Apply size handling'),
@@ -3452,6 +3514,7 @@ export async function createProductAuthoring({
     preparedRows,
     project: preparedRows,
     openEditor,
+    openDetails,
     openInventoryRecovery,
     reviewCodes,
     groupProducts,

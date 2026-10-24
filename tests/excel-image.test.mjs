@@ -15,7 +15,13 @@ import {
 import { appearanceTokens } from '../src/appearance.js'
 
 const excelImageColumns = allExcelImageColumns
-  .filter((column) => !column.supplier)
+  .filter(
+    (column) =>
+      !column.optional &&
+      !['cartonDimensions', 'cartonWeight', 'cartonNumberBlank'].includes(
+        column.key
+      )
+  )
   .map((column) => ({ ...column, label: column.labels.zh }))
 const planExcelImage = (rows, options = {}) =>
   planExcelImageBase(rows, { language: 'zh', ...options })
@@ -786,22 +792,22 @@ test('Localized headers grow narrow columns enough to keep whole words such as C
     { headerWidthScale: 1.2 }
   ))
 
-test('Custom image columns preserve the chosen order and leave supplier fields blank', async () =>
+test('Custom image columns preserve linked measurements and leave only the manual carton number blank', async () =>
   withCanvas(async (state) => {
     const columns = [
-      'supplierCarton',
+      'cartonNumberBlank',
       'quantity',
-      'supplierDimensions',
+      'cartonDimensions',
       'price',
-      'supplierWeight',
+      'cartonWeight',
     ]
     const input = {
       ...row,
       thumbnail: '',
       chineseCategory: '',
-      supplierCarton: 'must not be printed',
-      supplierDimensions: 'must not be printed',
-      supplierWeight: 'must not be printed',
+      cartonNumberBlank: 'must not be printed',
+      cartonDimensions: '60 × 40 × 30',
+      cartonWeight: '12.5',
     }
     const [plan] = planExcelImageBase([input], { columns, language: 'es' })
     assert.deepEqual(
@@ -814,7 +820,7 @@ test('Custom image columns preserve the chosen order and leave supplier fields b
     )
     assert.deepEqual(
       plan.rows[0].cells.map((cell) => cell.text),
-      ['', '20', '', '3.00 元', '']
+      ['', '20', '60 × 40 × 30', '3.00 元', '12.5']
     )
     assert.equal(
       plan.cssWidth,
@@ -835,7 +841,7 @@ test('English is the default image language and unsupported or repeated column k
     assert.equal(plan.language, 'en')
     assert.equal(plan.columns[0].label, 'No.')
     assert.equal(plan.columns.length, 8)
-    assert.equal(allExcelImageColumns.length, 11)
+    assert.equal(allExcelImageColumns.length, 30)
     assert.throws(
       () => planExcelImageBase([row], { columns: [] }),
       /at least one/

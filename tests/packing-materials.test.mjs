@@ -1,10 +1,9 @@
+import { legacyPackingCheckpoint } from './fixtures/legacy-packing-checkpoint.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   createPreparation,
   validatePreparation,
-  packingCheckpoint,
-  restoreDefaultPacking,
   planSelectedPreparations,
   variantMaterial,
   setVariantMaterial,
@@ -70,14 +69,14 @@ test('source material updates replace suggestions but not authored values', () =
   )
 })
 
-test('material edits survive restoring default grouping and partial moves', () => {
+test('material edits survive merging shared variants and partial moves', () => {
   const { snapshot, preparation } = fixture()
   const group = preparation.groups[0]
   const target = structuredClone(group.variants[0])
   target.entryIds = ['1', '2']
   mergeVariantMaterials(target, group.variants)
   group.variants = [target]
-  preparation.defaultPacking = packingCheckpoint(preparation)
+  preparation.defaultPacking = legacyPackingCheckpoint(preparation)
   group.variants = target.entryIds.map((id, index) => ({
     ...structuredClone(target),
     id: `split${index}`,
@@ -85,7 +84,12 @@ test('material edits survive restoring default grouping and partial moves', () =
   }))
   setVariantMaterial(group.variants[0], 'Cotton')
   setVariantMaterial(group.variants[1], 'Linen')
-  const restored = restoreDefaultPacking(preparation)
+  const merged = structuredClone(target)
+  mergeVariantMaterials(merged, group.variants)
+  const restored = {
+    ...preparation,
+    groups: [{ ...group, variants: [merged] }],
+  }
   assert.equal(restored.groups[0].variants.length, 1)
   const restoredVariant = restored.groups[0].variants[0]
   assert.equal(variantMaterial(restoredVariant, '1').value, 'Cotton')
@@ -118,7 +122,7 @@ test('selected packing backups contain only selected material authoring and rest
   setVariantMaterial(target, 'Private first material', ['1'])
   setVariantMaterial(target, 'Selected second material', ['2'])
   preparation.updatedAt = '2026-10-01T00:00:00Z'
-  preparation.defaultPacking = packingCheckpoint(preparation)
+  preparation.defaultPacking = legacyPackingCheckpoint(preparation)
   const selected = selectPackingPreparation(preparation, ['2'])
   assert.equal(
     JSON.stringify(selected).includes('Private first material'),

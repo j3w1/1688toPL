@@ -219,6 +219,8 @@ export function openImageCopyDialog({
   language,
   onLanguageChange,
   errorOptions,
+  exportWorkbook,
+  canExport = () => false,
   signal,
 }) {
   if (signal?.aborted || !count) return Promise.resolve(false)
@@ -248,7 +250,9 @@ export function openImageCopyDialog({
   const hint = element(
     'p',
     message(
-      'Copy a batch or hover over an image to copy it individually. Paste it, then continue here.'
+      exportWorkbook
+        ? 'Copy the current image or export every selected product to one editable Excel sheet. Both use these columns and details.'
+        : 'Copy a batch or hover over an image to copy it individually. Paste it, then continue here.'
     ),
     'image-copy-hint'
   )
@@ -289,7 +293,14 @@ export function openImageCopyDialog({
   const done = element('button', message('Done'))
   done.onclick = () => dialog.close()
   const actions = element('div', undefined, 'image-copy-actions')
-  actions.append(copy, done)
+  const download = exportWorkbook
+    ? decorateIcon(element('button', message('Export Excel (.xlsx)')), 'excel')
+    : null
+  if (download) {
+    download.type = 'button'
+    download.dataset.action = 'download-excel-table'
+  }
+  actions.append(copy, ...(download ? [download] : []), done)
   toolbar.append(status, progress, actions)
   header.append(heading, hint, toolbar, navigation)
   content.append(body)
@@ -301,6 +312,7 @@ export function openImageCopyDialog({
     controller,
     ready,
     copying = false,
+    copyLabel,
     copiedAny = false,
     timer,
     closed = false,
@@ -319,7 +331,13 @@ export function openImageCopyDialog({
     urls.clear()
   }
   function controls() {
+    const nextCopyLabel = plans.length > 1 ? 'Copy current image' : 'Copy image'
+    if (exportWorkbook && !copying && copyLabel !== nextCopyLabel) {
+      copyLabel = nextCopyLabel
+      bindText(copy, message(copyLabel))
+    }
     copy.disabled = copying || !ready
+    if (download) download.disabled = copying || !canExport()
     close.disabled = copying
     done.disabled = copying
     previous.disabled = copying || current === 0 || !plans.length
@@ -607,6 +625,34 @@ export function openImageCopyDialog({
       if (!closed) controls()
     }
   }
+  if (download)
+    download.onclick = async () => {
+      if (copying || !canExport()) return
+      copying = true
+      download.setAttribute('aria-busy', 'true')
+      clearErrorNotice({ scope: dialog, key: 'image-copy' })
+      bindText(progress, message('Creating Excel workbook…'))
+      controls()
+      try {
+        await exportWorkbook({ signal: controller.signal })
+        if (!closed) {
+          bindText(progress, message('Excel workbook saved.'))
+        }
+      } catch (error) {
+        if (!closed) {
+          bindText(progress, message('Excel export failed. Try again.'))
+          showErrorNotice(error, {
+            scope: dialog,
+            key: 'image-copy',
+            ...errorOptions?.(error, dialog),
+          })
+        }
+      } finally {
+        copying = false
+        download.removeAttribute('aria-busy')
+        if (!closed) controls()
+      }
+    }
   dialog.addEventListener('cancel', (event) => {
     if (copying) event.preventDefault()
   })

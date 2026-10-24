@@ -1,4 +1,45 @@
 export const EXCEL_MESSAGES = {
+  'Excel...': { zh: 'Excel...', es: 'Excel...' },
+  'Preview, copy or export the selected products as Excel': {
+    zh: '预览所选商品，复制图片或导出Excel',
+    es: 'Vista previa de los productos seleccionados, copiar imagen o exportar Excel',
+  },
+  'Copy image': { zh: '复制图片', es: 'Copiar imagen' },
+  'Copy current image': { zh: '复制当前图片', es: 'Copiar imagen actual' },
+  'Export Excel (.xlsx)': {
+    zh: '导出Excel（.xlsx）',
+    es: 'Exportar Excel (.xlsx)',
+  },
+  'Copy the current image or export every selected product to one editable Excel sheet. Both use these columns and details.':
+    {
+      zh: '复制当前图片，或将全部所选商品导出为一个可编辑的Excel工作表。两者使用相同的列和详情设置。',
+      es: 'Copia la imagen actual o exporta todos los productos seleccionados a una hoja Excel editable. Ambas opciones usan estas columnas y detalles.',
+    },
+  'Creating Excel workbook…': {
+    zh: '正在生成Excel工作簿…',
+    es: 'Creando libro Excel…',
+  },
+  'Excel workbook saved.': {
+    zh: 'Excel工作簿已保存。',
+    es: 'Libro Excel guardado.',
+  },
+  'Excel export failed. Try again.': {
+    zh: 'Excel导出失败，请重试。',
+    es: 'No se pudo exportar Excel. Inténtalo de nuevo.',
+  },
+  'Carton measurements come from linked physical cartons. Carton no. stays blank for manual completion.':
+    {
+      zh: '纸箱尺寸和重量来自关联的实际纸箱。“箱号”保留空白，供手动填写。',
+      es: 'Las medidas provienen de las cajas físicas vinculadas. El número de caja queda en blanco para completarlo manualmente.',
+    },
+  'Choose products before opening Excel.': {
+    zh: '请先选择商品，再打开Excel。',
+    es: 'Selecciona productos antes de abrir Excel.',
+  },
+  'The selected products changed. Reopen Excel.': {
+    zh: '所选商品已更改，请重新打开Excel。',
+    es: 'Los productos seleccionados cambiaron. Vuelve a abrir Excel.',
+  },
   'Copy a batch or hover over an image to copy it individually. Paste it, then continue here.':
     {
       zh: '复制整批，或将鼠标移到图片上单独复制。粘贴后可在此继续。',
@@ -74,11 +115,6 @@ export const EXCEL_MESSAGES = {
       zh: '点击选择要包含的列。拖动或使用箭头排序。设置会自动保存，并用于两个视图。',
       es: 'Pulsa las columnas para incluirlas. Arrastra o usa las flechas para ordenarlas. Ambos espacios recuerdan tus cambios.',
     },
-  'Supplier details stay blank for your supplier to complete.': {
-    zh: '供应商填写栏保持空白，供供应商补充。',
-    es: 'Los datos del proveedor quedan en blanco para que él los complete.',
-  },
-  'Supplier details': { zh: '供应商填写', es: 'Datos del proveedor' },
   'Move {0}': { zh: '移动{0}', es: 'Mover {0}' },
   'Move {0} left': { zh: '将{0}左移', es: 'Mover {0} a la izquierda' },
   'Move {0} right': { zh: '将{0}右移', es: 'Mover {0} a la derecha' },

@@ -296,7 +296,7 @@ test('Excel image language toggle regenerates the image without changing selecte
       return fill.call(this, value, ...args)
     }
     document.querySelector('#launch').onclick = () =>
-      Print.copyExcelImage(
+      Print.openExcelOutput(
         [
           {
             orderId: '12345',

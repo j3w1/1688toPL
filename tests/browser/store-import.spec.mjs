@@ -1,9 +1,7 @@
-import { CFB, utils, write } from 'xlsx'
-import { crc32, deflateSync } from 'node:zlib'
+import { workbookFile, png } from '../fixtures/store-workbook-fixture.mjs'
 import { mkdir } from 'node:fs/promises'
-import { test, expect } from './extension-fixture.mjs'
+import { test, expect, holdPreparationWrites } from './extension-fixture.mjs'
 import {
-  assignSelectedPurchaseCodes,
   editOrderProduct,
   closeOrderProduct,
   openOrderReconciliation,
@@ -11,98 +9,6 @@ import {
   sealContainerThroughUI,
 } from './smart-workspace-helpers.mjs'
 import { STORE_IMPORT_MARKERS } from '../../src/store-workbook-model.js'
-
-const png = (() => {
-  const chunk = (name, content) => {
-    const kind = Buffer.from(name),
-      header = Buffer.alloc(4),
-      crc = Buffer.alloc(4)
-    header.writeUInt32BE(content.length)
-    crc.writeUInt32BE(crc32(Buffer.concat([kind, content])))
-    return Buffer.concat([header, kind, content, crc])
-  }
-  const header = Buffer.alloc(13)
-  header.writeUInt32BE(16, 0)
-  header.writeUInt32BE(8, 4)
-  header[8] = 8
-  header[9] = 2
-  const pixels = Buffer.concat(
-    Array.from({ length: 8 }, () =>
-      Buffer.concat([
-        Buffer.from([0]),
-        Buffer.from(Array.from({ length: 16 }, () => [30, 100, 180]).flat()),
-      ])
-    )
-  )
-  return Buffer.concat([
-    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
-    chunk('IHDR', header),
-    chunk('IDAT', deflateSync(pixels)),
-    chunk('IEND', Buffer.alloc(0)),
-  ])
-})()
-
-function workbookFile({
-  variants = '',
-  amount = 60,
-  total = 60,
-  name = '4321.xlsx',
-  rows,
-  photoSpans = [{ from: 1, to: 2 }],
-} = {}) {
-  const workbook = utils.book_new()
-  utils.book_append_sheet(
-    workbook,
-    utils.aoa_to_sheet(
-      rows ?? [
-        ['pic', 'desc', 'boxes', 'perbox', 'price', 'amount', 'group', 'var'],
-        ['', 'Synthetic import cup', 2, 10, 3, amount, 1, variants],
-        [],
-        ['total', total, 'total'],
-      ]
-    ),
-    'Products'
-  )
-  const archive = CFB.read(
-    new Uint8Array(write(workbook, { type: 'array', bookType: 'xlsx' })),
-    { type: 'array' }
-  )
-  const add = (path, value) =>
-    CFB.utils.cfb_add(
-      archive,
-      path,
-      typeof value === 'string' ? new TextEncoder().encode(value) : value
-    )
-  const part =
-    archive.FileIndex[
-      archive.FullPaths.indexOf('Root Entry/xl/worksheets/sheet1.xml')
-    ]
-  part.content = new TextEncoder().encode(
-    new TextDecoder()
-      .decode(part.content)
-      .replace('</worksheet>', '<drawing r:id="photos"/></worksheet>')
-  )
-  part.size = part.content.length
-  add(
-    'xl/worksheets/_rels/sheet1.xml.rels',
-    '<Relationships><Relationship Id="photos" Target="../drawings/drawing1.xml"/></Relationships>'
-  )
-  add(
-    'xl/drawings/drawing1.xml',
-    `<xdr:wsDr>${photoSpans.map(({ from, to }) => `<xdr:twoCellAnchor><xdr:from><xdr:col>0</xdr:col><xdr:row>${from}</xdr:row></xdr:from><xdr:to><xdr:col>1</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${to}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to><xdr:pic><a:blip r:embed="photo1"/></xdr:pic></xdr:twoCellAnchor>`).join('')}</xdr:wsDr>`
-  )
-  add(
-    'xl/drawings/_rels/drawing1.xml.rels',
-    '<Relationships><Relationship Id="photo1" Target="../media/photo.png"/></Relationships>'
-  )
-  add('xl/media/photo.png', png)
-  return {
-    name,
-    mimeType:
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    buffer: Buffer.from(CFB.write(archive, { type: 'array', fileType: 'zip' })),
-  }
-}
 
 function reviewWorkbook({
   groups = 8,
@@ -164,18 +70,39 @@ function reviewWorkbook({
   return workbookFile({ rows, photoSpans })
 }
 
+function largeCodeWorkbook(groups = 52) {
+  return workbookFile({
+    rows: [
+      ['pic', 'desc', 'boxes', 'perbox', 'price', 'amount', 'group', 'var'],
+      ...Array.from({ length: groups }, (_, index) => [
+        '',
+        `SYN-${index + 1} · 碗 · 6"`,
+        1,
+        10,
+        1,
+        10,
+        index + 1,
+        '',
+      ]),
+      ['total', groups * 10, 'total'],
+    ],
+    photoSpans: [{ from: 1, to: groups + 1 }],
+  })
+}
+
 async function openImport(extension) {
   const page = await extension.context.newPage()
   await page.clock.setFixedTime(new Date('2026-10-21T04:00:00Z'))
   await page.goto(`${extension.extensionBaseUrl}/library.html`)
+  // Import is available in the initial markup before its handler is mounted.
+  // The existing guarded Orders control becomes enabled after the library read.
+  await expect(page.locator('#view-orders')).toBeEnabled()
   await page
     .getByRole('button', { name: 'Import spreadsheet', exact: true })
     .click()
-  const dialog = page.getByRole('dialog', {
-    name: 'Import store spreadsheet',
-    exact: true,
-  })
+  const dialog = page.locator('.store-import-dialog')
   await expect(dialog).toBeVisible()
+  await expect(dialog).toHaveAccessibleName('Import store spreadsheet')
   return { page, dialog, file: dialog.getByLabel('Workbook', { exact: true }) }
 }
 
@@ -186,6 +113,382 @@ async function backup(extension) {
   expect(response.ok, response.error).toBe(true)
   return response.data
 }
+
+async function reviewImportCodes(dialog) {
+  await dialog
+    .getByRole('button', { name: 'Review products and codes', exact: true })
+    .click()
+  const review = dialog.locator('[data-action="store-import-code-review"]')
+  await expect(review).toBeVisible()
+  return review
+}
+
+async function finishImport(dialog) {
+  await reviewImportCodes(dialog)
+  const save = dialog.getByRole('button', {
+    name: 'Import and assign codes',
+    exact: true,
+  })
+  await expect(save).toBeEnabled()
+  await save.click()
+}
+
+/** Include claims, history, photos and physical records in no-write evidence. */
+async function databaseState(extension) {
+  return extension.inspector.evaluate(async () => {
+    await window.testRepository
+    const database = await new Promise((resolve, reject) => {
+      const request = indexedDB.open('1688-order-library')
+      request.onsuccess = () => resolve(request.result)
+      request.onerror = () => reject(request.error)
+    })
+    try {
+      const names = [...database.objectStoreNames]
+      const transaction = database.transaction(names, 'readonly')
+      return Object.fromEntries(
+        await Promise.all(
+          names.map(
+            (name) =>
+              new Promise((resolve, reject) => {
+                const request = transaction.objectStore(name).getAll()
+                request.onsuccess = () => resolve([name, request.result])
+                request.onerror = () => reject(request.error)
+              })
+          )
+        )
+      )
+    } finally {
+      database.close()
+    }
+  })
+}
+
+async function acknowledgeWorkbook(dialog, date = '2026-10-20') {
+  await dialog.locator('input[name="purchaseDate"]').fill(date)
+  const all = dialog.locator('input[name="allReviews"]')
+  if ((await all.isVisible()) && (await all.isEnabled())) await all.check()
+  await dialog.locator('input[name="photosReviewed"]').check()
+}
+
+test('spreadsheet code preview and Cancel leave every library store unchanged', async ({
+  extension,
+}) => {
+  const { page, dialog, file } = await openImport(extension)
+  const before = await databaseState(extension)
+  await file.setInputFiles(workbookFile())
+  await expect(dialog.locator('.store-import-product')).toHaveCount(1)
+  await acknowledgeWorkbook(dialog)
+  const review = await reviewImportCodes(dialog)
+  await expect(review.locator('[data-code-field="baseCode"]')).toHaveValue(
+    /^CE2610/
+  )
+  await expect(review.locator('.store-import-barcode')).toHaveText(/^CE2610/)
+  expect(await databaseState(extension)).toEqual(before)
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  expect(await databaseState(extension)).toEqual(before)
+  await expect(page.locator('#sheet-body tr[data-selection-key]')).toHaveCount(
+    0
+  )
+})
+
+test('nonadjacent source groups stay authoritative while edited base and endings update full barcodes and save together', async ({
+  extension,
+}) => {
+  const { page, dialog, file } = await openImport(extension)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await file.setInputFiles(
+    workbookFile({
+      rows: [
+        ['pic', 'desc', 'boxes', 'perbox', 'price', 'amount', 'group', 'var'],
+        ['', 'First style', 1, 10, 1, 10, '007', 'a'],
+        ['', 'First style', 1, 10, 1, 10, 'other', 'a'],
+        [
+          '',
+          'Different description in the original group',
+          1,
+          10,
+          1,
+          10,
+          '007',
+          'b',
+        ],
+        ['total', 30, 'total'],
+      ],
+      photoSpans: [{ from: 1, to: 4 }],
+    })
+  )
+  await expect(dialog.locator('.store-import-product')).toHaveCount(3)
+  await acknowledgeWorkbook(dialog)
+  const review = await reviewImportCodes(dialog),
+    group = review.locator('[data-source-group="007"]'),
+    other = review.locator('[data-source-group="other"]')
+  await expect(review.locator('[data-source-group]')).toHaveCount(2)
+  await expect(group.locator('[data-code-field="baseCode"]')).toHaveCount(1)
+  await expect(group.locator('[data-code-field="variantSuffix"]')).toHaveCount(
+    2
+  )
+  await expect(other.locator('[data-code-field="variantSuffix"]')).toHaveCount(
+    1
+  )
+  await group.locator('[data-code-field="baseCode"]').fill('CE26100171')
+  const variant = group.locator('[data-code-field="variantSuffix"]').first(),
+    variantId = await variant.getAttribute('data-variant-id')
+  await variant.fill('Q')
+  await group
+    .locator(`[data-code-field="sizeSuffix"][data-variant-id="${variantId}"]`)
+    .fill('Z9')
+  await expect(
+    group.locator(`.store-import-barcode[data-variant-id="${variantId}"]`)
+  ).toHaveText('CE26100171QZ9')
+  await expect(group.locator('.store-import-barcode').nth(1)).toHaveText(
+    'CE26100171B'
+  )
+  await expect(
+    dialog.locator('[data-action="import-and-assign-codes"]')
+  ).toBeEnabled()
+  await dialog.screenshot({
+    path: test.info().outputPath('store-import-code-review-wide.png'),
+  })
+  await dialog.locator('[data-action="import-and-assign-codes"]').click()
+  await expect(dialog).toHaveCount(0)
+  const saved = await backup(extension),
+    snapshot = saved.orders[0].snapshot,
+    preparation = saved.preparations[0],
+    authored = preparation.groups.find(
+      (group) => group.baseCode === 'CE26100171'
+    )
+  expect(saved.orders).toHaveLength(1)
+  expect(preparation.groups).toHaveLength(2)
+  expect(snapshot.items.map((item) => item.sourceGroup)).toEqual([
+    '007',
+    'other',
+    '007',
+  ])
+  expect(authored.variants.flatMap((variant) => variant.entryIds)).toEqual([
+    snapshot.items[0].entryId,
+    snapshot.items[2].entryId,
+  ])
+  expect(authored.variants[0]).toMatchObject({
+    variantSuffix: 'Q',
+    sizeSuffix: 'Z9',
+  })
+  expect(snapshot.spreadsheet.rows).toHaveLength(3)
+  expect(saved.images).toHaveLength(1)
+})
+
+test('colliding codes show inline accessible errors and a summary and block the atomic import', async ({
+  extension,
+}) => {
+  const { page, dialog, file } = await openImport(extension)
+  const before = await databaseState(extension)
+  await file.setInputFiles(reviewWorkbook({ groups: 2 }))
+  await expect(dialog.locator('.store-import-product')).toHaveCount(4)
+  await acknowledgeWorkbook(dialog)
+  const review = await reviewImportCodes(dialog),
+    first = review.locator(
+      '[data-source-group="1"] [data-code-field="baseCode"]'
+    ),
+    second = review.locator(
+      '[data-source-group="2"] [data-code-field="baseCode"]'
+    ),
+    save = dialog.locator('[data-action="import-and-assign-codes"]'),
+    errors = dialog.locator('[data-action="store-import-code-errors"]')
+  const collision = await first.inputValue()
+  await second.fill('C')
+  await expect(errors).toHaveText(
+    'Finish editing the code field to check its format.'
+  )
+  await expect(second).toHaveAttribute('aria-invalid', 'false')
+  await expect(save).toBeDisabled()
+  await second.press('Tab')
+  await expect(second).toHaveAttribute('aria-invalid', 'true')
+  await second.fill(collision)
+  await second.press('Tab')
+  await expect(save).toBeDisabled()
+  await expect(errors).toBeVisible()
+  await expect(errors).not.toHaveText('')
+  await expect(review.locator('[aria-invalid="true"]')).not.toHaveCount(0)
+  const accessibleError = await review
+    .locator('[aria-invalid="true"]')
+    .first()
+    .evaluate((input) => {
+      const ids =
+        input.getAttribute('aria-errormessage') ||
+        input.getAttribute('aria-describedby') ||
+        ''
+      return ids
+        .split(/\s+/)
+        .some((id) => document.getElementById(id)?.textContent.trim())
+    })
+  expect(accessibleError).toBe(true)
+  expect(await databaseState(extension)).toEqual(before)
+  await page.setViewportSize({ width: 390, height: 700 })
+  expect(
+    await dialog.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)
+  ).toBe(true)
+  await expect(save).toBeInViewport()
+  await second.fill('CE26100172')
+  await expect(save).toBeEnabled()
+  await expect(review.locator('[aria-invalid="true"]')).toHaveCount(0)
+  await save.click()
+  await expect(dialog).toHaveCount(0)
+  expect((await backup(extension)).orders).toHaveLength(1)
+})
+
+test('Back retains authored codes, Reset restores suggestions, and a changed purchase month requires a fresh review', async ({
+  extension,
+}) => {
+  const { dialog, file } = await openImport(extension)
+  const before = await databaseState(extension)
+  await file.setInputFiles(workbookFile())
+  await expect(dialog.locator('.store-import-product')).toHaveCount(1)
+  await acknowledgeWorkbook(dialog)
+  const review = await reviewImportCodes(dialog),
+    base = review.locator('[data-code-field="baseCode"]'),
+    variant = review.locator('[data-code-field="variantSuffix"]'),
+    reset = dialog.locator('[data-action="reset-import-codes"]')
+  const suggested = await base.inputValue()
+  await base.fill('CE26100173')
+  await variant.fill('Q')
+  await dialog.locator('[data-action="back-import-workbook"]').click()
+  await expect(
+    dialog.locator('[data-action="review-import-codes"]')
+  ).toBeVisible()
+  await reviewImportCodes(dialog)
+  await expect(base).toHaveValue('CE26100173')
+  await expect(variant).toHaveValue('Q')
+  await reset.click()
+  await expect(base).toHaveValue(suggested)
+  await expect(variant).toHaveValue('')
+  await base.fill('CE26100173')
+  await dialog.locator('[data-action="back-import-workbook"]').click()
+  await dialog.locator('input[name="purchaseDate"]').fill('2026-09-12')
+  await reviewImportCodes(dialog)
+  await expect(base).toHaveValue(/^CE2609/)
+  await expect(base).not.toHaveValue('CE26100173')
+  expect(await databaseState(extension)).toEqual(before)
+  await dialog.locator('[data-action="import-and-assign-codes"]').click()
+  await expect(dialog).toHaveCount(0)
+  const saved = await backup(extension)
+  expect(saved.orders[0].snapshot.purchasedAt).toBe('2026-09-12T12:00:00+08:00')
+  expect(saved.preparations[0].groups[0].baseCode).toMatch(/^CE2609/)
+})
+
+test('a concurrent code claim rejects final import without partial writes and retains the editable draft', async ({
+  extension,
+}) => {
+  const first = await openImport(extension),
+    second = await openImport(extension)
+  for (const current of [first, second]) {
+    await current.file.setInputFiles(workbookFile())
+    await expect(current.dialog.locator('.store-import-product')).toHaveCount(1)
+    await acknowledgeWorkbook(current.dialog)
+    await reviewImportCodes(current.dialog)
+  }
+  const firstBase = first.dialog.locator('[data-code-field="baseCode"]'),
+    secondBase = second.dialog.locator('[data-code-field="baseCode"]'),
+    reserved = await firstBase.inputValue()
+  await expect(secondBase).toHaveValue(reserved)
+  await second.dialog.locator('[data-action="import-and-assign-codes"]').click()
+  await expect(second.dialog).toHaveCount(0)
+  const committed = await databaseState(extension)
+  await first.dialog.locator('[data-action="import-and-assign-codes"]').click()
+  await expect(first.dialog).toBeVisible()
+  await expect(
+    first.dialog.locator('[data-action="store-import-code-errors"]')
+  ).toContainText('Resolve these code issues before importing.')
+  const conflict = first.dialog.locator(
+    '[data-action="store-import-code-errors"]'
+  )
+  await expect(conflict).toContainText('Owner: order 4321.xlsx, product 1')
+  await expect(conflict).toContainText(committed.orders[0].snapshot.sellerName)
+  await expect(conflict).not.toContainText(
+    committed.preparations[0].groups[0].id
+  )
+  await expect(
+    first.dialog.locator('[data-action="import-and-assign-codes"]')
+  ).toBeDisabled()
+  await expect(firstBase).toHaveValue(reserved)
+  expect(await databaseState(extension)).toEqual(committed)
+  await firstBase.fill(`${reserved.slice(0, -2)}74`)
+  await expect(
+    first.dialog.locator('[data-action="import-and-assign-codes"]')
+  ).toBeEnabled()
+  await first.dialog.locator('[data-action="import-and-assign-codes"]').click()
+  await expect(first.dialog).toHaveCount(0)
+  const saved = await backup(extension)
+  expect(saved.orders).toHaveLength(2)
+  expect(saved.preparations).toHaveLength(2)
+  expect(
+    new Set(
+      saved.preparations.map((preparation) => preparation.groups[0].baseCode)
+    ).size
+  ).toBe(2)
+})
+
+test('spreadsheet code review translates en, es and zh without changing the code draft or workspace language', async ({
+  extension,
+}) => {
+  const { page, dialog, file } = await openImport(extension)
+  await file.setInputFiles(workbookFile())
+  await expect(dialog.locator('.store-import-product')).toHaveCount(1)
+  await acknowledgeWorkbook(dialog)
+  const workspace = await page.evaluate(() => ({
+    language: document.documentElement.lang,
+    preference: localStorage.getItem('1688-workspace-language'),
+  }))
+  for (const [language, text] of [
+    ['en', 'Review products and codes'],
+    ['es', 'Revisar productos y códigos'],
+    ['zh', '审核商品与编码'],
+  ]) {
+    await dialog
+      .locator(`.popup-language-toggle [data-language="${language}"]`)
+      .click()
+    await expect(
+      dialog.locator('[data-action="review-import-codes"]')
+    ).toHaveAccessibleName(text)
+  }
+  await dialog.locator('.popup-language-toggle [data-language="en"]').click()
+  const review = await reviewImportCodes(dialog),
+    base = review.locator('[data-code-field="baseCode"]')
+  await base.fill('CE26100175')
+  for (const [language, save, back, reset] of [
+    ['es', 'Importar y asignar códigos', 'Volver', 'Restablecer sugerencias'],
+    ['zh', '导入并分配编码', '返回', '重置为建议编码'],
+    ['en', 'Import and assign codes', 'Back', 'Reset to suggested'],
+  ]) {
+    await dialog
+      .locator(`.popup-language-toggle [data-language="${language}"]`)
+      .click()
+    await expect(dialog).toHaveAttribute(
+      'lang',
+      language === 'zh' ? 'zh-CN' : language
+    )
+    await expect(
+      dialog.locator('[data-action="import-and-assign-codes"]')
+    ).toHaveAccessibleName(save)
+    await expect(
+      dialog.locator('[data-action="back-import-workbook"]')
+    ).toHaveAccessibleName(back)
+    await expect(
+      dialog.locator('[data-action="reset-import-codes"]')
+    ).toHaveAccessibleName(reset)
+    await expect(base).toHaveValue('CE26100175')
+    expect(
+      await page.evaluate(() => ({
+        language: document.documentElement.lang,
+        preference: localStorage.getItem('1688-workspace-language'),
+      }))
+    ).toEqual(workspace)
+  }
+  await base.focus()
+  await expect(base).toBeFocused()
+  await expect(base).not.toHaveAccessibleName('')
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+  expect((await backup(extension)).orders).toHaveLength(0)
+})
 
 test('complete China purchase imports1350 pieces and15 physical cartons once, then whole-order loading seals without quantity reentry', async ({
   extension,
@@ -216,9 +519,7 @@ test('complete China purchase imports1350 pieces and15 physical cartons once, th
   await dialog.locator('input[name="allReviews"]').check()
   await dialog.getByLabel('Purchase date', { exact: true }).fill('2026-09-12')
   await dialog.locator('input[name="photosReviewed"]').check()
-  await dialog
-    .getByRole('button', { name: 'Import order', exact: true })
-    .click()
+  await finishImport(dialog)
   await expect(dialog).toBeHidden()
   await expect(page.locator('#sheet-body tr[data-selection-key]')).toHaveCount(
     5
@@ -249,8 +550,8 @@ test('complete China purchase imports1350 pieces and15 physical cartons once, th
   ).toBe('1350')
   await page.getByRole('button', { name: 'Show all', exact: true }).click()
   await page.locator('#select-rows').click()
-  await assignSelectedPurchaseCodes(page)
   const prepared = await backup(extension)
+  expect(prepared.preparations).toEqual(original.preparations)
   expect(
     prepared.preparations[0].groups.every((group) =>
       group.baseCode.startsWith('CE2609')
@@ -343,15 +644,31 @@ test('marked description cells without measurement headers reach automatic size 
       name: 'I checked the product photos, quantities and order total.',
     })
     .check()
-  await dialog
-    .getByRole('button', { name: 'Import order', exact: true })
-    .click()
+  const codeReview = await reviewImportCodes(dialog)
+  const unresolved = codeReview.locator('[data-source-group="3"]')
+  expect(
+    await unresolved
+      .locator('[data-code-field="sizeSuffix"]')
+      .evaluateAll((inputs) => inputs.map((input) => input.value))
+  ).toEqual(['', ''])
+  await expect(
+    dialog.locator('[data-action="import-and-assign-codes"]')
+  ).toBeDisabled()
+  await expect(unresolved).toContainText('25cm')
+  await expect(unresolved).toContainText('14*6')
+  await unresolved.locator('[data-action="no-size-difference"]').click()
+  // Removing size distinctions still needs two distinct complete barcodes.
+  await unresolved.locator('[data-code-field="variantSuffix"]').nth(0).fill('A')
+  await unresolved.locator('[data-code-field="variantSuffix"]').nth(1).fill('B')
+  await expect(
+    dialog.locator('[data-action="import-and-assign-codes"]')
+  ).toBeEnabled()
+  await dialog.locator('[data-action="import-and-assign-codes"]').click()
   await expect(dialog).toHaveCount(0)
   const imported = (await backup(extension)).orders[0].snapshot
   expect(imported.items[0].productNumber).toBe('SYN-1-1')
   expect(imported.items[0].description).toBe('SYN-1-1 · 黑色陶瓷盘 · 25cm')
   await page.locator('#select-rows').click()
-  await assignSelectedPurchaseCodes(page)
   await expect(page.locator('#orders-view')).toBeVisible()
   const saved = await backup(extension)
   const prepared = saved.preparations[0].groups
@@ -368,9 +685,18 @@ test('marked description cells without measurement headers reach automatic size 
     'S',
   ])
   expect(prepared[2].variants.map((variant) => variant.size)).toEqual(groups[2])
+  expect(prepared[2].sizeMode).toBe('none')
   expect(
-    prepared[2].variants.every((variant) => variant.needsSizeMapping)
+    prepared[2].variants.every((variant) => !variant.needsSizeMapping)
   ).toBe(true)
+  expect(prepared[2].variants.map((variant) => variant.sizeSuffix)).toEqual([
+    '',
+    '',
+  ])
+  expect(prepared[2].variants.map((variant) => variant.variantSuffix)).toEqual([
+    'A',
+    'B',
+  ])
   expect(saved.orders[0].snapshot).toEqual(imported)
 })
 
@@ -550,14 +876,12 @@ test('one embedded photo imports into every covered product group with one origi
   await dialog.getByLabel('Purchase date', { exact: true }).fill('2026-10-20')
   await dialog.locator('input[name="photosReviewed"]').check()
   await dialog
-    .getByRole('button', { name: 'Import order', exact: true })
+    .getByRole('button', { name: 'Review products and codes', exact: true })
     .click()
   await expect(dialog).toBeVisible()
   expect((await backup(extension)).orders).toHaveLength(0)
   await dialog.locator('input[name="allReviews"]').check()
-  await dialog
-    .getByRole('button', { name: 'Import order', exact: true })
-    .click()
+  await finishImport(dialog)
   await expect(dialog).toHaveCount(0)
   const saved = await backup(extension)
   expect(saved.orders).toHaveLength(1)
@@ -570,40 +894,176 @@ test('one embedded photo imports into every covered product group with one origi
   await page.close()
 })
 
+test('pending final spreadsheet import locks newly rendered code groups and dismissal until the real commit completes', async ({
+  extension,
+}) => {
+  const { page, dialog, file } = await openImport(extension)
+  await file.setInputFiles(largeCodeWorkbook())
+  await expect(dialog.locator('.store-import-product')).toHaveCount(52)
+  await acknowledgeWorkbook(dialog)
+  const review = await reviewImportCodes(dialog),
+    list = review.locator('.store-import-code-list'),
+    firstBase = review.locator(
+      '[data-source-group="1"] [data-code-field="baseCode"]'
+    ),
+    save = dialog.locator('[data-action="import-and-assign-codes"]')
+  await expect(review.locator('[data-source-group="52"]')).toHaveCount(0)
+  await firstBase.fill('CE26100191')
+  await expect(save).toBeEnabled()
+  await holdPreparationWrites(page)
+  let lastReviewed
+  try {
+    await save.click()
+    await expect
+      .poll(() => page.evaluate(() => window.preparationSaveStarted))
+      .toBe(true)
+    // Native fieldset state is the persistence barrier, including descendants
+    // mounted later by the virtual list rather than individually disabled inputs.
+    expect(await review.evaluate((node) => node.disabled)).toBe(true)
+    await expect(dialog.locator('form')).toHaveAttribute('aria-busy', 'true')
+    await list.evaluate((node) => {
+      node.scrollTop = node.scrollHeight
+    })
+    const lastGroup = review.locator('[data-source-group="52"]')
+    await expect(lastGroup).toBeVisible()
+    lastReviewed = await lastGroup
+      .locator('input[data-code-field]')
+      .evaluateAll((inputs) =>
+        Object.fromEntries(
+          inputs.map((input) => [input.dataset.codeField, input.value])
+        )
+      )
+    const controls = lastGroup.locator('input,button')
+    expect(await controls.count()).toBeGreaterThan(0)
+    expect(
+      await controls.evaluateAll((nodes) =>
+        nodes.every((node) => node.matches(':disabled'))
+      )
+    ).toBe(true)
+    for (const button of [
+      save,
+      dialog.locator('[data-action="back-import-workbook"]'),
+      dialog.locator('[data-action="reset-import-codes"]'),
+      dialog.getByRole('button', { name: 'Cancel', exact: true }),
+      dialog.getByRole('button', { name: 'Close import', exact: true }),
+    ]) {
+      await expect(button).toBeDisabled()
+      // HTMLElement.click honors real disabled controls without dispatching a
+      // synthetic event that bypasses the user-facing lock.
+      await button.evaluate((node) => node.click())
+    }
+    await lastGroup
+      .locator('[data-action="no-size-difference"]')
+      .evaluate((node) => node.click())
+    await page.keyboard.press('Escape')
+    await expect(dialog).toBeVisible()
+    await expect(review).toBeVisible()
+    expect(
+      await lastGroup
+        .locator('input[data-code-field]')
+        .evaluateAll((inputs) =>
+          Object.fromEntries(
+            inputs.map((input) => [input.dataset.codeField, input.value])
+          )
+        )
+    ).toEqual(lastReviewed)
+  } finally {
+    await page.evaluate(() => {
+      window.holdPreparationSave = false
+    })
+  }
+  await expect(dialog).toHaveCount(0)
+  const saved = await backup(extension),
+    snapshot = saved.orders[0].snapshot,
+    preparation = saved.preparations[0],
+    lastItem = snapshot.items.find((item) => item.sourceGroup === '52'),
+    lastGroup = preparation.groups.find((group) =>
+      group.variants.some((variant) =>
+        variant.entryIds.includes(lastItem.entryId)
+      )
+    )
+  expect(saved.orders).toHaveLength(1)
+  expect(saved.preparations).toHaveLength(1)
+  expect(preparation.groups).toHaveLength(52)
+  expect(preparation.groups[0].baseCode).toBe('CE26100191')
+  expect(lastGroup.baseCode).toBe(lastReviewed.baseCode)
+  expect(lastGroup.variants[0]).toMatchObject({
+    variantSuffix: lastReviewed.variantSuffix,
+    sizeSuffix: lastReviewed.sizeSuffix,
+  })
+  expect(snapshot.spreadsheet.rows).toHaveLength(52)
+  expect(snapshot.items.map((item) => item.description)).toEqual(
+    Array.from({ length: 52 }, (_, index) => `SYN-${index + 1} · 碗 · 6"`)
+  )
+  expect(
+    snapshot.items.every(
+      (item) => item.quantity === '10' && item.price === '1.00'
+    )
+  ).toBe(true)
+  expect(snapshot.totals.payable).toBe('520.00')
+  expect(saved.images).toHaveLength(1)
+})
+
 test('52 imported groups use one scrollable purchase-code review with bounded rows and preserve source descriptions', async ({
   extension,
 }) => {
   const { page, dialog, file } = await openImport(extension)
   await page.setViewportSize({ width: 1280, height: 900 })
-  const products = Array.from({ length: 52 }, (_, index) => [
-    '',
-    `SYN-${index + 1} · 碗 · 6"`,
-    1,
-    10,
-    1,
-    10,
-    index + 1,
-    '',
-  ])
-  await file.setInputFiles(
-    workbookFile({
-      rows: [
-        ['pic', 'desc', 'boxes', 'perbox', 'price', 'amount', 'group', 'var'],
-        ...products,
-        ['total', 520, 'total'],
-      ],
-      photoSpans: [{ from: 1, to: 53 }],
-    })
-  )
+  await file.setInputFiles(largeCodeWorkbook())
   await expect(dialog.locator('.store-import-product')).toHaveCount(52)
   await dialog.locator('input[name="allReviews"]').check()
   await dialog.locator('input[name="purchaseDate"]').fill('2026-10-20')
   await dialog.locator('input[name="photosReviewed"]').check()
-  await dialog
-    .getByRole('button', { name: 'Import order', exact: true })
-    .click()
+  const importReview = await reviewImportCodes(dialog),
+    importList = importReview.locator('.store-import-code-list'),
+    importCards = importReview.locator('[data-source-group]'),
+    importSave = dialog.locator('[data-action="import-and-assign-codes"]')
+  await expect(importList).toHaveAttribute('data-row-count', '52')
+  expect(await importCards.count()).toBeLessThanOrEqual(21)
+  await expect(importCards.first()).toContainText('SYN-1')
+  await importCards
+    .first()
+    .locator('[data-code-field="baseCode"]')
+    .fill('CE26100191')
+  const boundary = importCards.last(),
+    nextGroup = Number(await boundary.getAttribute('data-source-group')) + 1
+  await boundary.locator('[data-action="no-size-difference"]').focus()
+  await boundary.locator('[data-action="no-size-difference"]').press('Tab')
+  await expect(
+    importReview.locator(`[data-source-group="${nextGroup}"] input`).first()
+  ).toBeFocused()
+  for (const width of [1280, 720, 390]) {
+    await page.setViewportSize({ width, height: 700 })
+    const bounds = await dialog.boundingBox()
+    expect(bounds.x).toBeGreaterThanOrEqual(0)
+    expect(bounds.y).toBeGreaterThanOrEqual(0)
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(width)
+    expect(bounds.y + bounds.height).toBeLessThanOrEqual(700)
+    expect(
+      await dialog.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)
+    ).toBe(true)
+    await importList.evaluate((node) => {
+      node.scrollTop = node.scrollHeight
+    })
+    await expect(importReview.locator('[data-source-group="52"]')).toBeVisible()
+    // The current editor remains mounted when the 20-card window moves.
+    expect(await importCards.count()).toBeLessThanOrEqual(21)
+    await expect(importSave).toBeInViewport()
+    await dialog.screenshot({
+      path: test.info().outputPath(`store-import-code-review-${width}.png`),
+    })
+  }
+  await importList.evaluate((node) => {
+    node.scrollTop = 0
+  })
+  await expect(
+    importReview.locator('[data-source-group="1"] [data-code-field="baseCode"]')
+  ).toHaveValue('CE26100191')
+  await expect(importSave).toBeEnabled()
+  await importSave.click()
   await expect(dialog).toHaveCount(0)
-  const source = (await backup(extension)).orders[0].snapshot
+  const imported = await backup(extension),
+    source = imported.orders[0].snapshot
   await page.locator('#select-rows').click()
   await page.locator('#review-purchase-codes').click()
   const review = page.locator('dialog[data-action="purchase-code-review"]'),
@@ -652,11 +1112,12 @@ test('52 imported groups use one scrollable purchase-code review with bounded ro
       path: test.info().outputPath(`purchase-code-review-${width}.png`),
     })
   }
-  await review.locator('[data-action="assign-purchase-codes"]').click()
+  await review.getByRole('button', { name: 'Cancel', exact: true }).click()
   await expect(review).toBeHidden()
   await expect(page.locator('#orders-view')).toBeVisible()
   const prepared = await backup(extension)
   expect(prepared.preparations[0].groups).toHaveLength(52)
+  expect(prepared.preparations).toEqual(imported.preparations)
   expect(prepared.orders[0].snapshot).toEqual(source)
   await page.close()
 })
@@ -746,7 +1207,7 @@ test('import review cards show photos, source values and arithmetic comparisons 
   await dialog.locator('input[name="purchaseDate"]').fill('2026-10-20')
   await dialog.locator('input[name="photosReviewed"]').check()
   await dialog
-    .getByRole('button', { name: 'Import order', exact: true })
+    .getByRole('button', { name: 'Review products and codes', exact: true })
     .click()
   expect((await backup(extension)).orders).toHaveLength(0)
   await expect(dialog).toBeVisible()
@@ -759,7 +1220,7 @@ test('import review cards show photos, source values and arithmetic comparisons 
   await dialog.locator('input[name="purchaseDate"]').fill('2026-10-20')
   await dialog.locator('input[name="photosReviewed"]').check()
   await dialog
-    .getByRole('button', { name: 'Import order', exact: true })
+    .getByRole('button', { name: 'Review products and codes', exact: true })
     .click()
   expect((await backup(extension)).orders).toHaveLength(0)
   await expect(dialog.locator('.store-import-status')).toContainText(
@@ -793,7 +1254,7 @@ test('store import reads a real marked workbook in its worker, blocks bad totals
     })
     .check()
   await dialog
-    .getByRole('button', { name: 'Import order', exact: true })
+    .getByRole('button', { name: 'Review products and codes', exact: true })
     .click()
   expect((await backup(extension)).orders).toHaveLength(0)
   await expect(dialog).toBeVisible()
@@ -806,7 +1267,7 @@ test('store import reads a real marked workbook in its worker, blocks bad totals
     })
     .check()
   await dialog
-    .getByRole('button', { name: 'Import order', exact: true })
+    .getByRole('button', { name: 'Review products and codes', exact: true })
     .click()
   await expect(dialog.locator('.store-import-status')).toHaveText(
     'Confirm the purchase date before importing.'
@@ -816,9 +1277,7 @@ test('store import reads a real marked workbook in its worker, blocks bad totals
   await dialog
     .getByLabel('Store or factory name', { exact: true })
     .fill('Synthetic imported store')
-  await dialog
-    .getByRole('button', { name: 'Import order', exact: true })
-    .click()
+  await finishImport(dialog)
   await expect(dialog).toHaveCount(0)
   await expect(
     page.locator(
@@ -855,7 +1314,7 @@ test('combined variants require actual quantities and photo adjustments keep ori
   await quantities.nth(0).fill('7')
   await quantities.nth(1).fill('12')
   await dialog
-    .getByRole('button', { name: 'Import order', exact: true })
+    .getByRole('button', { name: 'Review products and codes', exact: true })
     .click()
   await expect(dialog.locator('.store-import-status')).toContainText(
     'the sum must be 20'
@@ -876,9 +1335,7 @@ test('combined variants require actual quantities and photo adjustments keep ori
   await viewer
     .getByRole('button', { name: 'Close product photo', exact: true })
     .click()
-  await dialog
-    .getByRole('button', { name: 'Import order', exact: true })
-    .click()
+  await finishImport(dialog)
   await expect(dialog).toHaveCount(0)
   await expect(page.locator('#sheet-body tr[data-selection-key]')).toHaveCount(
     2
@@ -907,9 +1364,7 @@ test('additional order charges preview increased prices and preserve source amou
       name: 'I checked the product photos, quantities and order total.',
     })
     .check()
-  await dialog
-    .getByRole('button', { name: 'Import order', exact: true })
-    .click()
+  await finishImport(dialog)
   await expect(dialog).toHaveCount(0)
   await page.locator('.order-details-trigger').click()
   const details = page.locator('#order-details')
@@ -960,9 +1415,7 @@ test('editing a repeated import photo in Orders updates its exact order and pres
         name: 'I checked the product photos, quantities and order total.',
       })
       .check()
-    await dialog
-      .getByRole('button', { name: 'Import order', exact: true })
-      .click()
+    await finishImport(dialog)
     await expect(dialog).toHaveCount(0)
   }
   await importCopy('4321.xlsx', '2026-10-19')
@@ -987,7 +1440,6 @@ test('editing a repeated import photo in Orders updates its exact order and pres
   )
 
   await page.locator('#select-rows').click()
-  await assignSelectedPurchaseCodes(page)
   await expect(page.locator('#orders-view')).toBeVisible()
   const secondRow = page.locator(
     `#sheet-body tr[data-selection-key=${JSON.stringify(JSON.stringify(['local', second.snapshot.orderId, second.snapshot.items[0].entryId]))}]`
@@ -1029,6 +1481,7 @@ test('editing a repeated import photo in Orders updates its exact order and pres
     second.snapshot.items[0].photos
   )
   expect(saved.images).toEqual(before.images)
+  expect(saved.preparations).toEqual(before.preparations)
 
   await page.locator('#view-orders').click()
   await page.reload()

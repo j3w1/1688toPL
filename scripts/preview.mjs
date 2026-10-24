@@ -106,7 +106,6 @@ export async function startPreview({ port = 0 } = {}) {
     ],
   ])
   for (const css of [
-    'carton-batches.css',
     'store-import.css',
     'order-charges.css',
     'operations.css',
@@ -121,6 +120,7 @@ export async function startPreview({ port = 0 } = {}) {
     'image-copy-dialog.css',
     'appearance-settings.css',
     'packing-review.css',
+    'product-detail-editor.css',
     'shell.css',
     'smart-cartons.css',
   ])
