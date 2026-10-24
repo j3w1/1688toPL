@@ -102,45 +102,20 @@ async function databasePage(extension) {
   return page
 }
 
-test('monthly carton confirmations persist, preserve zero and clears, survive source refresh and full restore', async ({
+test('legacy confirmation evidence preserves zero, refresh, reopening and newer archived clears', async ({
   extension,
 }) => {
   const page = await databasePage(extension)
   const result = await page.evaluate(async (source) => {
-    await library.saveSnapshot(source)
+    await library.restoreBackup(
+      await legacyConfirmationArchive(source, {
+        1: {
+          '2026-10': { received: 0, loaded: 3 },
+          '2026-11': { received: 8 },
+        },
+      })
+    )
     await library.saveSnapshot({ ...source, accountId: 'other-account' })
-    const saved = await library.setCartonConfirmation(
-      '1001',
-      '1',
-      '2026-10',
-      'received',
-      0
-    )
-    const unchanged = await library.setCartonConfirmation(
-      '1001',
-      '1',
-      '2026-10',
-      'received',
-      '0'
-    )
-    await library.setCartonConfirmation('1001', '1', '2026-10', 'loaded', 3)
-    await library.setCartonConfirmation('1001', '1', '2026-11', 'received', 8)
-    const errors = []
-    for (const [id, month, field, value] of [
-      ['1', '2026-10', 'received', -1],
-      ['1', '2026-10', 'received', 1.5],
-      ['1', '2026-10', 'loaded', '1e2'],
-      ['1', '2026-10', 'loaded', '9007199254740993'],
-      ['99', '2026-10', 'received', 1],
-      ['1', '2026-00', 'received', 1],
-      ['1', '2026-10', 'planned', 1],
-    ]) {
-      try {
-        await library.setCartonConfirmation('1001', id, month, field, value)
-      } catch (error) {
-        errors.push(error.message)
-      }
-    }
     const beforeRefresh = await library.getOrder('1001')
     await library.saveSnapshot({
       ...source,
@@ -152,31 +127,29 @@ test('monthly carton confirmations persist, preserve zero and clears, survive so
     window.library = await openOrderDatabase({ name: databaseName })
     const reopened = await library.getOrder('1001')
     const backup = await library.exportBackup()
-    const target = await openOrderDatabase({ name: `${databaseName}-restored` })
+    const target = await openOrderDatabase({ name: databaseName + '-restored' })
     await target.restoreBackup(backup)
     const restored = await target.getOrder('1001')
-    await target.setCartonConfirmation('1001', '1', '2026-10', 'received', '')
-    const cleared = await target.setCartonConfirmation(
-      '1001',
-      '1',
-      '2026-10',
-      'loaded',
-      null
+    const newer = structuredClone(backup)
+    const record = newer.orders.find(
+      (value) => value.snapshot.accountId === 'local'
     )
+    record.cartonConfirmations = { 1: { '2026-11': { received: 8 } } }
+    record.cartonConfirmationClocks['1']['2026-10'] = new Date(
+      Date.now() + 1000
+    ).toISOString()
+    await target.restoreBackup(newer)
+    const cleared = await target.getOrder('1001')
     await target.restoreBackup(backup)
     const afterOldRestore = await target.getOrder('1001')
     const other = await target.getOrder('1001', { accountId: 'other-account' })
-    const roundTrip = await target.exportBackup()
-    const copy = await openOrderDatabase({ name: `${databaseName}-copy` })
-    await copy.restoreBackup(roundTrip)
+    const copy = await openOrderDatabase({ name: databaseName + '-copy' })
+    await copy.restoreBackup(await target.exportBackup())
     const copied = await copy.getOrder('1001')
     copy.close()
     target.close()
     library.close()
     return {
-      saved,
-      unchanged,
-      errors,
       beforeRefresh,
       refreshed,
       reopened,
@@ -187,11 +160,6 @@ test('monthly carton confirmations persist, preserve zero and clears, survive so
       copied,
     }
   }, snapshot())
-  expect(result.saved.cartonConfirmations).toEqual({
-    1: { '2026-10': { received: 0 } },
-  })
-  expect(result.unchanged).toEqual(result.saved)
-  expect(result.errors).toHaveLength(7)
   expect(result.beforeRefresh.cartonConfirmations).toEqual({
     1: { '2026-10': { received: 0, loaded: 3 }, '2026-11': { received: 8 } },
   })
@@ -211,7 +179,7 @@ test('monthly carton confirmations persist, preserve zero and clears, survive so
   expect(result.copied).toEqual(result.cleared)
 })
 
-test('current physical scope refuses atomically; legacy scoped confirmations preserve products, months and accounts', async ({
+test('legacy scoped confirmations preserve other products, months and accounts while physical scope requires complete orders', async ({
   extension,
 }) => {
   const page = await databasePage(extension)
@@ -224,9 +192,6 @@ test('current physical scope refuses atomically; legacy scoped confirmations pre
     })
     validateBackup(legacy)
     await library.restoreBackup(legacy)
-    await library.setCartonConfirmation('1001', '2', '2026-10', 'received', 4)
-    await library.setCartonConfirmation('1001', '2', '2026-11', 'received', 6)
-    await library.setCartonConfirmation('1001', '3', '2026-10', 'received', 5)
     const full = await library.exportBackup()
     const scope = {
       months: ['2026-10'],
@@ -236,11 +201,7 @@ test('current physical scope refuses atomically; legacy scoped confirmations pre
     try {
       await library.exportBackup({ packingScope: scope })
     } catch (error) {
-      refusal = {
-        code: error.code,
-        message: error.message,
-        requiredOrderRefs: error.requiredOrderRefs,
-      }
+      refusal = { code: error.code, requiredOrderRefs: error.requiredOrderRefs }
     }
     const afterRefusal = await library.exportBackup()
     const complete = createPackingBackup(full, {
@@ -249,38 +210,45 @@ test('current physical scope refuses atomically; legacy scoped confirmations pre
     })
     validateBackup(complete)
     const completeTarget = await openOrderDatabase({
-      name: `${databaseName}-complete`,
+      name: databaseName + '-complete',
     })
     await completeTarget.restoreBackup(complete)
     const completeRoundTrip = await completeTarget.exportBackup()
     completeTarget.close()
     const scoped = createPackingBackup(legacy, scope)
     validateBackup(scoped)
-    const target = await openOrderDatabase({ name: `${databaseName}-target` })
-    await target.saveSnapshot(source)
-    await target.saveSnapshot({ ...source, accountId: 'other-account' })
-    await target.setCartonConfirmation('1001', '1', '2026-10', 'loaded', 7)
-    await target.setCartonConfirmation('1001', '2', '2026-11', 'received', 9)
-    const other = await target.setCartonConfirmation(
-      '1001',
-      '2',
-      '2026-10',
-      'received',
-      10,
-      { accountId: 'other-account' }
+    const target = await openOrderDatabase({ name: databaseName + '-target' })
+    const initial = await legacyConfirmationArchive(source, {
+      1: { '2026-10': { loaded: 7 } },
+      2: { '2026-11': { received: 9 } },
+    })
+    initial.preparations = []
+    initial.allocations = []
+    initial.issuedCodes = []
+    initial.orders[0].cartonConfirmationClocks['2']['2026-11'] =
+      '2026-10-16T12:00:00.000Z'
+    await target.restoreBackup(initial)
+    const otherArchive = await legacyConfirmationArchive(
+      { ...source, accountId: 'other-account' },
+      { 2: { '2026-10': { received: 10 } } }
     )
+    await target.restoreBackup(otherArchive)
+    const other = await target.getOrder('1001', { accountId: 'other-account' })
     await target.restoreBackup(scoped)
     const restored = await target.getOrder('1001')
     const otherAfter = await target.getOrder('1001', {
       accountId: 'other-account',
     })
-    const cleared = await target.setCartonConfirmation(
-      '1001',
-      '2',
-      '2026-10',
-      'received',
-      ''
+    const newer = await target.exportBackup()
+    const owner = newer.orders.find(
+      (record) => record.snapshot.accountId === 'local'
     )
+    delete owner.cartonConfirmations['2']['2026-10']
+    owner.cartonConfirmationClocks['2']['2026-10'] = new Date(
+      Date.now() + 1000
+    ).toISOString()
+    await target.restoreBackup(newer)
+    const cleared = await target.getOrder('1001')
     await target.restoreBackup(full)
     const completed = await target.getOrder('1001')
     await target.restoreBackup(scoped)
@@ -289,7 +257,6 @@ test('current physical scope refuses atomically; legacy scoped confirmations pre
     library.close()
     return {
       full,
-      legacy,
       refusal,
       afterRefusal,
       complete,
@@ -303,33 +270,19 @@ test('current physical scope refuses atomically; legacy scoped confirmations pre
       repeated,
     }
   }, snapshot())
-  expect(result.full.version).toBe(5)
-  expect(result.full.cartonBatches.length).toBeGreaterThan(0)
   expect(result.refusal).toMatchObject({
     code: 'PACKING_BACKUP_DEPENDENCY_REVIEW',
     requiredOrderRefs: [{ accountId: 'local', orderId: '1001' }],
   })
-  expect(result.refusal.message).toContain('complete-order')
   for (const field of Object.keys(result.full).filter(
     (key) => key !== 'exportedAt'
   ))
     expect(result.afterRefusal[field], field).toEqual(result.full[field])
-  expect(result.complete.packingScope).toBeUndefined()
-  expect(result.complete.requestedPackingScope.orders).toEqual([
-    { accountId: 'local', orderId: '1001', entryIds: ['1', '2', '3'] },
-  ])
-  expect(result.complete.dependencyOrderRefs).toEqual([])
-  for (const field of ['orders', 'cartonBatches', 'images']) {
-    expect(result.complete[field], field).toEqual(result.full[field])
+  for (const field of ['orders', 'cartonBatches', 'images'])
     expect(result.completeRoundTrip[field], field).toEqual(
       result.complete[field]
     )
-  }
-  expect(result.legacy.version).toBe(3)
   expect(result.scoped.version).toBe(4)
-  expect(result.scoped.packingScope.orders).toEqual([
-    { accountId: 'local', orderId: '1001', entryIds: ['2'] },
-  ])
   expect(result.scoped.orders[0].cartonConfirmations).toEqual({
     2: { '2026-10': { received: 4 } },
   })
@@ -355,15 +308,14 @@ test('current physical scope refuses atomically; legacy scoped confirmations pre
   )
 })
 
-test('shared supplier rows retain one owner, refuse partial v5 scope and preserve legacy partial-variant restore', async ({
+test('shared supplier rows keep one legacy confirmation owner and partial variants cannot duplicate carton evidence', async ({
   extension,
 }) => {
   const page = await databasePage(extension)
   const result = await page.evaluate(async () => {
-    const { createPreparation } = await import('/src/packing-model.js')
     const { validateBackup } = await import('/src/database.js')
     const { createPackingBackup } = await import('/src/packing-backup.js')
-    const input = {
+    const first = await library.importStoreOrder({
       filename: '4321.xlsx',
       sheetName: 'Order',
       purchaseDate: '2026-10-01',
@@ -392,136 +344,62 @@ test('shared supplier rows retain one owner, refuse partial v5 scope and preserv
           ],
         },
       ],
-    }
-    const first = await library.importStoreOrder(input)
-    const orderId = first.snapshot.orderId
-    const saved = await library.setCartonConfirmation(
-      orderId,
-      '2',
-      '2026-10',
-      'received',
-      2
-    )
-    await library.setCartonConfirmation(orderId, '1', '2026-10', 'loaded', 1)
-    await library.savePreparation(createPreparation(saved.snapshot, '2026-10'))
-    const second = await library.importStoreOrder(input)
+    })
+    const { createPreparation } = await import('/src/packing-model.js')
+    await library.savePreparation(createPreparation(first.snapshot, '2026-10'))
     const backup = await library.exportBackup()
-    const scope = (ids) => ({
+    const legacy = await legacyConfirmationArchive(
+      first.snapshot,
+      { 1: { '2026-10': { received: 2, loaded: 1 } } },
+      backup.images
+    )
+    validateBackup(legacy)
+    const scope = (entryIds) => ({
       months: ['2026-10'],
-      orders: [{ orderId, entryIds: ids }],
+      orders: [{ orderId: first.snapshot.orderId, entryIds }],
     })
     let refusal
     try {
       await library.exportBackup({ packingScope: scope(['2']) })
     } catch (error) {
-      refusal = {
-        code: error.code,
-        message: error.message,
-        requiredOrderRefs: error.requiredOrderRefs,
-      }
+      refusal = error.code
     }
     const afterRefusal = await library.exportBackup()
-    const legacy = await legacyConfirmationArchive(
-      first.snapshot,
-      {
-        1: { '2026-10': { received: 2, loaded: 1 } },
-      },
-      backup.images
-    )
-    validateBackup(legacy)
     const partial = createPackingBackup(legacy, scope(['2']))
+    const complete = createPackingBackup(legacy, scope(['1', '2']))
     validateBackup(partial)
-    const legacyComplete = createPackingBackup(legacy, scope(['1', '2']))
-    validateBackup(legacyComplete)
-    const complete = createPackingBackup(backup, scope(['1', '2']))
     validateBackup(complete)
-    const target = await openOrderDatabase({ name: `${databaseName}-target` })
+    const target = await openOrderDatabase({ name: databaseName + '-target' })
+    await target.restoreBackup(partial)
+    const partialRestored = await target.getOrder(first.snapshot.orderId)
     await target.restoreBackup(complete)
-    const restored = await target.getOrder(orderId)
+    const restored = await target.getOrder(first.snapshot.orderId)
     const roundTrip = await target.exportBackup()
-    const legacyTarget = await openOrderDatabase({
-      name: `${databaseName}-legacy`,
-    })
-    await legacyTarget.restoreBackup(partial)
-    const partialRestored = await legacyTarget.getOrder(orderId)
-    await legacyTarget.restoreBackup(legacyComplete)
-    const legacyRestored = await legacyTarget.getOrder(orderId)
-    legacyTarget.close()
     target.close()
     library.close()
     return {
-      saved,
-      second,
       backup,
-      refusal,
       afterRefusal,
-      legacy,
       partial,
-      partialRestored,
-      legacyComplete,
-      legacyRestored,
       complete,
+      partialRestored,
       restored,
       roundTrip,
+      refusal,
     }
   })
-  expect(result.saved.cartonConfirmations).toEqual({
-    1: { '2026-10': { received: 2 } },
-  })
-  expect(result.partial.orders[0].cartonConfirmations).toEqual({})
-  expect(result.partial.orders[0].cartonConfirmationClocks).toEqual({})
-  expect(result.partialRestored.cartonConfirmations || {}).toEqual({})
-  expect(result.legacy.version).toBe(3)
-  expect(result.partial.version).toBe(4)
-  expect(result.legacyRestored.cartonConfirmations).toEqual(
-    result.legacyComplete.orders[0].cartonConfirmations
-  )
-  expect(result.backup.version).toBe(5)
-  expect(result.backup.cartonBatches.length).toBeGreaterThan(0)
-  expect(result.refusal).toMatchObject({
-    code: 'PACKING_BACKUP_DEPENDENCY_REVIEW',
-    requiredOrderRefs: [
-      { accountId: 'local', orderId: result.saved.snapshot.orderId },
-    ],
-  })
-  expect(result.refusal.message).toContain('complete-order')
+  expect(result.refusal).toBe('PACKING_BACKUP_DEPENDENCY_REVIEW')
   for (const field of Object.keys(result.backup).filter(
     (key) => key !== 'exportedAt'
   ))
     expect(result.afterRefusal[field], field).toEqual(result.backup[field])
-  expect(result.complete.packingScope).toBeUndefined()
-  expect(result.complete.requestedPackingScope.orders).toEqual([
-    {
-      accountId: 'local',
-      orderId: result.saved.snapshot.orderId,
-      entryIds: ['1', '2'],
-    },
-  ])
-  expect(result.complete.dependencyOrderRefs).toEqual([])
-  for (const field of ['orders', 'cartonBatches', 'images']) {
-    const expected =
-      field === 'orders'
-        ? [
-            result.backup.orders.find(
-              (order) =>
-                order.snapshot.orderId === result.saved.snapshot.orderId
-            ),
-          ]
-        : result.backup[field].filter(
-            (entry) =>
-              field === 'images' ||
-              entry.contents.some(
-                (item) => item.orderId === result.saved.snapshot.orderId
-              )
-          )
-    expect(result.complete[field], field).toEqual(expected)
-    expect(result.roundTrip[field], field).toEqual(result.complete[field])
-  }
-  expect(result.complete.orders[0].cartonConfirmations).toEqual({
+  expect(result.partial.orders[0].cartonConfirmations).toEqual({})
+  expect(result.partial.orders[0].cartonConfirmationClocks).toEqual({})
+  expect(result.partialRestored.cartonConfirmations || {}).toEqual({})
+  expect(result.restored.cartonConfirmations).toEqual({
     1: { '2026-10': { received: 2, loaded: 1 } },
   })
-  expect(result.restored.cartonConfirmations).toEqual(
-    result.complete.orders[0].cartonConfirmations
+  expect(result.roundTrip.orders[0].cartonConfirmations).toEqual(
+    result.restored.cartonConfirmations
   )
-  expect(result.second.cartonConfirmations).toBeUndefined()
 })

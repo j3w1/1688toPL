@@ -1,18 +1,15 @@
+import { legacyPackingCheckpoint } from './fixtures/legacy-packing-checkpoint.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   allocatePreparation,
   createPreparation,
-  extendDefaultPacking,
   groupPackingMonth,
-  packingCheckpoint,
   planSelectedPreparations,
   regeneratePreparationCode,
   reorderPreparationGroups,
   reorderPreparationVariants,
   resetPreparationOrder,
-  restoreDefaultPacking,
-  restorePreviousPacking,
   validatePreparation,
   validatePreparationReservations,
 } from '../src/packing-model.js'
@@ -236,7 +233,7 @@ test('bounded packing snapshots preserve restore values without reserving inacti
     []
   )
   initial.preparation.revision = 1
-  const base = packingCheckpoint(initial.preparation)
+  const base = legacyPackingCheckpoint(initial.preparation)
   const changed = regeneratePreparationCode(
     initial.preparation,
     initial.preparation.groups[0].id
@@ -249,13 +246,6 @@ test('bounded packing snapshots preserve restore values without reserving inacti
     initial.allocations,
     initial.issuedCodes
   )
-  const reset = restoreDefaultPacking(result.preparation)
-  assert.equal(reset.groups[0].baseCode, 'CE26100101')
-  assert.equal(reset.groups[0].spanishName, 'TAZA PERSONALIZADA')
-  const previous = restorePreviousPacking(result.preparation)
-  assert.equal(previous.groups[0].baseCode, 'CE26100101')
-  assert.equal(previous.groups[0].spanishName, base.groups[0].spanishName)
-  assert.equal(previous.previousPacking.groups[0].baseCode, 'CE26100103')
   validatePreparationReservations(result.preparation, result)
   const unreserved = structuredClone(result.preparation)
   unreserved.defaultPacking.groups[0].baseCode = 'CE26100199'
@@ -268,75 +258,4 @@ test('bounded packing snapshots preserve restore values without reserving inacti
   const nested = structuredClone(result.preparation)
   nested.previousPacking.previousPacking = base
   assert.throws(() => validatePreparation(nested), /nested history/)
-})
-
-test('default baselines append newly prepared source rows without absorbing manual regrouping', () => {
-  const snapshot = source()
-  const initial = allocatePreparation(
-    createPreparation({ ...snapshot, items: [snapshot.items[0]] }, '2026-10'),
-    [],
-    []
-  )
-  initial.preparation.defaultPacking = packingCheckpoint(initial.preparation)
-  const plan = planSelectedPreparations(
-    [{ snapshot, preparation: initial.preparation, entryIds: ['2', '3'] }],
-    '2026-10'
-  )
-  const additional = allocatePreparation(
-    plan.preparations[0],
-    initial.allocations,
-    initial.issuedCodes
-  )
-  const baseline = extendDefaultPacking(additional.preparation, snapshot)
-  assert.equal(baseline.groups.length, 3)
-  assert.equal(baseline.groups[0].id, initial.preparation.groups[0].id)
-  assert.equal(
-    baseline.groups[0].baseCode,
-    initial.preparation.groups[0].baseCode
-  )
-  assert.deepEqual(
-    baseline.groups.flatMap((group) =>
-      group.variants.flatMap((variant) => variant.entryIds)
-    ),
-    ['1', '2', '3']
-  )
-  const regrouped = structuredClone(additional.preparation)
-  regrouped.defaultPacking = baseline
-  regrouped.groups[0].variants.push(...regrouped.groups[1].variants)
-  regrouped.groups.splice(1, 1)
-  assert.deepEqual(extendDefaultPacking(regrouped, snapshot), baseline)
-})
-
-test('reset restores a same-owner original base with its original barcode suffixes', () => {
-  const snapshot = source()
-  const original = allocatePreparation(
-    createPreparation(snapshot, '2026-10'),
-    [],
-    []
-  )
-  const draft = regeneratePreparationCode(
-    original.preparation,
-    original.preparation.groups[0].id
-  )
-  draft.defaultPacking = packingCheckpoint(original.preparation)
-  draft.groups[0].variants[0].variantSuffix = 'ZZ'
-  const changed = allocatePreparation(
-    draft,
-    original.allocations,
-    original.issuedCodes
-  )
-  const restored = allocatePreparation(
-    restoreDefaultPacking(changed.preparation),
-    changed.allocations,
-    changed.issuedCodes
-  )
-  assert.equal(restored.preparation.groups[0].baseCode, 'CE26100101')
-  assert.deepEqual(
-    restored.preparation.groups[0].variants.map(
-      (variant) => variant.variantSuffix
-    ),
-    ['A', 'B']
-  )
-  assert.ok(restored.issuedCodes.some((entry) => entry.code === 'CE26100103ZZ'))
-  assert.ok(restored.issuedCodes.some((entry) => entry.code === 'CE26100101A'))
 })

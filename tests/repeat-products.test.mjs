@@ -1,3 +1,4 @@
+import { legacyPackingCheckpoint } from './fixtures/legacy-packing-checkpoint.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
@@ -7,7 +8,6 @@ import {
   codeOwnerEvidence,
   codeReservationMembers,
   createPreparation,
-  packingCheckpoint,
   validatePreparation,
   validatePreparationReservations,
 } from '../src/packing-model.js'
@@ -87,7 +87,7 @@ function fixture(quantities = ['3', '27']) {
     allocations = result.allocations
     issuedCodes = result.issuedCodes
     const prep = { ...result.preparation, revision: 1 }
-    prep.defaultPacking = packingCheckpoint(prep)
+    prep.defaultPacking = legacyPackingCheckpoint(prep)
     return prep
   })
   const ref = (index) => ({

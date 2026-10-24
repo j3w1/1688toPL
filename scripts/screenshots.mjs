@@ -1,6 +1,7 @@
 import { chromium, expect } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
 import { startPreview } from './preview.mjs'
+import { workbookFile } from '../tests/fixtures/store-workbook-fixture.mjs'
 
 async function waitForVisibleProductImages(page) {
   const images = page.locator(
@@ -79,6 +80,18 @@ try {
   await page.getByRole('button', { name: 'Switch to light theme' }).click()
   await waitForVisibleProductImages(page)
   await page.screenshot({ path: 'screenshots/order-library.png' })
+  await page.locator('#copy-excel-image').click()
+  const excel = page.locator('.image-copy-dialog')
+  await expect(
+    excel.getByRole('button', { name: 'Export Excel (.xlsx)', exact: true })
+  ).toBeVisible()
+  await expect(excel.locator('.copy-preview img').first()).toBeVisible()
+  await excel
+    .locator('.copy-preview img')
+    .first()
+    .evaluate((image) => image.decode())
+  await excel.screenshot({ path: 'screenshots/excel-image-columns.png' })
+  await excel.getByRole('button', { name: 'Close', exact: true }).click()
   await page.getByRole('button', { name: 'Switch to dark theme' }).click()
   await page
     .getByRole('button', { name: 'Import spreadsheet', exact: true })
@@ -91,6 +104,68 @@ try {
   await importer.screenshot({
     path: 'screenshots/store-spreadsheet-import.png',
   })
+  const importPhoto = await page
+    .locator('#sheet-body .thumb-cell img')
+    .first()
+    .evaluate((image) => {
+      const canvas = document.createElement('canvas')
+      canvas.width = image.naturalWidth
+      canvas.height = image.naturalHeight
+      canvas.getContext('2d').drawImage(image, 0, 0)
+      return canvas.toDataURL('image/png').split(',')[1]
+    })
+  await importer.getByLabel('Workbook', { exact: true }).setInputFiles(
+    workbookFile({
+      name: 'Synthetic factory.xlsx',
+      total: 204,
+      rows: [
+        ['pic', 'desc', 'boxes', 'perbox', 'price', 'amount', 'group', 'var'],
+        ['', 'Ceramic cup · white', 1, 24, 3, 72, 'Cups', 'A'],
+        ['', 'Glass bowl', 1, 12, 5, 60, 'Bowls', ''],
+        ['', 'Ceramic cup · blue', 1, 24, 3, 72, 'Cups', 'B'],
+        ['total', 204, 'total'],
+      ],
+      photoBytes: Buffer.from(importPhoto, 'base64'),
+      photoSpans: [{ from: 1, to: 4 }],
+    })
+  )
+  await expect(importer.locator('.store-import-product')).toHaveCount(3)
+  await importer.getByLabel('Purchase date', { exact: true }).fill('2026-10-20')
+  await importer.locator('input[name="allReviews"]').check()
+  await importer.locator('input[name="photosReviewed"]').check()
+  await importer
+    .getByRole('button', { name: 'Review products and codes', exact: true })
+    .click()
+  await expect(
+    importer.locator('[data-action="store-import-code-review"]')
+  ).toBeVisible()
+  await expect(
+    importer.getByRole('button', {
+      name: 'Import and assign codes',
+      exact: true,
+    })
+  ).toBeEnabled()
+  for (const image of await importer
+    .locator('.store-import-code-variant img')
+    .all())
+    await image.evaluate((image) => image.decode())
+  await importer.screenshot({
+    path: 'screenshots/store-import-code-review.png',
+  })
+  await importer.locator('[data-action="edit-order-details"]').click()
+  const scopedDetails = page.locator('.product-detail-dialog')
+  await scopedDetails.locator('[data-detail-select="spanishName"]').check()
+  await scopedDetails
+    .locator('[data-detail-field="spanishName"]')
+    .fill('PRODUCTOS SINTETICOS')
+  await scopedDetails.locator('[data-detail-select="category"]').check()
+  await scopedDetails.locator('[data-detail-field="category"]').fill('合成品')
+  await scopedDetails.locator('[data-detail-select="material"]').check()
+  await scopedDetails.locator('[data-detail-field="material"]').fill('Ceramic')
+  await scopedDetails.screenshot({
+    path: 'screenshots/product-details-review.png',
+  })
+  await scopedDetails.locator('[data-action="cancel-product-details"]').click()
   await importer
     .getByRole('button', { name: 'Close import', exact: true })
     .click()

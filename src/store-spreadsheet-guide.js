@@ -7,7 +7,7 @@ const markerRows = [
   [
     ['group'],
     'Product group',
-    'Required. Repeated values join a group; a blank skips the row.',
+    'Required. Equal values share one product base, even across separated rows or different titles. A blank skips the row.',
   ],
   [['boxes'], 'Cartons', 'Required. Number of cartons for this row.'],
   [
@@ -34,7 +34,7 @@ const markerRows = [
   [
     ['var'],
     'Variant or size',
-    'Optional. Combined variants require a reviewed quantity split.',
+    'Optional. A nonblank var is the complete suggested ending. Combined variants require a reviewed quantity split.',
   ],
   [
     ['kg'],
@@ -80,7 +80,7 @@ export function mountStoreSpreadsheetGuide(
     intro = el(
       'p',
       m(
-        'Prepare a copy of the seller’s workbook, then review its rows, photos and totals before importing a new order.'
+        'Prepare a copy of the seller’s workbook, then review its rows, photos, totals and editable code proposals before saving a new order.'
       ),
       'store-import-guide-intro'
     ),
@@ -167,7 +167,7 @@ export function mountStoreSpreadsheetGuide(
   for (const text of [
     'Copy markers from the Markers tab. Repeat desc to combine description columns.',
     'Give each imported row a group value. Matching group values can appear anywhere in the sheet.',
-    'Mark the order total with total on both sides, then review photos, quantities and amounts before importing.',
+    'Mark the order total with total on both sides. Review the workbook, choose Review products and codes, edit details and endings, then choose Import and assign codes.',
   ])
     steps.append(el('li', m(text)))
   workflow.append(steps)
@@ -206,6 +206,34 @@ export function mountStoreSpreadsheetGuide(
   const review = makePanel('Checks', 'checks')
   review.append(
     section(
+      'Review products and codes before saving',
+      'First confirm the workbook date, photos, quantities, allocations and total. Review products and codes opens editable details and proposals without saving an order or reserving codes. Import and assign codes saves the reviewed order, photos, details, preparation and assignments together.'
+    ),
+    section(
+      'Use one base code per group',
+      'Equal group values share one editable CE product base, even when rows are separated or titles differ. Edit the base once for the whole group. A literal group value such as 12 is a grouping key, not the CE digits to assign.'
+    ),
+    section(
+      'Edit variant and size endings',
+      'Review each variant ending and size ending; the full barcode updates as you edit. Resolve unknown inferred sizes or explicitly choose Do not add size endings. Physical sizes remain in the source descriptions. An unresolved size or invalid or conflicting code blocks the final import.'
+    ),
+    section(
+      'Respect the workbook declaration',
+      'A nonblank var defines the complete suggested ending: a means A, s means size S, and as means AS. Description measurements do not append extra size characters. Blank var cells keep normal suggestions. Deliberate edits stay custom; resetting suggestions returns to the declaration. Correct existing codes through the group size-handling review rather than importing another purchase.'
+    ),
+    section(
+      'Edit order, group or variant details',
+      'Edit order details applies selected fields across the purchase; Edit group details covers one CE product base. Both offer Spanish name, Chinese category and Material. Edit variant details offers Spanish name and Material; Chinese category stays shared for the carton mark. Keep custom values preserves manual exceptions and deliberate blanks by default. Replace all values replaces them explicitly. Review affected counts before Apply; Cancel changes nothing. These controls are also available in Orders.'
+    ),
+    section(
+      'Keep purchase-month and ownership rules',
+      'New codes must use the confirmed purchase calendar month and known supplier identity. Current assignments and immutable shipment history protect code ownership. Proposed edits must satisfy these same rules; changing a group label cannot bypass them.'
+    ),
+    section(
+      'Return or reset without reserving codes',
+      'Use Back to review the workbook, Cancel to leave without saving, or Reset to suggested to restore proposed codes while preserving authored details. Proposals reserve nothing. Final confirmation revalidates the current library; a new conflict must be resolved before anything is saved.'
+    ),
+    section(
       'Check quantities and prices',
       'Check boxes × perbox = qty, price × qty = amount, and the row amounts against total. A mismatch blocks import and names the affected cells; values are never silently corrected.'
     ),
@@ -219,7 +247,7 @@ export function mountStoreSpreadsheetGuide(
     ),
     section(
       'Keep combined variants together until review',
-      'abcd shares one quantity and amount across A–D. Enter the actual split during review; never duplicate the totals or assume equal quantities. abs, abm and abl mean A/B in sizes S, M and L.'
+      'abcd shares one quantity and amount across A–D. Enter the actual split during review; never duplicate the totals or assume equal quantities. abs, abm and abl mean A/B in sizes S, M and L. Reviewed allocations keep one source carton record; they never multiply its cartons.'
     ),
     section(
       'Review photos before importing',

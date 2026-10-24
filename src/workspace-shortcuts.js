@@ -4,7 +4,7 @@ import { preparationShortcut } from './preparation-help.js'
 
 const commands = [
   { id: 'copy', labels: ['More copy formats'], keys: ['Alt+Shift+C'] },
-  { id: 'excel-image', labels: ['Copy Excel image'], keys: ['Alt+Shift+E'] },
+  { id: 'excel-image', labels: ['Excel...'], keys: ['Alt+Shift+E'] },
   {
     id: 'product-search',
     elementId: 'search',

@@ -256,9 +256,6 @@
   justify-content: end;
   flex-wrap: nowrap;
 }
-.image-copy-body .excel-column-toggle small {
-  display: none;
-}
 .image-copy-body .excel-options-footer button {
   font-size: 11px;
   min-height: 28px;

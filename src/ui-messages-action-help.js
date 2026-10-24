@@ -50,10 +50,10 @@ export const ACTION_HELP_RULES = [
     'Previsualiza las fotos y cópialas con los datos originales en filas editables de Excel. Pega cada lote antes de copiar el siguiente.',
   ],
   [
-    ['Copy Excel image', 'Excel image'],
-    'Choose and arrange columns, preview the table, then copy one table picture per batch. Headings and helpers use your workspace language.',
-    '选择并排列列，预览表格，再按批次复制整张表格图片。标题和辅助文字使用工作区语言。',
-    'Elige y ordena las columnas, revisa la tabla y copia una imagen por lote. Los encabezados y las ayudas usan el idioma del espacio de trabajo.',
+    ['Excel...'],
+    'Choose and arrange columns, preview the table, then copy an image or export every selected product to one editable Excel sheet. Both outputs use the same details and popup language.',
+    '选择并排列列、预览表格，然后复制图片或将所有所选商品导出为一个可编辑的 Excel 工作表。两种输出使用相同的详情和弹窗语言。',
+    'Elige y ordena las columnas, revisa la tabla y copia una imagen o exporta todos los productos seleccionados a una hoja editable de Excel. Ambos formatos usan los mismos detalles e idioma de la ventana.',
   ],
   [
     ['Copy preparation columns', 'Copy columns', 'Chosen columns'],
@@ -86,6 +86,18 @@ export const ACTION_HELP_RULES = [
     'Copia este lote. Pégalo antes de elegir el siguiente.',
   ],
   [
+    ['Copy image', 'Copy current image'],
+    'Copy the displayed table image with the selected columns and details. Paste each image before copying another.',
+    '使用所选列和详情复制当前显示的表格图片。每次复制后先粘贴，再复制下一张。',
+    'Copia la imagen de tabla mostrada con las columnas y detalles elegidos. Pega cada imagen antes de copiar otra.',
+  ],
+  [
+    ['Export Excel (.xlsx)'],
+    'Download every captured product in one editable worksheet using these columns, details and language, including products in other image batches.',
+    '使用当前列、详情和语言，将所有已捕获商品下载为一个可编辑工作表，包括其他图片批次中的商品。',
+    'Descarga todos los productos capturados en una hoja editable con estas columnas, detalles e idioma, incluidos los productos de otros lotes de imágenes.',
+  ],
+  [
     ['Previous batch'],
     'Previous batch. A check means it was copied.',
     '上一批。勾号表示已复制。',
@@ -105,9 +117,9 @@ export const ACTION_HELP_RULES = [
   ],
   [
     ['Default columns'],
-    'Restore the standard column selection and order for this export. You can customize them again before copying.',
-    '恢复此导出的默认列选择和顺序。复制前仍可重新调整。',
-    'Restaura la selección y el orden estándar de columnas. Puedes personalizarlos de nuevo antes de copiar.',
+    'Restore the standard column selection and order for this export. You can customize them again before copying or exporting.',
+    '恢复此导出的默认列选择和顺序。复制或导出前仍可重新调整。',
+    'Restaura la selección y el orden estándar de columnas. Puedes personalizarlos de nuevo antes de copiar o exportar.',
   ],
   [
     ['Copy description'],
@@ -189,9 +201,9 @@ export const ACTION_HELP_RULES = [
   ],
   [
     ['Undo'],
-    'Undo the latest packing edit in this session, including saved codes, names, grouping, removal and arrangement. Codes are checked against current assignments.',
-    '撤销本次装箱会话中的最近修改，包括已保存的编码、名称、分组、移除和排序。货号会与当前分配进行核对。',
-    'Deshace el último cambio de esta sesión, incluidos códigos, nombres, agrupación, eliminación y orden ya guardados. Se comprueban los códigos con las asignaciones actuales.',
+    'Undo the latest product edit in this session, including saved codes, names, materials and grouping. Codes are checked against current assignments.',
+    '撤销本次会话中的最近商品修改，包括已保存的编码、名称、材质和分组。货号会与当前分配进行核对。',
+    'Deshace el último cambio de producto de esta sesión, incluidos códigos, nombres, materiales y agrupación ya guardados. Se comprueban los códigos con las asignaciones actuales.',
   ],
   [
     ['Redo'],

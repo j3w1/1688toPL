@@ -9,7 +9,6 @@ export function mountProductCopyActions(host, actions) {
     ['Packing', ['columns', 'codes']],
     ['Labels & codes', ['barcodes', 'marks']],
     ['Options', ['headers']],
-    ['Export', ['exportList']],
     ['Backup', ['backup']],
   ].flatMap(([label, keys]) => {
     const available = keys.map((key) => actions[key]).filter(Boolean)

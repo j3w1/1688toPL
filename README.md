@@ -21,7 +21,7 @@ In your Chromium browser, open **Extensions → Developer mode → Load unpacked
 Click the **1688toPL** extension icon to open the workspace, then choose a source:
 
 - **1688:** open your [orders](https://work.1688.com/home/buyer.htm), tick the purchases, choose **Import selected** and confirm the count. Keep the list open. If sign-in or verification is needed, choose **Open the 1688 tab**, finish it yourself, then **Resume import**.
-- **Supplier workbook:** choose **Import spreadsheet**, download the template or [mark your workbook](docs/store-spreadsheets.md), then review its date, photos, quantities and total. A matching-content warning lets you check an earlier import before deliberately creating another purchase.
+- **Supplier workbook:** choose **Import spreadsheet**, download the template or [mark your workbook](docs/store-spreadsheets.md), then review its date, photos, quantities and total. Choose **Review products and codes**, edit details for the order, group or variant and check each group's base and endings, then **Import and assign codes** to save everything together. Nonblank `var` declarations control the suggested endings; descriptions retain physical sizes. A matching-content warning lets you check an earlier import before deliberately creating another purchase.
 - **Other purchases:** choose **Add order**, enter the supplier, reference, date and products, then **Save order**. You can also [import an order JSON file](docs/automation.md#orders-from-other-sources).
 
 [Importing and finding orders](docs/importing.md) explains filtering, refresh and recovery.
@@ -40,13 +40,15 @@ Click a product to inspect its original source. Use its checkbox for selection. 
 
 [Cartons](docs/cartons.md) explains exact facts, aggregate evidence, unknowns and draft recovery. [Packing and codes](docs/packing.md) explains product ownership and code review.
 
+Deleting an order also retires its owned cartons and removes it from unsealed Packing containers after one review. Sealed shipment dependencies block deletion and show the container names. Containers and other orders remain; see [backup and deletion rules](docs/data-and-backups.md).
+
 ## 3. Load a container, then copy, export or print
 
 Open **Packing**, create or choose a named container, and include whole orders from current Backlog. Inclusion reserves eligible remainder and starts cartons **Unconfirmed**. Use **Mark all loaded**, then choose the actual boxes left behind. Loading derives product quantities; it requires no repeated product-quantity entry.
 
 **Review & seal** checks the complete container. Packing list and **Se quedó** are read-only revision views. **Edit in Orders** retains a return route; source/carton changes require reviewed availability or amendment. Backlog is the current global remainder, while Se quedó preserves that container's historical result.
 
-- **Excel image** and **Copy…** retain values, photos, chosen columns, barcodes and carton marks. A preview changes no data; use **Copy current batch** to write to the clipboard.
+- **Excel...** previews selected products with your chosen columns and details. **Copy image** copies the current table picture; **Export Excel (.xlsx)** downloads every selected product in one editable sheet with photos and carton marks. Linked carton dimensions and weights show actual saved evidence; identical measurements collapse and different sets remain clearly separated. **Copy…** keeps the other values, photos, columns and label formats.
 - **Export packing list** captures the complete loaded revision, regardless of selected/filtered display rows. Default sheets are **Packing list**, **Cartons** and **Se quedó**. Advanced columns/layout remain optional. **Include detailed automation JSON** starts off for each export and discloses full costs, reasons and source identifiers independently of workbook columns.
 - **Print…** produces label or carton-mark PDFs. Packing reprints revision data; label editing belongs in Orders. Print at **100% / Actual size** and calibrate before relying on physical dimensions.
 

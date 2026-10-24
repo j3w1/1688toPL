@@ -12,6 +12,43 @@ An unavailable saved purchase, container or account route keeps its visible noti
 
 Photo Close stays disabled while an edit saves. Its accessible description and the photo status show the existing localized Saving message until the save settles; Escape and backdrop clicks preserve the pending save. Preview zoom, fit and image-toggle controls wait for actual image dimensions. These guards preserve original photos and export bytes.
 
+## Store spreadsheet import
+
+Open **Import spreadsheet** after the Orders readiness control is enabled. Upload through the labeled Workbook field, select the sheet, confirm the purchase date and supplier, resolve review/quantity items, and check the final photos/totals confirmation. Then use `review-import-codes`; this creates no purchase or code reservation.
+
+| `data-action`                 | Accessible name / behavior                                                              |
+| ----------------------------- | --------------------------------------------------------------------------------------- |
+| `review-import-codes`         | Review products and codes; validate the workbook and propose assignments and details.   |
+| `store-import-code-review`    | The grouped code-review fieldset; disabled during a final save or reset.                |
+| `store-import-code-errors`    | Live validation summary; its buttons focus the affected field.                          |
+| `back-import-workbook`        | Back; return to workbook checks and retain unchanged draft edits.                       |
+| `reset-import-codes`          | Reset to suggested; regenerate proposals against the current library.                   |
+| `no-size-difference`          | Do not add size endings; remove only coding suffixes for the containing group.          |
+| `suggest-import-size-endings` | Review optional size endings inferred from descriptions; Cancel keeps declared endings. |
+| `import-and-assign-codes`     | Import and assign codes; commit the complete reviewed purchase atomically.              |
+
+Code cards retain `data-source-group`; inputs expose `data-code-field="baseCode"`, `variantSuffix` or `sizeSuffix`, plus stable group/variant IDs. Full barcode previews use `.store-import-barcode`. Use the labeled inputs rather than deriving codes from literal group values. The scrollable review mounts a bounded window and preserves the active editor; scroll or follow the error-summary link before selecting an unmounted group.
+
+Wait until the final action is enabled. Invalid codes, unresolved sizes and current/historical ownership conflicts block it. Back and Cancel save nothing. A changed workbook, sheet, purchase date, supplier or allocation regenerates the review. Final confirmation rechecks current ownership; a newly claimed code leaves the editable draft open without partially importing. During saving, code inputs and dismissal are locked, including rows mounted by scrolling. An existing source group remains one base even when its rows have different descriptions.
+
+Nonblank `var` declarations define complete suggested endings. Check the displayed workbook declaration and source cell: `a` means A without another size ending, `s` means size S, and `as` means AS. Physical sizes remain in source descriptions. Blank declarations retain normal suggestions; declared rows need an explicit reviewed action to add description-derived size endings. Resetting suggested codes returns to declarations without changing authored details.
+
+Use **Edit order details**, **Edit group details** or **Edit variant details** for the intended logical scope, including unmounted rows. Select the fields before Apply; **Keep custom values** preserves manual exceptions and blanks by default, while **Replace all values** changes them explicitly. Group category remains shared for carton marks. A shared variant's Spanish name affects all its separately accounted source rows. Import Apply edits only the unsaved draft; Orders Apply checks current revisions and uses one Undo/Redo step. To repair an existing code, use its reviewed size-handling action rather than importing another purchase. A newly sealed or otherwise conflicting owner must leave the correction draft intact.
+
+| `data-action`                | Accessible name / behavior                                |
+| ---------------------------- | --------------------------------------------------------- |
+| `edit-order-details`         | Edit order details; target every group in this purchase.  |
+| `edit-group-details`         | Edit group details; target one CE product base.           |
+| `edit-variant-details`       | Edit variant details; target one shared barcode identity. |
+| `product-detail-form`        | Scoped details form; only checked fields participate.     |
+| `apply-product-details`      | Apply the reviewed fields to the displayed scope.         |
+| `cancel-product-details`     | Cancel the unapplied detail draft.                        |
+| `edit-shared-group-category` | Edit group category from a variant's shared category.     |
+
+## Deleting orders
+
+To delete selected whole orders, open `#remove-orders`. The **Delete selected orders** dialog reviews affected carton batches and unsealed container inclusions without writing. Its final **Delete** action removes the selection atomically, including owned cartons and draft loading choices; **Cancel** saves nothing. Sealed or historical shipment dependencies list their actual container names by order, and foreign carton ownership or payment links block the whole selection. If another tab seals before the write, the dialog refreshes the blockers and retains the selection. Repository automation uses `reviewOrderRemoval(orderIds, {accountId})` before `removeOrders(orderIds, {accountId})`; the latter always rechecks inside the transaction. Never delete real owner data to test this behavior.
+
 ## Orders from other sources
 
 `add-other-order` opens a draft; manual entry and JSON use identical complete-order validation. Upload one shared-file JSON through `other-order-file`, review, then `other-order-save`. File import fills fields without saving. At least one product row remains. A failed validation or duplicate supplier/reference leaves the full draft and writes nothing; success selects the new order/month.
@@ -217,7 +254,8 @@ Report originals are saved before worker transfer. Changed source text/file canc
 | `copy-container-barcodes`  | Preview/copy read-only barcode artwork from captured revision settings.                                                                        |
 | `copy-container-marks`     | Preview/copy read-only physical carton marks from captured revision settings.                                                                  |
 | `backup-packing`           | Back up the captured Orders source/preparation scope, original media and supported evidence; explicitly review omitted partial carton records. |
-| `copy-excel-image`         | Prepare an Excel-image preview; explicit Copy writes the clipboard.                                                                            |
+| `copy-excel-image`         | Open Excel... for the captured product scope; copy the current image or export the same configured table as one editable worksheet.            |
+| `download-excel-table`     | Download every captured product in one editable worksheet using the Excel... popup's current columns, details and language.                    |
 | `resolve-legacy-carton`    | Confirm a documented single-order legacy not-shipped review with the retained batch revision.                                                  |
 | `purchase-code-review`     | Marker on the purchase-code review dialog, not a mutation.                                                                                     |
 | `inspect-container-order`  | Filter/inspect included order context without changing membership.                                                                             |

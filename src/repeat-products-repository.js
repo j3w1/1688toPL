@@ -46,7 +46,6 @@ export function createRepeatProductsRepository({
     expectedSnapshots: plan.expectedSnapshots,
     preserveNaming: true,
     allowSharedProductEdits: true,
-    capturePrevious: !preview,
     preview,
     allowCartonReview: true,
     ...(!preview && plan.cartons?.changes.length

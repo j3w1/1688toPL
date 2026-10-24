@@ -10,13 +10,24 @@ let sessionPreference
 let pendingSessionPreference = false
 
 export function normalizeExcelImagePreference(value) {
+  const migrated = (list) =>
+    list.map(
+      (key) =>
+        ({
+          supplierDimensions: 'cartonDimensions',
+          supplierWeight: 'cartonWeight',
+          supplierCarton: 'cartonNumberBlank',
+        })[key] || key
+    )
   const order = [
-    ...new Set(Array.isArray(value?.order) ? value.order : []),
+    ...new Set(migrated(Array.isArray(value?.order) ? value.order : [])),
   ].filter((key) => keys.includes(key))
   order.push(...keys.filter((key) => !order.includes(key)))
   const selected = Array.isArray(value?.selected)
-    ? [...new Set(value.selected)].filter((key) => keys.includes(key))
-    : [...keys]
+    ? [...new Set(migrated(value.selected))].filter((key) => keys.includes(key))
+    : excelImageColumns
+        .filter((column) => !column.optional)
+        .map(({ key }) => key)
   return {
     order,
     selected,
@@ -73,7 +84,7 @@ export function createExcelImageOptions(onChange, { rows = [] } = {}) {
   preparationHelp(
     identity,
     message(
-      'Include the selected order details in the image. Turning this off hides store names, order numbers, dates, status and order tags, while keeping order separators.'
+      'Include the selected order details in both outputs. Turning this off hides store names, order numbers, dates, status and order tags, while keeping order separators.'
     )
   )
   const details = element('details')
@@ -86,9 +97,11 @@ export function createExcelImageOptions(onChange, { rows = [] } = {}) {
     ),
     'excel-options-help'
   )
-  const supplier = element(
+  const cartonHelp = element(
     'p',
-    message('Supplier details stay blank for your supplier to complete.'),
+    message(
+      'Carton measurements come from linked physical cartons. Carton no. stays blank for manual completion.'
+    ),
     'excel-options-help'
   )
   const list = element('ol', undefined, 'excel-column-list')
@@ -167,7 +180,7 @@ export function createExcelImageOptions(onChange, { rows = [] } = {}) {
         if (!order && !preference.selected.includes('description'))
           return message('Include the Product description column first.')
         return message(
-          'Show this detail in the image. Source values stay unchanged.'
+          'Show this detail in both outputs. Source values stay unchanged.'
         )
       }
       toggles.push({ input, key, order, label, help })
@@ -270,8 +283,6 @@ export function createExcelImageOptions(onChange, { rows = [] } = {}) {
       const label = element('span')
       bindText(label, () => columnLabel(column))
       toggle.append(check, label)
-      if (column.supplier)
-        toggle.append(element('small', message('Supplier details')))
       toggle.onclick = () => {
         preference.selected = preference.selected.includes(key)
           ? preference.selected.filter((value) => value !== key)
@@ -338,7 +349,7 @@ export function createExcelImageOptions(onChange, { rows = [] } = {}) {
     persist()
   }
   footer.append(reset)
-  details.append(help, supplier, list, status, footer)
+  details.append(help, cartonHelp, list, status, footer)
   fieldset.append(identity, styleDetails, details)
   render()
   return fieldset

@@ -2823,10 +2823,6 @@ html:has(body.packing-active) {
   justify-self: end;
   min-inline-size: 0;
 }
-.variant-carton-columns .carton-measurement {
-  font-size: 12px;
-  box-sizing: border-box;
-}
 @media (max-width: 600px) {
   .variants .variant-carton-columns {
     grid-column: 2 / -1;
@@ -2851,10 +2847,6 @@ html:has(body.packing-active) {
   padding: 2px 4px;
   font-size: 10px;
   white-space: nowrap;
-}
-.carton-confirmation input {
-  color: var(--quantity-text);
-  font-variant-numeric: tabular-nums;
 }
 .packing-selection-toolbar .packing-export-button {
   flex: none;

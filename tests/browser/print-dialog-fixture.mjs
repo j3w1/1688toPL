@@ -10,7 +10,8 @@ async function buildResources() {
         export { DEFAULT_LABEL_SETTINGS } from './src/labels.js';
         export { applyCodeDesign } from './src/code-design.js';
         export { setLanguage, getLanguage, onLanguageChange, bindText, message } from './src/i18n.js';
-        export { copyExcelImage } from './src/excel-image-copy.js';`,
+        export { openExcelOutput } from './src/excel-output.js';
+        export { planExcelTable, renderExcelCodeImage, renderExcelImage } from './src/excel-image.js';`,
       resolveDir: root,
     },
     bundle: true,

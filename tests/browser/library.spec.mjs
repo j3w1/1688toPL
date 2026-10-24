@@ -263,18 +263,21 @@ test('Excel table image batches keep every selected row across product pages', a
   const copy = page.locator('#copy-excel-image')
   await copy.click()
   const batches = page.getByRole('dialog', {
-    name: 'Copy Excel image',
+    name: 'Excel...',
     exact: true,
   })
   await expect(batches).toBeVisible()
   await batches.getByRole('button', { name: 'Done', exact: true }).click()
-  await expect(copy).toHaveText('Excel image')
+  await expect(copy).toHaveText('Excel...')
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
     'before-batch'
   )
   await copy.click()
   await expect(
-    batches.getByRole('button', { name: 'Copy current batch', exact: true })
+    batches.getByRole('button', {
+      name: /^(?:Copy image|Copy current image)$/,
+      exact: true,
+    })
   ).toBeEnabled()
   await page.evaluate(() => {
     globalThis.drawnBatchRows = []

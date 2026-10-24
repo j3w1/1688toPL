@@ -34,7 +34,7 @@ import {
 } from './print-store.js'
 import { physicalUnits } from './inventory-model.js'
 import { physicalMarkReadback } from './physical-mark-aliases.js'
-import { copyExcelImage } from './excel-image-copy.js'
+import { openExcelOutput } from './excel-output.js'
 import { createExcelImageBadges } from './excel-image-badges.js'
 import { resolveOperations } from './operations-workflow.js'
 import { copySourceImages } from './source-image-copy.js'
@@ -777,9 +777,26 @@ export function createProductOutput({
     if (format === 'values')
       return copyTable(context.products, { headers: headers() })
     if (format === 'columns') return copyPreparation(context)
-    if (format === 'excel-image')
+    if (format === 'excel-image') {
+      const evidence =
+        context.kind === 'orders-selection' && repository.getOrdersExcelEvidence
+          ? await repository.getOrdersExcelEvidence(
+              context.products.map((row) => ({
+                accountId: row.accountId || 'local',
+                orderId: row.orderId,
+                entryId: row.entryId,
+                ...(row.record?.snapshot?.observedAt
+                  ? { observedAt: row.record.snapshot.observedAt }
+                  : {}),
+                ...(Number.isSafeInteger(row.preparationRevision)
+                  ? { preparationRevision: row.preparationRevision }
+                  : {}),
+              }))
+            )
+          : context
       return openContextDialog(context, () =>
-        copyExcelImage(context.products, {
+        openExcelOutput(context.products, {
+          evidence,
           sizeClassifier: createSizeClassifier(
             context.preferences?.sizeVocabulary
           ),
@@ -800,6 +817,7 @@ export function createProductOutput({
           errorOptions: (error) => labelFailure(error, context).noticeOptions,
         })
       )
+    }
     return copySourceImages(context.products, {
       imagesOnly: format === 'images',
       headers: headers(),

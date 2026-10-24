@@ -4,7 +4,6 @@ import {
   cartonBatchForItem,
   cartonBatchesForItems,
   cartonConfirmationForItem,
-  editCartonConfirmation,
   normalizeCartonConfirmation,
   validateCartonConfirmations,
   validateCartonConfirmationMetadata,
@@ -115,7 +114,7 @@ test('split spreadsheet variants resolve one batch while ordinary products and p
   assert.throws(() => cartonBatchForItem(shared, '99'), /not found/)
   const saved = {
     ...shared,
-    ...editCartonConfirmation(shared, '2', '2026-10', 'received', 4),
+    cartonConfirmations: { 1: { '2026-10': { received: 4 } } },
   }
   assert.deepEqual(cartonConfirmationForItem(saved, '1', '2026-10'), {
     received: 4,
@@ -126,55 +125,6 @@ test('split spreadsheet variants resolve one batch while ordinary products and p
   assert.deepEqual(
     cartonConfirmationForItem(sharedFixture(), '2', '2026-10'),
     {}
-  )
-})
-
-test('month edits preserve the other confirmation, other months and source evidence', () => {
-  const record = fixture(),
-    source = structuredClone(record)
-  let saved = {
-    ...record,
-    ...editCartonConfirmation(record, '1', '2026-10', 'received', 0),
-  }
-  saved = {
-    ...saved,
-    ...editCartonConfirmation(saved, '1', '2026-10', 'loaded', 3),
-  }
-  saved = {
-    ...saved,
-    ...editCartonConfirmation(saved, '1', '2026-11', 'received', 7),
-  }
-  assert.deepEqual(saved.cartonConfirmations, {
-    1: { '2026-10': { received: 0, loaded: 3 }, '2026-11': { received: 7 } },
-  })
-  saved = {
-    ...saved,
-    ...editCartonConfirmation(saved, '1', '2026-10', 'received', ''),
-  }
-  assert.deepEqual(cartonConfirmationForItem(saved, '1', '2026-10'), {
-    loaded: 3,
-  })
-  saved = {
-    ...saved,
-    ...editCartonConfirmation(saved, '1', '2026-10', 'loaded', null),
-  }
-  assert.deepEqual(saved.cartonConfirmations, {
-    1: { '2026-11': { received: 7 } },
-  })
-  saved = {
-    ...saved,
-    ...editCartonConfirmation(saved, '1', '2026-11', 'received', undefined),
-  }
-  assert.deepEqual(saved.cartonConfirmations, {})
-  assert.deepEqual(record, source)
-  for (const month of ['2026-00', '2026-13', '2026-1', '26-10', '', null])
-    assert.throws(
-      () => editCartonConfirmation(record, '1', month, 'received', 1),
-      /packing month/
-    )
-  assert.throws(
-    () => editCartonConfirmation(record, '1', '2026-10', 'planned', 1),
-    /received or loaded/
   )
 })
 

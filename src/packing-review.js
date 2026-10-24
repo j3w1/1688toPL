@@ -3,6 +3,7 @@ import {
   bindAttribute,
   isMessage,
   onLanguageChange,
+  inheritLanguageScope,
 } from './i18n.js'
 import {
   element as el,
@@ -141,6 +142,7 @@ export async function reviewPackingChanges({
   mountControls,
 }) {
   const modal = el('dialog', undefined, 'packing-review packing-change-dialog')
+  inheritLanguageScope(modal)
   modal.classList.toggle('packing-review-overview', overview)
   if (overview) modal.dataset.reviewLayout = 'expanded'
   bindAttribute(modal, 'aria-label', title)

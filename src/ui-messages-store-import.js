@@ -1,4 +1,96 @@
 export const STORE_IMPORT_MESSAGES = {
+  'Review products and codes before saving': {
+    zh: '保存前审核商品与货号',
+    es: 'Revisa productos y códigos antes de guardar',
+  },
+  'First confirm the workbook date, photos, quantities, allocations and total. Review products and codes opens editable details and proposals without saving an order or reserving codes. Import and assign codes saves the reviewed order, photos, details, preparation and assignments together.':
+    {
+      zh: '先确认工作簿的采购日期、照片、数量、分配和总金额。“审核商品与编码”打开可编辑详情与方案，不保存订单，也不占用货号。“导入并分配编码”会一起保存已审核的订单、照片、详情、备货数据和编码分配。',
+      es: 'Confirma primero la fecha, las fotos, las cantidades, los repartos y el total. Revisar productos y códigos abre detalles y propuestas editables sin guardar pedidos ni reservar códigos. Importar y asignar códigos guarda juntos el pedido, las fotos, los detalles, la preparación y las asignaciones revisadas.',
+    },
+  'Optional. A nonblank var is the complete suggested ending. Combined variants require a reviewed quantity split.':
+    {
+      zh: '可选。非空 var 是完整的建议后缀。合并款式需要审核实际数量分配。',
+      es: 'Opcional. Un var no vacío define el sufijo sugerido completo. Las variantes combinadas requieren revisar el reparto de cantidades.',
+    },
+  'Mark the order total with total on both sides. Review the workbook, choose Review products and codes, edit details and endings, then choose Import and assign codes.':
+    {
+      zh: '在订单总金额两侧标记 total。审核工作簿后选择“审核商品与编码”，编辑详情与后缀，再选择“导入并分配编码”。',
+      es: 'Marca el total del pedido con total a ambos lados. Revisa el libro, elige Revisar productos y códigos, edita detalles y sufijos y después Importar y asignar códigos.',
+    },
+  'Review each variant ending and size ending; the full barcode updates as you edit. Resolve unknown inferred sizes or explicitly choose Do not add size endings. Physical sizes remain in the source descriptions. An unresolved size or invalid or conflicting code blocks the final import.':
+    {
+      zh: '核对每个款式与尺码后缀；完整条码随编辑更新。解决未知的推断尺码，或明确选择“不添加尺码后缀”。实际尺寸仍保留在原始描述中。未解决的尺码、无效编码或编码冲突会阻止最终导入。',
+      es: 'Revisa los sufijos de variante y talla; el código completo se actualiza al editar. Resuelve las tallas inferidas desconocidas o elige No añadir sufijos de talla. Las medidas físicas se conservan en las descripciones. Una talla pendiente o un código inválido o en conflicto bloquea la importación final.',
+    },
+  'Respect the workbook declaration': {
+    zh: '遵循工作簿声明',
+    es: 'Respeta la declaración del libro',
+  },
+  'A nonblank var defines the complete suggested ending: a means A, s means size S, and as means AS. Description measurements do not append extra size characters. Blank var cells keep normal suggestions. Deliberate edits stay custom; resetting suggestions returns to the declaration. Correct existing codes through the group size-handling review rather than importing another purchase.':
+    {
+      zh: '非空 var 定义完整的建议后缀：a 表示 A，s 表示尺码 S，as 表示 AS。描述中的尺寸不会自动追加尺码字符。空白 var 使用常规建议。主动编辑保留为自定义值；重置建议会恢复工作簿声明。通过商品组的尺码处理审核修正已有编码，不要另建采购订单。',
+      es: 'Un var no vacío define el sufijo sugerido completo: a significa A, s significa talla S y as significa AS. Las medidas de la descripción no añaden caracteres de talla. Un var vacío mantiene las sugerencias normales. Las ediciones deliberadas son personalizadas; restablecer sugerencias recupera la declaración. Corrige los códigos existentes mediante la revisión de tallas del grupo en lugar de importar otra compra.',
+    },
+  'Edit order, group or variant details': {
+    zh: '编辑订单、商品组或款式详情',
+    es: 'Edita detalles del pedido, grupo o variante',
+  },
+  'Edit order details applies selected fields across the purchase; Edit group details covers one CE product base. Both offer Spanish name, Chinese category and Material. Edit variant details offers Spanish name and Material; Chinese category stays shared for the carton mark. Keep custom values preserves manual exceptions and deliberate blanks by default. Replace all values replaces them explicitly. Review affected counts before Apply; Cancel changes nothing. These controls are also available in Orders.':
+    {
+      zh: '“编辑订单详情”将所选字段应用到整笔采购；“编辑商品组详情”用于同一 CE 商品基础货号。两者均提供西班牙语名称、中文品类和材质。“编辑款式详情”提供西班牙语名称和材质；中文品类仍由整组共用以打印箱唛。默认“保留自定义值”会保留手动例外和刻意留空；“替换所有值”才会覆盖它们。应用前核对影响数量；取消不作更改。订单中也提供这些控件。',
+      es: 'Editar detalles del pedido aplica los campos seleccionados a la compra; Editar detalles del grupo cubre una base CE. Ambos ofrecen Nombre en español, Categoría en chino y Material. Editar detalles de variante ofrece Nombre en español y Material; la categoría se comparte para la marca de caja. Conservar valores personalizados mantiene por defecto excepciones manuales y vacíos deliberados. Reemplazar todos los valores los sustituye expresamente. Revisa las cantidades afectadas antes de Aplicar; Cancelar no cambia nada. Estos controles también están en Pedidos.',
+    },
+  'Use Back to review the workbook, Cancel to leave without saving, or Reset to suggested to restore proposed codes while preserving authored details. Proposals reserve nothing. Final confirmation revalidates the current library; a new conflict must be resolved before anything is saved.':
+    {
+      zh: '返回可重新审核工作簿，取消会退出且不保存，重置为建议编码可恢复建议货号并保留已编辑详情。方案不占用货号。最终确认会重新校验当前资料库；任何新冲突都必须解决后才能保存。',
+      es: 'Usa Volver para revisar el libro, Cancelar para salir sin guardar o Restablecer sugerencias para recuperar códigos conservando los detalles editados. Las propuestas no reservan nada. La confirmación final valida otra vez la biblioteca; cualquier conflicto nuevo debe resolverse antes de guardar.',
+    },
+  'Review codes before saving': {
+    zh: '保存前审核货号',
+    es: 'Revisa los códigos antes de guardar',
+  },
+  'First confirm the workbook date, photos, quantities, allocations and total. Review codes opens editable proposals without saving an order or reserving codes. Import and assign codes saves the reviewed order, photos, preparation and assignments together.':
+    {
+      zh: '先确认工作簿的采购日期、照片、数量、分配和总金额。“审核编码”会打开可编辑方案，不保存订单，也不占用货号。“导入并分配编码”会一次保存已审核的订单、照片、准备数据和货号分配。',
+      es: 'Confirma primero la fecha de compra, las fotos, las cantidades, los repartos y el total. Revisar códigos abre propuestas editables sin guardar el pedido ni reservar códigos. Importar y asignar códigos guarda juntos el pedido revisado, las fotos, la preparación y las asignaciones.',
+    },
+  'Use one base code per group': {
+    zh: '每组共用一个基础货号',
+    es: 'Usa un código base por grupo',
+  },
+  'Equal group values share one editable CE product base, even when rows are separated or titles differ. Edit the base once for the whole group. A literal group value such as 12 is a grouping key, not the CE digits to assign.':
+    {
+      zh: '相同 group 值共用一个可编辑的 CE 商品基础货号，即使行不相邻或标题不同。修改一次基础货号即可应用于整组。12 等原始 group 值只是分组标识，不会成为待分配的 CE 数字。',
+      es: 'Los valores group iguales comparten una base CE editable, aunque las filas estén separadas o tengan títulos distintos. Edita la base una vez para todo el grupo. Un valor como 12 solo identifica el grupo; no indica los dígitos CE que se asignarán.',
+    },
+  'Edit variant and size endings': {
+    zh: '编辑款式和尺码后缀',
+    es: 'Edita los sufijos de variante y talla',
+  },
+  'Review each variant ending and size ending; the full barcode updates as you edit. Resolve every unknown size or explicitly choose No size difference when appropriate. An unresolved size or invalid or conflicting code blocks the final import.':
+    {
+      zh: '核对每个款式后缀和尺码后缀；完整条码会随编辑实时更新。请解决所有未知尺码，或在适用时明确选择“无尺寸差异”。未解决的尺码、无效货号或货号冲突都会阻止最终导入。',
+      es: 'Revisa cada sufijo de variante y talla; el código de barras completo se actualiza al editar. Resuelve las tallas desconocidas o elige expresamente Sin diferencia de talla cuando corresponda. Una talla pendiente o un código inválido o en conflicto bloquea la importación final.',
+    },
+  'Keep purchase-month and ownership rules': {
+    zh: '遵守采购月份和货号归属规则',
+    es: 'Respeta el mes de compra y la titularidad',
+  },
+  'New codes must use the confirmed purchase calendar month and known supplier identity. Current assignments and immutable shipment history protect code ownership. Proposed edits must satisfy these same rules; changing a group label cannot bypass them.':
+    {
+      zh: '新货号必须使用已确认的采购日历月份和已知供应商身份。当前分配与不可变更的出货历史共同保护货号归属。编辑方案同样必须遵守这些规则；更改 group 标识不能绕过校验。',
+      es: 'Los códigos nuevos deben usar el mes calendario de la compra confirmada y la identidad conocida del proveedor. Las asignaciones actuales y el historial inmutable de envíos protegen la titularidad. Las propuestas deben cumplir las mismas reglas; cambiar la etiqueta group no las evita.',
+    },
+  'Return or reset without reserving codes': {
+    zh: '返回或重置方案不会占用货号',
+    es: 'Vuelve o restablece sin reservar códigos',
+  },
+  'Use Back to review the workbook, Cancel to leave without saving, or Reset to suggested to restore proposed codes. Proposals reserve nothing. Final confirmation revalidates the current library; a new conflict must be resolved before anything is saved.':
+    {
+      zh: '选择“返回”可重新核对工作簿，“取消”会退出且不保存，“重置为建议编码”可恢复建议货号。方案不会占用任何货号。最终确认时会重新校验当前资料库；出现新冲突时，必须解决后才能保存任何内容。',
+      es: 'Usa Volver para revisar el libro, Cancelar para salir sin guardar o Restablecer sugerencias para recuperar las propuestas. Las propuestas no reservan nada. La confirmación final vuelve a validar la biblioteca actual; cualquier conflicto nuevo debe resolverse antes de guardar.',
+    },
   'This appears to match {0} imported order(s). Importing again creates a separate purchase; review the date before continuing.':
     {
       es: 'Esto parece coincidir con {0} pedido(s) importado(s). Volver a importar crea una compra separada; revisa la fecha antes de continuar.',
@@ -38,10 +130,10 @@ export const STORE_IMPORT_MESSAGES = {
       zh: 'cbm 是供应商提供的每箱体积。完整厘米尺寸分别填入 cbmx、cbmy、cbmz。工作区按长 × 宽 × 高 ÷ 1,000,000 计算体积；填写完整尺寸前，供应商体积仅供查看。',
       es: 'cbm es el volumen por caja indicado por el proveedor. Pon las medidas completas en centímetros en cbmx, cbmy y cbmz. El espacio de trabajo calcula largo × ancho × alto ÷ 1,000,000; el volumen indicado es de solo lectura hasta completar las medidas.',
     },
-  'abcd shares one quantity and amount across A–D. Enter the actual split during review; never duplicate the totals or assume equal quantities. abs, abm and abl mean A/B in sizes S, M and L.':
+  'abcd shares one quantity and amount across A–D. Enter the actual split during review; never duplicate the totals or assume equal quantities. abs, abm and abl mean A/B in sizes S, M and L. Reviewed allocations keep one source carton record; they never multiply its cartons.':
     {
-      zh: 'abcd 表示 A–D 共用一份数量和金额。审核时输入实际分配；不可复制总数或假定平均分配。abs、abm、abl 分别表示 S、M、L 尺码的 A/B 款。',
-      es: 'abcd comparte una cantidad e importe entre A–D. Introduce el reparto real al revisar; nunca dupliques los totales ni supongas cantidades iguales. abs, abm y abl indican A/B en tallas S, M y L.',
+      zh: 'abcd 表示 A–D 共用一份数量和金额。审核时输入实际分配；不可复制总数或假定平均分配。abs、abm、abl 分别表示 S、M、L 尺码的 A/B 款。已审核的数量分配仍保留一份来源纸箱记录，不会增加箱数。',
+      es: 'abcd comparte una cantidad e importe entre A–D. Introduce el reparto real al revisar; nunca dupliques los totales ni supongas cantidades iguales. abs, abm y abl indican A/B en tallas S, M y L. Los repartos revisados conservan un único registro original de cajas; nunca multiplican su número.',
     },
   'Every product needs a photo. One photo can serve different groups when its anchor or merged pic cell covers their rows. Confirm shared photos during review. Missing or unreadable photos block import. Square thumbnails keep proportions and originals.':
     {
@@ -365,29 +457,17 @@ export const STORE_IMPORT_MESSAGES = {
     es: 'Foto guardada. Original conservado.',
   },
   'Carton details': { zh: '纸箱信息', es: 'Datos de la caja' },
-  'Save carton details': { zh: '保存纸箱信息', es: 'Guardar datos de la caja' },
   'One carton · optional': { zh: '单箱数据 · 选填', es: 'Una caja · opcional' },
   'Save to apply changes': {
     zh: '保存后应用修改',
     es: 'Guarda para aplicar los cambios',
   },
-  'Not saved yet': { zh: '尚未保存', es: 'Sin guardar' },
   'Decrease cartons': { zh: '减少箱数', es: 'Reducir cajas' },
   'Increase cartons': { zh: '增加箱数', es: 'Aumentar cajas' },
   Weight: { zh: '重量', es: 'Peso' },
   Length: { zh: '长度', es: 'Largo' },
   'Manual volume': { zh: '手动体积', es: 'Volumen manual' },
-  'Volume per carton': { zh: '单箱体积', es: 'Volumen por caja' },
-  'Calculated from dimensions': {
-    zh: '按尺寸计算',
-    es: 'Calculado con las medidas',
-  },
   'Using manual volume': { zh: '使用手动体积', es: 'Usando el volumen manual' },
-  'Volume not set': { zh: '未填写体积', es: 'Volumen sin definir' },
-  'Enter all three dimensions, or clear all three.': {
-    zh: '请填写全部三项尺寸，或全部清空。',
-    es: 'Completa las tres medidas o déjalas todas vacías.',
-  },
   'Complete dimensions take priority. Manual volume is kept.': {
     zh: '尺寸齐全时优先计算，手动体积会保留。',
     es: 'Las medidas completas tienen prioridad. El volumen manual se conserva.',
@@ -395,10 +475,6 @@ export const STORE_IMPORT_MESSAGES = {
   'Carton dimensions must be greater than zero.': {
     zh: '纸箱尺寸必须大于零。',
     es: 'Las medidas de la caja deben ser mayores que cero.',
-  },
-  'Measurements for one carton': {
-    zh: '单箱测量值',
-    es: 'Medidas de una caja',
   },
   'Weight (kg/box)': { zh: '重量（千克/箱）', es: 'Peso (kg/caja)' },
   'Volume (m³/box)': { zh: '体积（立方米/箱）', es: 'Volumen (m³/caja)' },
@@ -571,10 +647,10 @@ export const STORE_IMPORT_MESSAGES = {
       zh: '查看导入标记、文件命名和审核规则。本格式指南不会导入文件，也不会更改资料库。',
       es: 'Consulta los marcadores, los nombres de archivo y las reglas de revisión. Esta guía de formato no importa archivos ni cambia tu biblioteca.',
     },
-  'Prepare a copy of the seller’s workbook, then review its rows, photos and totals before importing a new order.':
+  'Prepare a copy of the seller’s workbook, then review its rows, photos, totals and editable code proposals before saving a new order.':
     {
-      zh: '请先制作卖家工作簿的副本，导入新订单前审核行、照片和总金额。',
-      es: 'Prepara una copia del libro del vendedor y revisa sus filas, fotos y totales antes de importar un pedido nuevo.',
+      zh: '请先制作卖家工作簿的副本，保存新订单前审核行、照片、总金额和可编辑的货号方案。',
+      es: 'Prepara una copia del libro del vendedor y revisa sus filas, fotos, totales y propuestas de códigos editables antes de guardar un pedido nuevo.',
     },
   'Spreadsheet guide sections': {
     zh: '表格指南章节',
@@ -624,10 +700,10 @@ export const STORE_IMPORT_MESSAGES = {
       zh: '为每个需要导入的行填写 group 值。相同 group 值可以分散在工作表中的不同位置。',
       es: 'Asigna un valor group a cada fila que quieras importar. Los valores iguales pueden aparecer en cualquier parte de la hoja.',
     },
-  'Mark the order total with total on both sides, then review photos, quantities and amounts before importing.':
+  'Mark the order total with total on both sides. Review the workbook, choose Review codes, edit the proposals, then choose Import and assign codes.':
     {
-      zh: '在订单总金额两侧各填写 total。导入时，还需要先审核照片、数量和金额。',
-      es: 'Pon total a ambos lados del importe total del pedido. Antes de importar, revisa las fotos, las cantidades y los importes.',
+      zh: '在订单总金额两侧各填写 total。核对工作簿后选择“审核编码”，编辑方案，再选择“导入并分配编码”。',
+      es: 'Pon total a ambos lados del importe total. Revisa el libro, elige Revisar códigos, edita las propuestas y selecciona Importar y asignar códigos.',
     },
   'Click a marker to copy its exact spelling. Markers stay the same in every language.':
     {
@@ -645,10 +721,11 @@ export const STORE_IMPORT_MESSAGES = {
     es: 'Obligatorio para cada producto importado.',
   },
   'Product group': { zh: '商品组', es: 'Grupo de productos' },
-  'Required. Repeated values join a group; a blank skips the row.': {
-    zh: '必填。相同值归为一组；留空则跳过该行。',
-    es: 'Obligatorio. Los valores repetidos forman un grupo; una celda vacía omite la fila.',
-  },
+  'Required. Equal values share one product base, even across separated rows or different titles. A blank skips the row.':
+    {
+      zh: '必填。相同值共用一个商品基础货号，即使行不相邻或标题不同。留空则跳过该行。',
+      es: 'Obligatorio. Los valores iguales comparten una base de producto, aunque las filas estén separadas o tengan títulos distintos. Una celda vacía omite la fila.',
+    },
   Cartons: { zh: '箱数', es: 'Cajas' },
   'Required. Number of cartons for this row.': {
     zh: '必填。该行商品的箱数。',
@@ -768,4 +845,162 @@ export const STORE_IMPORT_MESSAGES = {
       zh: '工作簿中没有可靠日期时，审核必须要求确认购买日期。文件名用于识别门店，不代表购买日期。',
       es: 'La revisión debe exigir una fecha de compra confirmada cuando el libro no tenga una fecha fiable. El nombre del archivo identifica la tienda, no la fecha de compra.',
     },
+  'Review the workbook, then review and assign its product codes.': {
+    es: 'Revisa el libro y después revisa y asigna sus códigos de producto.',
+    zh: '先核对工作簿，再审核并分配商品编码。',
+  },
+  'Resolve the source size or choose No size difference.': {
+    es: 'Resuelve la talla de origen o elige Sin diferencia de talla.',
+    zh: '请明确来源尺寸，或选择“无尺寸差异”。',
+  },
+  'Enter a base code or generate the suggested codes.': {
+    es: 'Introduce un código base o genera los códigos sugeridos.',
+    zh: '请输入基础编码，或生成建议编码。',
+  },
+  'The code review must belong to this new spreadsheet purchase.': {
+    es: 'La revisión de códigos debe corresponder a esta nueva compra del libro.',
+    zh: '编码审核必须对应本次新增的工作簿采购。',
+  },
+  'Keep the source spreadsheet groups and variants together.': {
+    es: 'Conserva la agrupación de productos y variantes del libro de origen.',
+    zh: '请保留来源工作簿中的商品分组和款式归属。',
+  },
+  ' · Reserved by shipment history': {
+    es: ' · Reservado por el historial de envíos',
+    zh: ' · 已由出货历史保留',
+  },
+  'Finish editing the code field to check its format.': {
+    es: 'Termina de editar el campo del código para comprobar su formato.',
+    zh: '完成编码字段的编辑后再检查格式。',
+  },
+  Back: { es: 'Volver', zh: '返回' },
+  'Review codes': { es: 'Revisar códigos', zh: '审核编码' },
+  'Import and assign codes': {
+    es: 'Importar y asignar códigos',
+    zh: '导入并分配编码',
+  },
+  'Reset to suggested': { es: 'Restablecer sugerencias', zh: '重置为建议编码' },
+  'Review product codes': {
+    es: 'Revisar códigos de producto',
+    zh: '审核商品编码',
+  },
+  'Proposed product codes': {
+    es: 'Códigos de producto propuestos',
+    zh: '建议商品编码',
+  },
+  'Product base code': { es: 'Código base del producto', zh: '商品基础编码' },
+  'Complete barcode': { es: 'Código de barras completo', zh: '完整条码' },
+  'Each group shares one product base code. Variant and size endings form the complete barcode. Review does not reserve codes.':
+    {
+      es: 'Cada grupo comparte un código base. Las terminaciones de variante y talla forman el código de barras completo. La revisión no reserva códigos.',
+      zh: '同一组共用一个商品基础编码。款式和尺寸后缀组成完整条码。审核时不会预占编码。',
+    },
+  'CE + purchase year/month + supplier number + product number + variant/size endings. New codes must use the confirmed purchase month.':
+    {
+      es: 'CE + año/mes de compra + número de proveedor + número de producto + terminaciones de variante/talla. Los códigos nuevos deben usar el mes de compra confirmado.',
+      zh: 'CE + 采购年月 + 供应商编号 + 商品编号 + 款式/尺寸后缀。新编码必须使用已确认的采购月份。',
+    },
+  ' · Owner: order {0}, product {1}': {
+    es: ' · Asignado a: pedido {0}, producto {1}',
+    zh: ' · 所属订单 {0}，商品 {1}',
+  },
+  'Checking proposed codes…': {
+    es: 'Comprobando los códigos propuestos…',
+    zh: '正在检查建议编码…',
+  },
+  'All proposed codes are valid. Nothing is saved until you import.': {
+    es: 'Todos los códigos propuestos son válidos. No se guarda nada hasta que importes.',
+    zh: '所有建议编码均有效。点击导入前不会保存任何数据。',
+  },
+  'Resolve these code issues before importing.': {
+    es: 'Resuelve estos problemas de códigos antes de importar.',
+    zh: '请先解决以下编码问题，再导入。',
+  },
+  'Row {row}: {quantity} pcs × ¥{price}': {
+    es: 'Fila {row}: {quantity} unidades × ¥{price}',
+    zh: '第 {row} 行：{quantity} 件 × ¥{price}',
+  },
+  'Source cells {0}': { es: 'Celdas de origen {0}', zh: '来源单元格 {0}' },
+  'Saving the reviewed order and codes…': {
+    es: 'Guardando el pedido y los códigos revisados…',
+    zh: '正在保存已审核的订单和编码…',
+  },
+  'Review the proposed codes before importing.': {
+    es: 'Revisa los códigos propuestos antes de importar.',
+    zh: '请在导入前审核建议编码。',
+  },
+  'Preparing proposed product codes…': {
+    es: 'Preparando los códigos de producto propuestos…',
+    zh: '正在生成建议商品编码…',
+  },
+  'Workbook details changed. Review the regenerated codes.': {
+    es: 'Los datos del libro cambiaron. Revisa los códigos generados de nuevo.',
+    zh: '工作簿信息已更改。请审核重新生成的编码。',
+  },
+  'Review products and codes': {
+    es: 'Revisar productos y códigos',
+    zh: '审核商品与编码',
+  },
+  'Spanish: {name} · Chinese category: {category} · Material: {material}{custom}':
+    {
+      es: 'Español: {name} · Categoría china: {category} · Material: {material}{custom}',
+      zh: '西语名称：{name} · 中文类别：{category} · 材质：{material}{custom}',
+    },
+  'Mixed values': { es: 'Valores diferentes', zh: '多个不同值' },
+  'Mixed materials': { es: 'Materiales diferentes', zh: '多种材质' },
+  ' · Custom values: {0}': {
+    es: ' · Valores personalizados: {0}',
+    zh: ' · 自定义值：{0}',
+  },
+  'Workbook declaration {cell}: {value}': {
+    es: 'Declaración del libro {cell}: {value}',
+    zh: '工作簿声明 {cell}：{value}',
+  },
+  'No var declaration; description-based suggestions apply.': {
+    es: 'Sin declaración var; se usan sugerencias de las descripciones.',
+    zh: '未填写 var，将根据描述提供建议。',
+  },
+  'Size ending: None declared': {
+    es: 'Terminación de talla: ninguna declarada',
+    zh: '尺寸后缀：未声明',
+  },
+  'Needs size review': { es: 'Revisar talla', zh: '需要审核尺寸' },
+  'Resolve the source size or choose Do not add size endings.': {
+    es: 'Resuelve la talla de origen o elige No añadir terminaciones de talla.',
+    zh: '请确认原始尺寸，或选择“不添加尺寸后缀”。',
+  },
+  'Code endings follow the workbook declaration.': {
+    es: 'Las terminaciones siguen la declaración del libro.',
+    zh: '编码后缀遵循工作簿声明。',
+  },
+  'Custom code endings differ from the workbook declaration.': {
+    es: 'Las terminaciones personalizadas difieren de la declaración del libro.',
+    zh: '自定义编码后缀与工作簿声明不同。',
+  },
+  'Code endings are suggested from source descriptions or edited manually.': {
+    es: 'Las terminaciones se sugieren a partir de las descripciones o se editan manualmente.',
+    zh: '编码后缀根据原始描述建议或手动编辑。',
+  },
+  'Do not add size endings': {
+    es: 'No añadir terminaciones de talla',
+    zh: '不添加尺寸后缀',
+  },
+  'Suggest size endings from descriptions': {
+    es: 'Sugerir terminaciones de talla desde las descripciones',
+    zh: '根据描述建议尺寸后缀',
+  },
+  'Remove only the size endings from these barcodes. Keep variant letters, physical measurements, source descriptions and other products unchanged.':
+    {
+      es: 'Quita solo las terminaciones de talla de estos códigos. Conserva las letras de variante, medidas físicas, descripciones y otros productos.',
+      zh: '仅移除这些条码的尺寸后缀。保留款式字母、实际尺寸、原始描述及其他商品。',
+    },
+  'Review size endings suggested from the descriptions. Applying them is an explicit code edit; workbook declarations and physical measurements remain unchanged.':
+    {
+      es: 'Revisa las terminaciones de talla sugeridas desde las descripciones. Aplicarlas es una edición explícita del código; las declaraciones y medidas físicas se conservan.',
+      zh: '审核根据描述建议的尺寸后缀。应用后属于明确的编码编辑；工作簿声明和实际尺寸保持不变。',
+    },
+  'This import review is no longer available.': {
+    es: 'Esta revisión de importación ya no está disponible.',
+    zh: '此导入审核已不可用。',
+  },
 }

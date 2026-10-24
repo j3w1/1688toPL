@@ -7,15 +7,15 @@ import {
   EXCEL_IMAGE_PREFERENCE,
 } from '../src/excel-image-options.js'
 
-test('image columns default to all product and blank supplier fields', () => {
+test('default columns keep existing fields and offer extra workbook fields without selecting them', () => {
   const value = normalizeExcelImagePreference()
   assert.equal(value.showOrderDetails, true)
-  assert.equal(value.order.length, 11)
-  assert.deepEqual(value.selected, value.order)
-  assert.deepEqual(value.order.slice(-3), [
-    'supplierDimensions',
-    'supplierWeight',
-    'supplierCarton',
+  assert.equal(value.order.length, 30)
+  assert.deepEqual(value.selected, value.order.slice(0, 11))
+  assert.deepEqual(value.order.slice(8, 11), [
+    'cartonDimensions',
+    'cartonWeight',
+    'cartonNumberBlank',
   ])
 })
 
@@ -25,8 +25,8 @@ test('saved image column order is validated without silently reselecting disable
     selected: ['quantity', 'supplierCarton', 'removed', 'quantity'],
   })
   assert.deepEqual(value.order.slice(0, 2), ['quantity', 'price'])
-  assert.equal(new Set(value.order).size, 11)
-  assert.deepEqual(value.selected, ['quantity', 'supplierCarton'])
+  assert.equal(new Set(value.order).size, 30)
+  assert.deepEqual(value.selected, ['quantity', 'cartonNumberBlank'])
   assert.deepEqual(normalizeExcelImagePreference({ selected: [] }).selected, [])
   assert.equal(
     normalizeExcelImagePreference({ selected: ['quantity'] }).showOrderDetails,

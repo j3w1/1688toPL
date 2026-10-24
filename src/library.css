@@ -3,6 +3,7 @@
 @import './image-copy-dialog.css';
 @import './appearance-settings.css';
 @import './packing-review.css';
+@import './product-detail-editor.css';
 
 .preparation-help-shortcut {
   display: flex;
@@ -965,100 +966,6 @@ tbody tr:hover {
 #sheet-body .measurement-cell:last-child {
   padding-inline-end: 12px;
 }
-.carton-measurement {
-  --carton-measurement-width: 7ch;
-  display: inline-flex;
-  align-items: center;
-  position: relative;
-  min-inline-size: 0;
-  max-inline-size: 100%;
-  block-size: 23px;
-  vertical-align: middle;
-  color: var(--text);
-  font-size: inherit;
-  font-weight: inherit;
-  font-variant-numeric: tabular-nums;
-}
-.carton-measurement[data-field='cbm'] {
-  --carton-measurement-width: 9ch;
-}
-/* These small table fields must win over the generic text-input/dialog rules. */
-.carton-measurement[data-field] > input[type='text'] {
-  display: block;
-  box-sizing: border-box;
-  inline-size: var(--carton-measurement-width);
-  min-inline-size: 0;
-  max-inline-size: 100%;
-  block-size: 23px;
-  min-block-size: 23px;
-  max-block-size: 23px;
-  margin: 0;
-  padding: 1px 3px;
-  border: 1px solid transparent;
-  border-radius: 3px;
-  background: transparent;
-  box-shadow: none;
-  color: inherit;
-  font: inherit;
-  font-size: inherit;
-  text-align: end;
-  text-box: normal;
-  line-height: 18px;
-}
-.carton-measurement-unit {
-  flex: 0 0 auto;
-  margin-inline-start: 2px;
-  color: var(--muted);
-  font-size: 9px;
-  line-height: 1;
-  font-weight: 400;
-  pointer-events: none;
-}
-.carton-measurement-unit[hidden] {
-  display: none;
-}
-.carton-measurement:has(.carton-measurement-unit:not([hidden]))
-  > input[type='text'] {
-  inline-size: calc(var(--carton-measurement-width) - 15px);
-}
-.carton-measurement[data-field]
-  > input[type='text']:is(:hover, :focus-visible) {
-  border-color: transparent;
-  border-block-end-color: var(--border);
-  background: var(--field);
-}
-.carton-measurement[data-field] > input[type='text']:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 1px;
-}
-.carton-measurement[data-state='saved']:not(:focus-within)
-  > input[type='text'] {
-  border-block-end-color: var(--success-text);
-}
-.carton-measurement[data-state='error'][data-field] > input[type='text'] {
-  border-block-end-color: var(--danger-text);
-  color: var(--danger-text);
-}
-.carton-measurement[data-state='error'] .carton-measurement-status {
-  position: absolute;
-  z-index: 2;
-  inset-block-start: calc(100% + 3px);
-  inset-inline-end: 0;
-  clip: auto;
-  clip-path: none;
-  inline-size: max-content;
-  max-inline-size: 200px;
-  block-size: auto;
-  margin: 0;
-  padding: 4px 6px;
-  border-radius: 4px;
-  background: var(--danger);
-  color: var(--danger-text);
-  box-shadow: 0 2px 8px #0002;
-  white-space: normal;
-  text-align: start;
-  font-size: 10px;
-}
 .thumb-cell {
   width: 90px;
   padding-inline: 6px 10px;
@@ -1586,6 +1493,22 @@ dialog {
 dialog::backdrop {
   background: #100d099e;
 }
+.order-removal-dialog .scroll-dialog-content {
+  overflow-wrap: anywhere;
+}
+.order-removal-dialog .danger {
+  color: var(--danger-text);
+}
+.order-removal-orders {
+  padding-inline-start: 20px;
+}
+.order-removal-blockers {
+  border-inline-start: 3px solid var(--error);
+  padding-inline-start: 12px;
+}
+.order-removal-blockers h3 {
+  font-size: 14px;
+}
 .dialog-close {
   float: right;
   border: 0;
@@ -1972,246 +1895,6 @@ dialog a {
   border-radius: 12px;
   background: color-mix(in srgb, var(--surface), var(--control-accent) 3%);
   font-size: 12px;
-}
-.product-carton-heading {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 4px 10px;
-  margin-block-end: 10px;
-}
-.product-carton-heading h3 {
-  margin: 0;
-  font-size: 13px;
-}
-.product-carton-heading > span {
-  color: var(--muted);
-  font-size: 10px;
-}
-.product-carton-details form {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
-  min-inline-size: 0;
-  max-inline-size: 100%;
-  align-items: start;
-  gap: 9px 18px;
-}
-.product-carton-details fieldset {
-  min-inline-size: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-.product-carton-basics,
-.product-carton-dimension-fields {
-  display: grid;
-  grid-template-columns: 130px 138px;
-  align-items: start;
-  gap: 10px;
-}
-.product-carton-field {
-  min-inline-size: 0;
-}
-.product-carton-field label,
-.product-carton-dimensions legend {
-  display: block;
-  margin: 0 0 4px;
-  padding: 0;
-  color: var(--muted);
-  font-size: 11px;
-}
-.product-carton-control {
-  display: flex;
-  align-items: center;
-  min-inline-size: 0;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--field);
-}
-.product-carton-control:focus-within {
-  border-color: var(--control-accent);
-  outline: 1px solid var(--control-accent);
-}
-.product-carton-details .product-carton-control input {
-  flex: 1;
-  min-inline-size: 0;
-  inline-size: 4ch;
-  width: 4ch;
-  min-block-size: 32px;
-  block-size: 32px;
-  height: 32px;
-  box-sizing: border-box;
-  margin: 0;
-  padding: 4px 7px;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-}
-.product-carton-geometry {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  min-inline-size: 0;
-}
-.product-carton-cube {
-  flex: none;
-  inline-size: 52px;
-  block-size: 50px;
-  color: var(--control-accent);
-}
-.product-carton-unit {
-  flex: none;
-  margin-inline-end: 7px;
-  color: var(--muted);
-  font-size: 10px;
-  white-space: nowrap;
-}
-.product-carton-stepper {
-  display: grid;
-  grid-template-columns: 30px minmax(0, 1fr) 30px;
-}
-.product-carton-stepper button {
-  min-inline-size: 0;
-  min-block-size: 32px;
-  block-size: 32px;
-  height: 32px;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  font-size: 18px;
-}
-.product-carton-stepper input {
-  appearance: textfield;
-  text-align: center;
-}
-.product-carton-stepper input::-webkit-inner-spin-button,
-.product-carton-stepper input::-webkit-outer-spin-button {
-  appearance: none;
-  margin: 0;
-}
-.product-carton-dimensions legend {
-  margin-block-end: 6px;
-}
-.product-carton-dimension-fields {
-  grid-template-columns: minmax(64px, 76px) auto minmax(64px, 76px) auto minmax(
-      64px,
-      76px
-    );
-  gap: 7px;
-}
-.product-carton-times {
-  align-self: end;
-  padding-block-end: 8px;
-  color: var(--muted);
-}
-.product-carton-note {
-  margin: 6px 0 0;
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1.4;
-}
-.product-carton-volume {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
-  align-items: center;
-  gap: 2px 12px;
-  padding-block: 6px;
-  border-block: 1px solid var(--divider);
-}
-.product-carton-volume-label {
-  font-size: 11px;
-}
-.product-carton-volume-amount {
-  grid-column: 2;
-  grid-row: 1 / 3;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: flex-end;
-  gap: 4px;
-  min-inline-size: 0;
-  overflow-wrap: anywhere;
-  font-variant-numeric: tabular-nums;
-}
-.product-carton-volume-value {
-  min-inline-size: 0;
-  color: var(--control-accent);
-  font-size: 19px;
-  line-height: 1.25;
-}
-.product-carton-volume-source {
-  grid-column: 1;
-  color: var(--muted);
-  font-size: 10px;
-}
-.product-carton-footer {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.product-carton-footer button {
-  flex: none;
-  min-block-size: 30px;
-  padding: 4px 7px;
-  font-size: 11px;
-}
-.product-carton-status {
-  min-inline-size: 0;
-  color: var(--muted);
-  font-size: 11px;
-  overflow-wrap: anywhere;
-}
-.product-carton-supplied {
-  grid-column: 1 / -1;
-  margin: 0;
-  color: var(--muted);
-  font-size: 10px;
-}
-.product-carton-details[data-save-state='error'] .product-carton-status {
-  color: var(--danger-text);
-}
-@media (max-width: 880px) {
-  .product-carton-details form {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-@media (max-width: 580px) {
-  .product-carton-basics {
-    grid-template-columns: minmax(105px, 0.9fr) minmax(0, 1.1fr);
-  }
-  .product-carton-geometry {
-    gap: 6px;
-  }
-  .product-carton-cube {
-    inline-size: 40px;
-  }
-  .product-carton-dimension-fields {
-    grid-template-columns:
-      minmax(56px, 76px) auto minmax(56px, 76px)
-      auto minmax(56px, 76px);
-  }
-}
-@media (pointer: coarse) {
-  .product-carton-details .product-carton-control input,
-  .product-carton-stepper button,
-  .product-carton-footer button {
-    min-block-size: 48px;
-    block-size: 48px;
-    height: 48px;
-  }
-  .product-carton-stepper {
-    grid-template-columns: 48px minmax(0, 1fr) 48px;
-  }
-  .product-carton-basics {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
 .store-source-file {
   display: flex;

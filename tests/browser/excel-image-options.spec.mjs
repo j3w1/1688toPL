@@ -134,7 +134,7 @@ for (const mode of ['light', 'dark'])
       mode
     )
     const dialog = page.getByRole('dialog', {
-      name: 'Copy Excel image',
+      name: 'Excel...',
       exact: true,
     })
     const assertPreviewAndCopy = async () => {
@@ -241,9 +241,7 @@ for (const mode of ['light', 'dark'])
     await page.evaluate(() => {
       window.badgeText = []
     })
-    await packing
-      .getByRole('button', { name: 'Copy Excel image', exact: true })
-      .click()
+    await packing.getByRole('button', { name: 'Excel...', exact: true }).click()
     await assertPreviewAndCopy()
     expect(extension.unexpectedRequests).toEqual([])
   })
@@ -495,7 +493,7 @@ test('store and order details toggle regenerates the raster and persists across 
     3
   )
   const dialog = page.getByRole('dialog', {
-    name: 'Copy Excel image',
+    name: 'Excel...',
     exact: true,
   })
   const toggle = dialog.getByRole('checkbox', {
@@ -558,9 +556,7 @@ test('store and order details toggle regenerates the raster and persists across 
   await page.evaluate(() => {
     window.excelIdentityText = []
   })
-  await packing
-    .getByRole('button', { name: 'Copy Excel image', exact: true })
-    .click()
+  await packing.getByRole('button', { name: 'Excel...', exact: true }).click()
   await ready()
   await expect(toggle).not.toBeChecked()
   await assertIdentity(false)
@@ -616,11 +612,9 @@ test('image columns reorder, persist across copying and reload, and use the sele
   await expect(page.locator('#sheet-body tr[data-selection-key]')).toHaveCount(
     3
   )
-  await page
-    .getByRole('button', { name: 'Copy Excel image', exact: true })
-    .click()
+  await page.getByRole('button', { name: 'Excel...', exact: true }).click()
   let dialog = page.getByRole('dialog', {
-    name: 'Copy Excel image',
+    name: 'Excel...',
     exact: true,
   })
   await expect(
@@ -632,7 +626,7 @@ test('image columns reorder, persist across copying and reload, and use the sele
   await expect(
     dialog.locator('.excel-column-toggle[aria-pressed="true"]')
   ).toHaveCount(11)
-  const selected = ['quantity', 'price', 'supplierWeight']
+  const selected = ['quantity', 'price', 'cartonWeight']
   for (const key of [
     'number',
     'thumbnail',
@@ -640,8 +634,8 @@ test('image columns reorder, persist across copying and reload, and use the sele
     'baseCode',
     'barcode',
     'chineseCategory',
-    'supplierDimensions',
-    'supplierCarton',
+    'cartonDimensions',
+    'cartonNumberBlank',
   ]) {
     await dialog.locator(`[data-column="${key}"] .excel-column-toggle`).click()
   }
@@ -693,7 +687,7 @@ test('image columns reorder, persist across copying and reload, and use the sele
   await expect(
     dialog.locator('.excel-column-toggle[aria-pressed="true"]')
   ).toHaveCount(3)
-  await expect(dialog.locator('[data-column="supplierWeight"]')).toContainText(
+  await expect(dialog.locator('[data-column="cartonWeight"]')).toContainText(
     'Peso (kg)'
   )
   const description = dialog.locator('[data-column="description"]')
@@ -799,7 +793,7 @@ test('image columns reorder, persist across copying and reload, and use the sele
   })
   await page.locator('#copy-excel-image').click()
   await expect(dialog.locator('.image-copy-submit')).toHaveAccessibleName(
-    'Copiar lote actual'
+    'Copiar imagen'
   )
   await dialog.locator('.image-copy-submit').click()
   await expect(dialog.locator('[data-batch-index="0"]')).toHaveClass(
@@ -829,11 +823,9 @@ test('image columns reorder, persist across copying and reload, and use the sele
     ]),
     packing = await openContainerOutput(page, id)
   await expect(packing.locator('tr[data-container-row]')).toHaveCount(3)
-  await packing
-    .getByRole('button', { name: 'Copy Excel image', exact: true })
-    .click()
+  await packing.getByRole('button', { name: 'Excel...', exact: true }).click()
   dialog = page.getByRole('dialog', {
-    name: 'Copy Excel image',
+    name: 'Excel...',
     exact: true,
   })
   await expect(

@@ -46,7 +46,6 @@ await cp(path.join(root, 'src/assets'), path.join(output, 'assets'), {
 for (const resource of [
   'library.html',
   'library.css',
-  'carton-batches.css',
   'store-import.css',
   'order-charges.css',
   'operations.css',
@@ -60,6 +59,7 @@ for (const resource of [
   'appearance-settings.css',
   'packing.css',
   'packing-review.css',
+  'product-detail-editor.css',
   'label-editor.css',
   'shell.css',
   'smart-cartons.css',
@@ -83,7 +83,6 @@ const resources = [
   manifest.background.service_worker,
   'library.html',
   'library.css',
-  'carton-batches.css',
   'photo-viewer.css',
   'copy-actions.css',
   'code-design.css',
@@ -94,6 +93,7 @@ const resources = [
   'theme.js',
   'packing.css',
   'packing-review.css',
+  'product-detail-editor.css',
   'label-editor.css',
   'shell.css',
   'smart-cartons.css',
@@ -106,6 +106,13 @@ for (const [, resource] of workspaceHtml.matchAll(
   /<link\b[^>]*\bhref="([^"]+\.css)"/g
 ))
   await readFile(path.join(output, resource))
+for (const resource of resources.filter((resource) =>
+  resource.endsWith('.css')
+)) {
+  const css = await readFile(path.join(output, resource), 'utf8')
+  for (const [, imported] of css.matchAll(/@import\s+['"]([^'"]+\.css)['"]/g))
+    await readFile(path.resolve(output, path.dirname(resource), imported))
+}
 console.log(
   `Built complete extension ${pkg.version} → dist (${resources.length} manifest resources verified)`
 )

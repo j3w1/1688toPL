@@ -645,6 +645,121 @@
   outline: 1px solid var(--danger-text, #cf4b50);
   outline-offset: 1px;
 }
+.store-import-actions {
+  flex-wrap: wrap;
+  flex: 0 1 auto;
+  justify-content: flex-end;
+}
+.store-import-code-review[hidden],
+.store-import-workbook-review[hidden],
+.store-import-actions > button[hidden] {
+  display: none;
+}
+.store-import-code-review > h3 {
+  margin: 0 0 8px;
+}
+.store-import-code-review {
+  min-inline-size: 0;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.store-import-code-review > p {
+  color: var(--muted);
+  margin: 6px 0;
+}
+.store-import-code-list {
+  block-size: min(55dvh, 520px);
+  min-block-size: 220px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding-inline-end: 6px;
+}
+.store-import-code-group {
+  min-inline-size: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-block-end: 12px;
+  padding: 12px;
+  overflow-wrap: anywhere;
+}
+.store-import-code-group h4 {
+  margin: 0 0 10px;
+}
+.store-import-code-field {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+  min-inline-size: 0;
+}
+.store-import-code-field input {
+  box-sizing: border-box;
+  inline-size: 100%;
+  min-inline-size: 0;
+  font-family: ui-monospace, monospace;
+}
+.store-import-code-group > .store-import-code-field {
+  max-inline-size: 32ch;
+}
+.store-import-code-variant {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 8px 12px;
+  padding-block: 12px;
+  border-block-end: 1px solid var(--border);
+  margin-block-end: 10px;
+}
+.store-import-code-variant > img {
+  inline-size: 64px;
+  block-size: 64px;
+  object-fit: contain;
+  border-radius: 4px;
+  background: var(--field);
+}
+.store-import-code-source {
+  min-inline-size: 0;
+}
+.store-import-code-source p {
+  margin: 0 0 5px;
+}
+.store-import-code-source small {
+  display: block;
+  color: var(--muted);
+  margin-block: 4px;
+}
+.store-import-code-endings {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px 10px;
+}
+.store-import-code-endings > :is(span, code) {
+  grid-column: 1 / -1;
+}
+.store-import-barcode {
+  font-size: 14px;
+}
+.store-import-code-errors ul {
+  max-block-size: 145px;
+  overflow: auto;
+  margin: 6px 0 12px;
+  padding-inline-start: 20px;
+}
+.store-import-code-errors li button {
+  display: block;
+  padding: 3px 0;
+  text-align: start;
+  color: var(--danger-text, #cf4b50);
+  background: transparent;
+  white-space: normal;
+}
+.store-import-code-error {
+  color: var(--danger-text, #cf4b50);
+}
+.store-import-code-error > span {
+  display: block;
+}
 @media (max-width: 1150px) {
   .store-import-setup {
     grid-template-columns: repeat(2, minmax(0, 1fr));

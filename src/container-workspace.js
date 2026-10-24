@@ -5,6 +5,7 @@ import { measurementWarningMessages } from './ui-messages-smart-cartons.js'
 import { photoCopyTile } from './photo-copy.js'
 import { copySingleImage } from './clipboard.js'
 import { mountProductCopyActions, mountCopyActions } from './copy-actions.js'
+import { decorateIcon } from './icons.js'
 
 const clone = (value) => structuredClone(value)
 const orderRef = (order) => ({
@@ -520,8 +521,11 @@ export function createContainerWorkspace({
     // No selected or filtered product rows enter this request.
     return output.openWorkbook(await output.containerContext(route))
   })
-  action(tools, 'Copy Excel image', 'copy-excel-image', () =>
-    capturedCopy('excel-image')
+  decorateIcon(
+    action(tools, 'Excel...', 'copy-excel-image', () =>
+      capturedCopy('excel-image')
+    ),
+    'excel'
   )
   action(tools, 'Copy values', 'copy-values', (target) =>
     copied(target, () => capturedCopy('values'), { onError: failure })

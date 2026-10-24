@@ -5,6 +5,18 @@ const key = (value) =>
     .toLowerCase()
     .replace(/\s+/g, ' ')
 
+/** A populated var marker declares the complete ending, including absent parts. */
+export function spreadsheetDeclaration(item = {}) {
+  if (!String(item?.sourceGroup ?? '').trim()) return null
+  const variantSuffix = String(item.sourceVariant ?? '')
+      .trim()
+      .toUpperCase(),
+    sizeSuffix = String(item.sourceSize ?? '')
+      .trim()
+      .toUpperCase()
+  return variantSuffix || sizeSuffix ? { variantSuffix, sizeSuffix } : null
+}
+
 /** Read-only recognition input. Spreadsheet descriptions contain marked cells,
  * unlike 1688 titles, which can contain unrelated marketing text and numbers. */
 export function recognitionProperties(item = {}) {

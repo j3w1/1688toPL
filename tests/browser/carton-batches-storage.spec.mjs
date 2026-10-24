@@ -164,7 +164,12 @@ test('deleted batches survive old backups without resurrection and source refres
   const result = await page.evaluate(async (source) => {
     const first = await lib.saveCartonBatch(newBatch()),
       old = await lib.exportBackup()
-    await lib.removeCartonBatch(first)
+    await lib.saveCartonBatches([
+      {
+        after: { ...first, deletedAt: new Date().toISOString() },
+        expectedRevision: first.revision,
+      },
+    ])
     const beforeRestore = await lib.exportBackup()
     let conflict
     try {
@@ -404,24 +409,26 @@ test('v3 database upgrade converts historical defaults once and later v4 default
     const first = await upgraded.listCartonBatches(),
       sourceAfterUpgrade = await upgraded.getOrder('1001')
     await upgraded.setUnitsPerCarton('1001', '3', 10)
-    await upgraded.setCartonDetails('1001', '3', {
-      kg: '5',
-      len: '50',
-      wid: '40',
-      ht: '30',
-    })
+    const dimensionsOnly = await upgraded.exportBackup()
+    dimensionsOnly.orders[0].cartonDetails = {
+      ...dimensionsOnly.orders[0].cartonDetails,
+      3: { kg: '5', len: '50', wid: '40', ht: '30' },
+    }
+    dimensionsOnly.orders[0].cartonDetailsUpdatedAt = new Date(
+      Date.now() + 1000
+    ).toISOString()
+    await upgraded.restoreBackup(dimensionsOnly)
     const afterDefaults = await upgraded.listCartonBatches(),
       exported = await upgraded.exportBackup()
     upgraded.close()
     upgraded = await openDatabase({ name })
     const reopened = await upgraded.listCartonBatches()
-    await upgraded.setCartonDetails('1001', '3', {
-      boxes: '2',
-      kg: '5',
-      len: '50',
-      wid: '40',
-      ht: '30',
-    })
+    const explicitBoxes = await upgraded.exportBackup()
+    explicitBoxes.orders[0].cartonDetails['3'].boxes = '2'
+    explicitBoxes.orders[0].cartonDetailsUpdatedAt = new Date(
+      Date.now() + 2000
+    ).toISOString()
+    await upgraded.restoreBackup(explicitBoxes)
     const withExplicitBoxes = await upgraded.listCartonBatches()
     upgraded.close()
     return {

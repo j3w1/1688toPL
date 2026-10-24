@@ -10,6 +10,7 @@ import { squareProductPhoto } from './product-photo.js'
 import { popupLanguageToggle } from './popup-language-toggle.js'
 import { photoCopyTile } from './photo-copy.js'
 import { copySingleImage } from './clipboard.js'
+import { mountStoreImportCodeReview } from './store-import-code-review.js'
 
 const positiveInteger = (value) =>
   /^\d+$/.test(String(value ?? '')) &&
@@ -354,14 +355,22 @@ export function openStoreImportDialog({
     header = el('header', undefined, 'store-import-header'),
     heading = el('div'),
     title = el('h2', m('Import store spreadsheet')),
-    subtitle = el('p', m('Review one sheet, then save it as a new order.')),
+    subtitle = el(
+      'p',
+      m('Review the workbook, then review and assign its product codes.')
+    ),
     actions = el('div', undefined, 'store-import-actions'),
-    submit = el('button', m('Import order'), 'primary'),
+    submit = el('button', m('Review products and codes'), 'primary'),
+    back = el('button', m('Back')),
+    resetCodes = el('button', m('Reset to suggested')),
+    cancelCodes = el('button', m('Cancel')),
     close = decorateIcon(el('button', m('Close import')), 'close', {
       iconOnly: true,
     }),
     layout = el('div', undefined, 'store-import-layout'),
     body = el('div', undefined, 'store-import-body'),
+    workbookReview = el('div', undefined, 'store-import-workbook-review'),
+    codeReview = el('fieldset', undefined, 'store-import-code-review'),
     guide = el('aside', undefined, 'store-import-sidebar'),
     guideTitle = el('h3', m('Workbook guide')),
     setup = el('section', undefined, 'store-import-setup'),
@@ -392,7 +401,12 @@ export function openStoreImportDialog({
     busy = false,
     saveLocked = false,
     readingController,
-    submitted = false
+    submitted = false,
+    codeView,
+    codeFingerprint,
+    codeIntent,
+    reviewingCodes = false,
+    codeValidity = { pending: false, valid: false }
   const allocations = new Map(),
     reviewedIssues = new Set(),
     reviewChecks = new Map()
@@ -449,6 +463,15 @@ export function openStoreImportDialog({
   duplicateNotice.setAttribute('role', 'status')
   form.noValidate = true
   submit.type = 'submit'
+  submit.dataset.action = 'review-import-codes'
+  codeReview.dataset.action = 'store-import-code-review'
+  codeReview.hidden = true
+  for (const button of [back, resetCodes, cancelCodes]) {
+    button.type = 'button'
+    button.hidden = true
+  }
+  back.dataset.action = 'back-import-workbook'
+  resetCodes.dataset.action = 'reset-import-codes'
   close.type = 'button'
   close.addEventListener('click', () => dialog.close())
   file.accept = '.xlsx,.xls'
@@ -472,7 +495,14 @@ export function openStoreImportDialog({
   }
   heading.append(title, subtitle)
   decorateIcon(submit, 'upload')
-  actions.append(popupLanguageToggle(dialog), submit, close)
+  actions.append(
+    popupLanguageToggle(dialog),
+    back,
+    resetCodes,
+    cancelCodes,
+    submit,
+    close
+  )
   header.append(heading, actions)
   const dateField = field('Purchase date', purchaseDate)
   dateField.classList.add('store-import-date-field')
@@ -524,10 +554,9 @@ export function openStoreImportDialog({
   checksStatus.setAttribute('role', 'status')
   checksHeader.append(checksTitle, checksStatus, allReviewsLabel)
   checksHeader.hidden = true
-  body.append(
+  workbookReview.append(
     setup,
     identity,
-    status,
     duplicateNotice,
     checksHeader,
     issues,
@@ -535,17 +564,62 @@ export function openStoreImportDialog({
     products,
     reviewLabel
   )
+  body.append(status, workbookReview, codeReview)
   layout.append(body, guide)
   form.append(header, layout)
   dialog.append(form)
 
+  const updateSubmit = () => {
+    submit.disabled =
+      busy ||
+      submitted ||
+      (reviewingCodes && (codeValidity.pending || !codeValidity.valid))
+    resetCodes.disabled = busy || codeValidity.pending
+    back.disabled = busy || codeValidity.resetting
+    codeReview.disabled = busy || codeValidity.resetting
+    cancelCodes.disabled = saveLocked
+  }
+  const setCodeStage = (value) => {
+    reviewingCodes = value
+    workbookReview.hidden = value
+    codeReview.hidden = !value
+    for (const button of [back, resetCodes, cancelCodes]) button.hidden = !value
+    bindText(
+      submit,
+      m(value ? 'Import and assign codes' : 'Review products and codes')
+    )
+    if (value) submit.dataset.action = 'import-and-assign-codes'
+    else submit.dataset.action = 'review-import-codes'
+    updateSubmit()
+    body.scrollTop = 0
+    if (value) {
+      codeView?.update()
+      codeReview.querySelector('input')?.focus()
+    } else purchaseDate.focus()
+  }
+  const discardCodes = () => {
+    codeView?.destroy()
+    codeView = undefined
+    codeFingerprint = undefined
+    codeIntent = undefined
+    codeValidity = { pending: false, valid: false }
+    setCodeStage(false)
+  }
+  back.addEventListener('click', () => setCodeStage(false))
+  cancelCodes.addEventListener('click', () => dialog.close())
+  resetCodes.addEventListener('click', () => {
+    void codeView?.validate({ resetCodes: true })
+  })
   const setBusy = (value, { saving = false } = {}) => {
     busy = value
     saveLocked = value && saving
-    submit.disabled = value || submitted
+    updateSubmit()
     close.disabled = saveLocked
     file.disabled = value
     sheet.disabled = value || !workbook
+    storeName.disabled = purchaseDate.disabled = photosReviewed.disabled = value
+    for (const control of products.querySelectorAll('input,button'))
+      control.disabled = value
     form.setAttribute('aria-busy', String(value))
     updateReviews()
   }
@@ -561,6 +635,7 @@ export function openStoreImportDialog({
     status.focus()
   }
   const render = () => {
+    discardCodes()
     issues.replaceChildren()
     summary.replaceChildren()
     products.replaceChildren()
@@ -834,6 +909,45 @@ export function openStoreImportDialog({
   form.addEventListener('submit', async (event) => {
     event.preventDefault()
     if (busy || submitted) return
+    if (reviewingCodes) {
+      if (!codeView?.valid) {
+        codeView?.showErrors()
+        return
+      }
+      setBusy(true, { saving: true })
+      status.classList.remove('is-error')
+      bindText(status, m('Saving the reviewed order and codes…'))
+      try {
+        if (!(await codeView.validate())) {
+          bindText(status, m('Resolve these code issues before importing.'))
+          status.classList.add('is-error')
+          codeView.showErrors()
+          return
+        }
+        const { candidate, preparation } = codeView.review
+        const record = await repository.importStoreOrder({
+          candidate,
+          preparation,
+          intentId: codeIntent,
+        })
+        submitted = true
+        await onImported(record)
+        dialog.close()
+      } catch (error) {
+        if (!submitted) await codeView.validate()
+        fail(
+          submitted
+            ? {
+                message:
+                  'The order was imported. Close this window and reopen the workspace to refresh the table.',
+              }
+            : error
+        )
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
     const review = validateStoreImportReview(analysis, {
       purchaseDate: purchaseDate.value,
       storeName: storeName.value,
@@ -852,8 +966,28 @@ export function openStoreImportDialog({
       status.focus()
       return
     }
-    setBusy(true, { saving: true })
-    bindText(status, m('Saving the reviewed order…'))
+    const fingerprint = JSON.stringify({
+      filename: analysis.filename,
+      sheetName: analysis.sheetName,
+      total: analysis.total,
+      purchaseDate: purchaseDate.value,
+      store: { ...analysis.store, name: storeName.value.trim() },
+      rows: review.rows,
+    })
+    if (codeView && codeFingerprint === fingerprint) {
+      setCodeStage(true)
+      status.classList.remove('is-error')
+      bindText(status, m('Review the proposed codes before importing.'))
+      void codeView.validate()
+      return
+    }
+    const previousDraft = Boolean(codeView)
+    codeView?.destroy()
+    codeView = undefined
+    const reviewGeneration = generation
+    setBusy(true)
+    status.classList.remove('is-error')
+    bindText(status, m('Preparing proposed product codes…'))
     try {
       const importRows = [],
         thumbnails = new Map()
@@ -873,8 +1007,7 @@ export function openStoreImportDialog({
           thumbnail: row.thumbnail || thumbnails.get(original),
         })
       }
-      bindText(status, m('Saving the reviewed order…'))
-      const record = await repository.importStoreOrder({
+      const result = await repository.reviewStoreOrderImport({
         filename: analysis.filename,
         sheetName: analysis.sheetName,
         total: analysis.total,
@@ -882,9 +1015,35 @@ export function openStoreImportDialog({
         store: { ...analysis.store, name: storeName.value.trim() },
         rows: importRows,
       })
-      submitted = true
-      await onImported(record)
-      dialog.close()
+      if (generation !== reviewGeneration || !dialog.isConnected) return
+      codeFingerprint = fingerprint
+      codeIntent = crypto.randomUUID()
+      codeView = mountStoreImportCodeReview(codeReview, {
+        repository,
+        review: result,
+        sourceRows: review.rows.map((row) => ({
+          ...row,
+          variantDeclaration:
+            workbook.sheets
+              .find((value) => value.name === analysis.sheetName)
+              ?.rows.find((value) => value.row === row.row)
+              ?.cells.find((cell) => cell.address === row.cells.var)?.value ??
+            '',
+        })),
+        onValidity: (value) => {
+          codeValidity = value
+          updateSubmit()
+        },
+      })
+      setCodeStage(true)
+      bindText(
+        status,
+        m(
+          previousDraft
+            ? 'Workbook details changed. Review the regenerated codes.'
+            : 'Review the proposed codes before importing.'
+        )
+      )
     } catch (error) {
       fail(
         submitted
@@ -896,6 +1055,8 @@ export function openStoreImportDialog({
       )
     } finally {
       setBusy(false)
+      if (reviewingCodes && !submitted)
+        codeReview.querySelector('input')?.focus()
     }
   })
   dialog.addEventListener('cancel', (event) => {
@@ -906,6 +1067,7 @@ export function openStoreImportDialog({
     () => {
       generation++
       readingController?.abort()
+      codeView?.destroy()
       photoViewer.close()
       dialog.remove()
     },

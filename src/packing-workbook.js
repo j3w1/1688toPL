@@ -1824,6 +1824,15 @@ export function planPackingWorkbook(rows, options = {}) {
   }
 }
 
+function fontProperties(font = {}, familyTag = 'name') {
+  const color = String(font.color || '#222222').replace(/^#/, '')
+  const rgb =
+    color.length === 3
+      ? [...color].map((value) => value + value).join('')
+      : color
+  return `${font.bold ? '<b/>' : ''}<sz val="${font.size || 12}"/><${familyTag} val="${xml(font.name || 'Segoe UI')}"/><color rgb="FF${rgb.toUpperCase()}"/>`
+}
+
 function serializeCell(cell, row, column) {
   const ref = `${columnName(column)}${row}`,
     style = ` s="${cell.style}"`
@@ -1835,16 +1844,19 @@ function serializeCell(cell, row, column) {
   // Excel stores 15 significant digits: preserve larger source values as text.
   if (cell.type === 'number' && value && excelNumber(value))
     return `<c r="${ref}"${style}><v>${value}</v></c>`
+  if (cell.richText?.length)
+    return `<c r="${ref}"${style} t="inlineStr"><is>${cell.richText.map((run) => `<r><rPr>${fontProperties(run.font, 'rFont')}</rPr><t xml:space="preserve">${xml(run.text)}</t></r>`).join('')}</is></c>`
   return `<c r="${ref}"${style} t="inlineStr"><is><t xml:space="preserve">${xml(value)}</t></is></c>`
 }
 
 function sheetXml(plan, images) {
+  const headerRow = plan.headerRow || 5
   const frozenColumns =
     plan.columns[0]?.key === 'photo' && plan.columns[1]?.key === 'barcode'
       ? 2
       : 0
   const pane = plan.freezeHeaders
-    ? `<pane ${frozenColumns ? `xSplit="${frozenColumns}" ` : ''}ySplit="5" topLeftCell="${columnName(frozenColumns)}6" activePane="${frozenColumns ? 'bottomRight' : 'bottomLeft'}" state="frozen"/>`
+    ? `<pane ${frozenColumns ? `xSplit="${frozenColumns}" ` : ''}ySplit="${headerRow}" topLeftCell="${columnName(frozenColumns)}${headerRow + 1}" activePane="${frozenColumns ? 'bottomRight' : 'bottomLeft'}" state="frozen"/>`
     : ''
   const links = plan.rows.flatMap((row) =>
     row.cells.flatMap((cell, column) =>
@@ -1855,10 +1867,10 @@ function sheetXml(plan, images) {
         : []
     )
   )
-  return `${XML_HEADER}<worksheet xmlns="${MAIN}" xmlns:r="${REL}"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><dimension ref="A1:${plan.lastColumn}${plan.lastRow}"/><sheetViews><sheetView workbookViewId="0">${pane}</sheetView></sheetViews><sheetFormatPr defaultRowHeight="18"/><cols>${plan.columns.map((column, index) => `<col min="${index + 1}" max="${index + 1}" width="${column.width}" customWidth="1"/>`).join('')}</cols><sheetData>${plan.rows.map((row) => `<row r="${row.number}" ht="${row.height}" customHeight="1">${row.cells.map((cell, index) => serializeCell(cell, row.number, index)).join('')}</row>`).join('')}</sheetData>${plan.filters ? `<autoFilter ref="A5:${plan.lastColumn}${plan.lastProductRow}"/>` : ''}${plan.merges.length ? `<mergeCells count="${plan.merges.length}">${plan.merges.map((ref) => `<mergeCell ref="${ref}"/>`).join('')}</mergeCells>` : ''}${links.length ? `<hyperlinks>${links.join('')}</hyperlinks>` : ''}<printOptions horizontalCentered="1"/><pageMargins left="0.25" right="0.25" top="0.4" bottom="0.4" header="0.2" footer="0.2"/><pageSetup paperSize="8" orientation="landscape" fitToWidth="1" fitToHeight="0"/><headerFooter><oddFooter>&amp;L1688toPL&amp;R&amp;P / &amp;N</oddFooter></headerFooter>${images.length ? '<drawing r:id="drawing1"/>' : ''}</worksheet>`
+  return `${XML_HEADER}<worksheet xmlns="${MAIN}" xmlns:r="${REL}"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><dimension ref="A1:${plan.lastColumn}${plan.lastRow}"/><sheetViews><sheetView workbookViewId="0">${pane}</sheetView></sheetViews><sheetFormatPr defaultRowHeight="18"/><cols>${plan.columns.map((column, index) => `<col min="${index + 1}" max="${index + 1}" width="${column.width}" customWidth="1"/>`).join('')}</cols><sheetData>${plan.rows.map((row) => `<row r="${row.number}" ht="${row.height}" customHeight="1">${row.cells.map((cell, index) => serializeCell(cell, row.number, index)).join('')}</row>`).join('')}</sheetData>${plan.filters ? `<autoFilter ref="A${headerRow}:${plan.lastColumn}${plan.lastProductRow}"/>` : ''}${plan.merges.length ? `<mergeCells count="${plan.merges.length}">${plan.merges.map((ref) => `<mergeCell ref="${ref}"/>`).join('')}</mergeCells>` : ''}${links.length ? `<hyperlinks>${links.join('')}</hyperlinks>` : ''}<printOptions horizontalCentered="1"/><pageMargins left="0.25" right="0.25" top="0.4" bottom="0.4" header="0.2" footer="0.2"/><pageSetup paperSize="8" orientation="landscape" fitToWidth="1" fitToHeight="0"/><headerFooter><oddFooter>&amp;L1688toPL&amp;R&amp;P / &amp;N</oddFooter></headerFooter>${images.length ? '<drawing r:id="drawing1"/>' : ''}</worksheet>`
 }
 
-function stylesXml(palette, language) {
+function stylesXml(palette, language, visualStyles = []) {
   const color = (key) =>
     (
       palette[key] ||
@@ -1934,20 +1946,53 @@ function stylesXml(palette, language) {
   }
   styles.push(xf({ border: 1, format: 169 }))
   styles.push(xf({ font: 6, border: 1, align: 'left' }))
+  const formats = [
+    [164, ';;;'],
+    [165, '#,##0.00" 元"'],
+    [166, '0.0##" kg"'],
+    [167, '0.0#####" m³"'],
+    [168, '0.0#" cm"'],
+    [
+      169,
+      `#,##0"${{ en: '/box', es: '/ctn', zh: '/箱' }[language] || '/box'}"`,
+    ],
+  ]
+  const rgb = (value) => {
+    const color = String(value || '#ffffff').replace(/^#/, '')
+    return (
+      color.length === 3
+        ? [...color].map((part) => part + part).join('')
+        : color
+    ).toUpperCase()
+  }
+  for (const spec of visualStyles) {
+    const font = fonts.length,
+      fill = fills.length,
+      border = borders.length
+    fonts.push(`<font>${fontProperties(spec.font)}</font>`)
+    fills.push(
+      `<fill><patternFill patternType="solid"><fgColor rgb="FF${rgb(spec.fill)}"/><bgColor indexed="64"/></patternFill></fill>`
+    )
+    borders.push(
+      `<border>${['left', 'right', 'top', 'bottom'].map((side) => `<${side} style="${side === 'top' ? spec.topStyle || 'thin' : 'thin'}"><color rgb="FF${rgb(side === 'top' ? spec.topColor || spec.borderColor : spec.borderColor)}"/></${side}>`).join('')}<diagonal/></border>`
+    )
+    let format = 0
+    if (spec.numberFormat) {
+      let entry = formats.find(([, value]) => value === spec.numberFormat)
+      if (!entry) {
+        entry = [164 + formats.length, spec.numberFormat]
+        formats.push(entry)
+      }
+      format = entry[0]
+    }
+    styles.push(
+      xf({ font, fill, border, format, align: spec.align || 'center' })
+    )
+  }
   return [
     XML_HEADER,
     `<styleSheet xmlns="${MAIN}">`,
-    `<numFmts count="6">${[
-      [164, ';;;'],
-      [165, '#,##0.00" 元"'],
-      [166, '0.0##" kg"'],
-      [167, '0.0#####" m³"'],
-      [168, '0.0#" cm"'],
-      [
-        169,
-        `#,##0"${{ en: '/box', es: '/ctn', zh: '/箱' }[language] || '/box'}"`,
-      ],
-    ]
+    `<numFmts count="${formats.length}">${formats
       .map(
         ([id, format]) =>
           `<numFmt numFmtId="${id}" formatCode="${xml(format)}"/>`
@@ -2064,7 +2109,11 @@ async function prepareWorkbookImages(plan, prepareImages, registry) {
       code:
         plan.imageColumns.code === undefined
           ? undefined
-          : { maxWidth: 512, maxHeight: 128 },
+          : {
+              maxWidth: 512,
+              maxHeight: 128,
+              ...(product.codeCell ? { layout: product.codeCell } : {}),
+            },
       mark:
         product.hideMark || plan.imageColumns.mark === undefined
           ? undefined
@@ -2077,32 +2126,48 @@ async function prepareWorkbookImages(plan, prepareImages, registry) {
       if (!asset) continue
       const { media, size } = await registry.prepare(asset, kind)
       const cellWidth = plan.columns[column].pixelWidth
-      const cellHeight = plan.rows[product.row - 1].height / 0.75
+      const cellHeight =
+        plan.rows
+          .slice(
+            product.row - 1,
+            kind === 'mark' ? product.markEndRow || product.row : product.row
+          )
+          .reduce((sum, row) => sum + row.height, 0) / 0.75
       const box =
         kind === 'photo'
           ? [cellWidth, cellHeight]
           : [
               cellWidth - 16,
-              Math.min(
-                kind === 'mark' ? plan.photoPixels : 47,
-                cellHeight - 16
-              ),
+              plan.matchPreview
+                ? cellHeight - 16
+                : Math.min(
+                    kind === 'mark' ? plan.photoPixels : 47,
+                    cellHeight - 16
+                  ),
             ]
+      const specifiedSize =
+        Number.isFinite(asset.displayWidth) &&
+        Number.isFinite(asset.displayHeight) &&
+        asset.displayWidth > 0 &&
+        asset.displayHeight > 0
+      const sourceWidth = specifiedSize ? asset.displayWidth : size.width
+      const sourceHeight = specifiedSize ? asset.displayHeight : size.height
       const scale = Math.min(
-        box[0] / size.width,
-        box[1] / size.height,
-        kind === 'code' ? 0.5 : 1
+        box[0] / sourceWidth,
+        box[1] / sourceHeight,
+        kind === 'code' && !specifiedSize ? 0.5 : 1
       )
-      const width = kind === 'photo' ? cellWidth : size.width * scale,
-        height = kind === 'photo' ? cellHeight : size.height * scale
+      const stretchPhoto = kind === 'photo' && !plan.fitPhotos
+      const width = stretchPhoto ? cellWidth : sourceWidth * scale,
+        height = stretchPhoto ? cellHeight : sourceHeight * scale
       images.push({
         kind,
         row: product.row - 1,
         column,
         width,
         height,
-        x: kind === 'photo' ? 0 : (cellWidth - width) / 2,
-        y: kind === 'photo' ? 0 : (cellHeight - height) / 2,
+        x: stretchPhoto ? 0 : (cellWidth - width) / 2,
+        y: stretchPhoto ? 0 : (cellHeight - height) / 2,
         media,
       })
     }
@@ -2122,7 +2187,22 @@ export async function createPackingWorkbook(rows, options = {}) {
 
 /** Serialize an already planned immutable export using the proven styles/media writer. */
 export async function createPreparedPackingWorkbook(plan, options = {}) {
-  const sheets = plan.sheets || [{ ...plan, name: 'Packing list' }],
+  const visualStyles = [],
+    visualStyleKeys = new Map()
+  const visualStyle = (spec) => {
+    const key = JSON.stringify(spec)
+    if (!visualStyleKeys.has(key)) {
+      visualStyleKeys.set(
+        key,
+        18 + boxStages.length * 3 + 2 + visualStyles.length
+      )
+      visualStyles.push(spec)
+    }
+    return visualStyleKeys.get(key)
+  }
+  const sheets = plan.sheets || [
+      { ...plan, name: plan.name || 'Packing list' },
+    ],
     prepared = [],
     registry = workbookImageRegistry(),
     media = registry.media
@@ -2140,18 +2220,20 @@ export async function createPreparedPackingWorkbook(plan, options = {}) {
     prepared.push({
       ...sheet,
       images,
-      rows: sheet.rows.map((row) =>
-        codeRows.has(row.number)
-          ? {
-              ...row,
-              cells: row.cells.map((cell, column) =>
-                column === sheet.imageColumns.code
-                  ? { ...cell, style: 9 }
-                  : cell
-              ),
-            }
-          : row
-      ),
+      rows: sheet.rows.map((row) => ({
+        ...row,
+        cells: row.cells.map((cell, column) => {
+          const coveredCode =
+            codeRows.has(row.number) && column === sheet.imageColumns.code
+          if (cell.styleSpec) {
+            const spec = coveredCode
+              ? { ...cell.styleSpec, numberFormat: ';;;' }
+              : cell.styleSpec
+            return { ...cell, style: visualStyle(spec) }
+          }
+          return coveredCode ? { ...cell, style: 9 } : cell
+        }),
+      })),
     })
   }
   const relationships = (items) =>
@@ -2167,7 +2249,7 @@ export async function createPreparedPackingWorkbook(plan, options = {}) {
     ],
     [
       'xl/workbook.xml',
-      `${XML_HEADER}<workbook xmlns="${MAIN}" xmlns:r="${REL}"><bookViews><workbookView/></bookViews><sheets>${prepared.map((sheet, index) => `<sheet name="${xml(sheet.name)}" sheetId="${index + 1}" r:id="sheet${index + 1}"/>`).join('')}</sheets><definedNames>${prepared.map((sheet, index) => `<definedName name="_xlnm.Print_Titles" localSheetId="${index}">'${xml(sheet.name)}'!$1:$5</definedName><definedName name="_xlnm.Print_Area" localSheetId="${index}">'${xml(sheet.name)}'!$A$1:$${sheet.lastColumn}$${sheet.lastRow}</definedName>`).join('')}</definedNames><calcPr calcId="191029" fullCalcOnLoad="1" forceFullCalc="1"/></workbook>`,
+      `${XML_HEADER}<workbook xmlns="${MAIN}" xmlns:r="${REL}"><bookViews><workbookView/></bookViews><sheets>${prepared.map((sheet, index) => `<sheet name="${xml(sheet.name)}" sheetId="${index + 1}" r:id="sheet${index + 1}"/>`).join('')}</sheets><definedNames>${prepared.map((sheet, index) => `<definedName name="_xlnm.Print_Titles" localSheetId="${index}">'${xml(sheet.name)}'!$1:$${sheet.headerRow || 5}</definedName><definedName name="_xlnm.Print_Area" localSheetId="${index}">'${xml(sheet.name)}'!$A$1:$${sheet.lastColumn}$${sheet.lastRow}</definedName>`).join('')}</definedNames><calcPr calcId="191029" fullCalcOnLoad="1" forceFullCalc="1"/></workbook>`,
     ],
     [
       'xl/_rels/workbook.xml.rels',
@@ -2180,7 +2262,7 @@ export async function createPreparedPackingWorkbook(plan, options = {}) {
         ['styles', 'styles', 'styles.xml'],
       ]),
     ],
-    ['xl/styles.xml', stylesXml(plan.palette, plan.language)],
+    ['xl/styles.xml', stylesXml(plan.palette, plan.language, visualStyles)],
   ]
   for (const [index, sheet] of prepared.entries()) {
     const number = index + 1,

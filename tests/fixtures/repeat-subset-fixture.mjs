@@ -1,7 +1,7 @@
+import { legacyPackingCheckpoint } from './legacy-packing-checkpoint.mjs'
 import {
   activePackingState,
   createPreparation,
-  packingCheckpoint,
 } from '../../src/packing-model.js'
 
 /** Synthetic single-size reorder of one variant in an existing three-size product. */
@@ -82,7 +82,7 @@ export function repeatSubsetFixture() {
         : { '55cm': 'S', '70cm': 'M', '90cm': 'L' }[variant.size]
     }
     draft.revision = 1
-    draft.defaultPacking = packingCheckpoint(draft)
+    draft.defaultPacking = legacyPackingCheckpoint(draft)
     return draft
   })
   const state = activePackingState(preparations)

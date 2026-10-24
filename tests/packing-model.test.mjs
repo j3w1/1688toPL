@@ -1,3 +1,4 @@
+import { legacyPackingCheckpoint } from './fixtures/legacy-packing-checkpoint.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
@@ -7,17 +8,11 @@ import {
   barcodeValue,
   codeOwnerEvidence,
   createPreparation,
-  defaultPackingChanges,
-  extendDefaultPacking,
-  hasDefaultPackingChanges,
   mergePackingState,
-  packingCheckpoint,
   planSelectedPreparations,
   removeSelectedProducts,
   reorderPreparationGroups,
   reorderPreparationVariants,
-  restoreDefaultPacking,
-  restorePreviousPacking,
   refreshPreparationMaterials,
   setGroupSizeMode,
   validatePackingPreferences,
@@ -442,10 +437,13 @@ test('no-size overrides persist through validation, checkpoints, prepare again a
   preparation = setGroupSizeMode(preparation, preparation.groups[0].id, 'none')
   const saved = allocatePreparation(preparation, [], [])
   saved.preparation.revision = 1
-  saved.preparation.defaultPacking = packingCheckpoint(saved.preparation)
-  saved.preparation.previousPacking = packingCheckpoint(saved.preparation, {
-    includeDefaults: true,
-  })
+  saved.preparation.defaultPacking = legacyPackingCheckpoint(saved.preparation)
+  saved.preparation.previousPacking = legacyPackingCheckpoint(
+    saved.preparation,
+    {
+      includeDefaults: true,
+    }
+  )
   const restored = validatePreparation(
     JSON.parse(JSON.stringify(saved.preparation))
   )
@@ -471,34 +469,8 @@ test('no-size overrides persist through validation, checkpoints, prepare again a
       )
     )
   )
-  assert.equal(restorePreviousPacking(restored).groups[0].sizeMode, 'none')
   restored.groups[0].sizeMode = 'invalid'
   assert.throws(() => validatePreparation(restored), /automatic size/)
-})
-
-test('reset detects size-mode-only changes and restores the recorded default mode', () => {
-  const snapshot = source([
-    { skuProperties: sku('red', '10cm') },
-    { skuProperties: sku('blue', '10cm') },
-  ])
-  const preparation = allocatePreparation(
-    createPreparation(snapshot, '2026-10'),
-    [],
-    []
-  ).preparation
-  preparation.defaultPacking = packingCheckpoint(preparation)
-  const groupId = preparation.groups[0].id
-  const none = setGroupSizeMode(preparation, groupId, 'none')
-  const changes = defaultPackingChanges(none)
-  assert.equal(changes.length, 1)
-  assert.equal(changes[0].sizeModeChanged, true)
-  assert.equal(changes[0].barcodeChanges.length, 0)
-  assert.equal(restoreDefaultPacking(none).groups[0].sizeMode, undefined)
-  none.defaultPacking = packingCheckpoint(none)
-  const automatic = setGroupSizeMode(none, groupId, 'automatic', { snapshot })
-  const restored = restoreDefaultPacking(automatic)
-  assert.equal(restored.groups[0].sizeMode, 'none')
-  assert.equal(hasDefaultPackingChanges(restored), false)
 })
 
 test('size suggestions normalize units and rank measurements only when dimensions agree', () => {
@@ -711,7 +683,7 @@ test('manual base edits reserve old codes, advance allocation and reject seller/
   )
 })
 
-test('the same product and variant can return to their issued codes after edits and a default reset', () => {
+test('the same product and variant can return to their issued codes after deliberate edits', () => {
   const snapshot = source([
     { skuProperties: sku('red') },
     { skuProperties: sku('blue') },
@@ -723,7 +695,7 @@ test('the same product and variant can return to their issued codes after edits 
     { snapshot }
   )
   const original = structuredClone(state.preparation)
-  original.defaultPacking = packingCheckpoint(original)
+  original.defaultPacking = legacyPackingCheckpoint(original)
   const edited = structuredClone(original)
   edited.groups[0].baseCode = 'CE26100107'
   state = allocatePreparation(edited, state.allocations, state.issuedCodes, {
@@ -745,7 +717,10 @@ test('the same product and variant can return to their issued codes after edits 
     state.issuedCodes,
     { snapshot }
   )
-  const reset = restoreDefaultPacking(state.preparation)
+  const reset = {
+    ...state.preparation,
+    groups: structuredClone(original.groups),
+  }
   const restored = allocatePreparation(
     reset,
     state.allocations,
@@ -855,7 +830,7 @@ test('legacy owner evidence follows variant identities after merging and splitti
     { getReservedBarcodes: async () => [], newId: () => 'split-candle' }
   )
   state = allocatePreparation(split, state.allocations, state.issuedCodes)
-  state.preparation.defaultPacking = packingCheckpoint(state.preparation)
+  state.preparation.defaultPacking = legacyPackingCheckpoint(state.preparation)
   const before = structuredClone(state)
   const evidence = codeOwnerEvidence(
     originalOwner,
@@ -938,7 +913,7 @@ test('legacy owner evidence uses checkpoints without claiming a current group an
   const owner = state.issuedCodes.find((entry) => entry.kind === 'base')
   const regrouped = structuredClone(state.preparation)
   regrouped.groups[0].id = 'regrouped'
-  const checkpoint = packingCheckpoint(regrouped)
+  const checkpoint = legacyPackingCheckpoint(regrouped)
   regrouped.groups = []
   regrouped.defaultPacking = checkpoint
   const historical = codeOwnerEvidence(owner, regrouped, state.issuedCodes)
@@ -1060,94 +1035,16 @@ function resettablePacking() {
     []
   )
   allocated.preparation.revision = 1
-  allocated.preparation.defaultPacking = packingCheckpoint(
+  allocated.preparation.defaultPacking = legacyPackingCheckpoint(
     allocated.preparation
   )
   return { snapshot, ...allocated }
 }
 
-test('reset is a no-op for saved defaults and retained names, even after saving again', () => {
-  const original = resettablePacking()
-  const draft = structuredClone(original.preparation)
-  draft.groups[0].spanishName = 'TAZA'
-  draft.groups[0].category = '杯子'
-  draft.groups[0].variants[0].variant = 'Editable product description'
-  draft.groups[0].variants[0].spanishName = 'TAZA ROJA'
-  draft.updatedAt = '2026-10-16T00:00:00.000Z'
-  draft.revision = 2
-  assert.equal(hasDefaultPackingChanges(draft), false)
-  assert.deepEqual(defaultPackingChanges(draft), [])
-  const reset = restoreDefaultPacking(draft)
-  assert.equal(reset.groups[0].spanishName, 'TAZA')
-  assert.equal(
-    reset.groups[0].variants[0].variant,
-    'Editable product description'
-  )
-  assert.equal(reset.groups[0].variants[0].spanishName, 'TAZA ROJA')
-  const saved = allocatePreparation(
-    reset,
-    original.allocations,
-    original.issuedCodes
-  )
-  saved.preparation.revision = 3
-  assert.equal(hasDefaultPackingChanges(saved.preparation), false)
-})
-
-test('reset reports group and variant order and suffix changes when the product code stays the same', () => {
-  const original = resettablePacking()
-  let draft = reorderPreparationGroups(
-    original.preparation,
-    [...original.preparation.groups].reverse().map((group) => group.id)
-  )
-  const cup = draft.groups[1]
-  draft = reorderPreparationVariants(
-    draft,
-    cup.id,
-    [...cup.variants].reverse().map((variant) => variant.id)
-  )
-  draft.groups[1].variants[0].variantSuffix = 'Z'
-  draft.groups[1].variants[0].sizeSuffix = 'XL'
-  const changes = defaultPackingChanges(draft)
-  assert.equal(changes.length, 2)
-  const change = changes.find((entry) => entry.groupId === cup.id)
-  assert.equal(change.baseCodeChanged, false)
-  assert.equal(change.beforePosition, 2)
-  assert.equal(change.afterPosition, 1)
-  assert.equal(change.orderChanged, true)
-  assert.equal(change.variantOrderChanged, true)
-  assert.equal(change.clearedManualOrdering, true)
-  assert.equal(change.groupingChanged, false)
-  assert.equal(change.barcodeChanges.length, 1)
-  assert.equal(change.barcodeChanges[0].before, 'CE26100101ZXL')
-  assert.equal(change.barcodeChanges[0].after, 'CE26100101L')
-  const saved = allocatePreparation(
-    restoreDefaultPacking(draft),
-    original.allocations,
-    original.issuedCodes
-  )
-  assert.deepEqual(
-    saved.preparation.groups.map((group) => group.id),
-    original.preparation.groups.map((group) => group.id)
-  )
-  assert.equal(hasDefaultPackingChanges(saved.preparation), false)
-})
-
-test('reset reports merged or missing products as membership changes without unrelated groups', () => {
-  const original = resettablePacking()
-  const draft = structuredClone(original.preparation)
-  draft.groups[0].variants.push(...draft.groups[1].variants)
-  draft.groups.splice(1, 1)
-  const changes = defaultPackingChanges(draft)
-  assert.equal(changes.length, 2)
-  assert.ok(changes.every((entry) => entry.groupingChanged))
-  assert.equal(changes.find((entry) => entry.before === null).afterPosition, 2)
-  assert.equal(hasDefaultPackingChanges(restoreDefaultPacking(draft)), false)
-})
-
 test('remove packing products preserves partial shared variants, source rows and issued codes', () => {
   const original = resettablePacking()
   const unchanged = structuredClone(original)
-  original.preparation.previousPacking = packingCheckpoint(
+  original.preparation.previousPacking = legacyPackingCheckpoint(
     original.preparation,
     { includeDefaults: true }
   )
@@ -1164,17 +1061,8 @@ test('remove packing products preserves partial shared variants, source rows and
   )
   assert.equal(removed.groups[0].baseCode, 'CE26100101')
   assert.deepEqual(removed.defaultPacking.groups, removed.groups)
-  assert.equal(hasDefaultPackingChanges(removed), false)
-  assert.deepEqual(
-    extendDefaultPacking(removed, original.snapshot),
-    removed.defaultPacking
-  )
   assert.deepEqual(original.snapshot, unchanged.snapshot)
   assert.deepEqual(original.preparation.groups, unchanged.preparation.groups)
-  assert.deepEqual(
-    restorePreviousPacking(removed).groups,
-    original.preparation.groups
-  )
   const saved = allocatePreparation(
     removed,
     original.allocations,
@@ -1208,7 +1096,6 @@ test('removing the final packing products keeps a valid empty record and re-addi
   assert.deepEqual(saved.preparation.defaultPacking.groups, [])
   validatePreparationReservations(saved.preparation, saved)
   assert.deepEqual(activeGroups(saved.preparation, original.snapshot), [])
-  assert.equal(hasDefaultPackingChanges(saved.preparation), false)
   const plan = planSelectedPreparations(
     [
       {
@@ -1227,13 +1114,6 @@ test('removing the final packing products keeps a valid empty record and re-addi
   assert.deepEqual(added.preparation.groups[0].variants[0].entryIds, ['1'])
   assert.equal(added.preparation.groups[0].baseCode, 'CE26100103')
   assert.ok(added.issuedCodes.some((entry) => entry.code === 'CE26100101'))
-  assert.equal(
-    hasDefaultPackingChanges({
-      ...saved.preparation,
-      defaultPacking: undefined,
-    }),
-    false
-  )
 })
 
 test('removal rejects stale or malformed memberships without changing the draft', () => {

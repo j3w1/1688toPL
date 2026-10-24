@@ -2513,8 +2513,7 @@ test('saved product codes roundtrip and released barcode endings can be reused',
 }) => {
   const page = await openTestDatabase(extension)
   const result = await page.evaluate(async (first) => {
-    const { createPreparation, restoreDefaultPacking } =
-      await import('/src/packing-model.js')
+    const { createPreparation } = await import('/src/packing-model.js')
     first.items[1].description = first.items[0].description
     first.items.forEach((item, index) => {
       const color = index ? 'blue' : 'red'
@@ -2549,9 +2548,10 @@ test('saved product codes roundtrip and released barcode endings can be reused',
       conflict = error.conflict
     }
     const unchanged = await library.getPreparation(first.orderId)
-    const restored = await library.savePreparation(
-      restoreDefaultPacking(unchanged)
-    )
+    const restored = await library.savePreparation({
+      ...unchanged,
+      groups: structuredClone(original.groups),
+    })
     const final = await library.exportBackup()
     return {
       original,

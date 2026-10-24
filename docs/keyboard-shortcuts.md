@@ -13,7 +13,7 @@ Focus a control for its explanation. Workspace accelerators invoke enabled contr
 | Tab / Shift+Tab in the carton grid     | Next/previous editable cell; reveal its logical row.                  |
 | Enter / Shift+Enter in the carton grid | Next/previous row in the same editable column.                        |
 | Ctrl+Z / Ctrl+Y or Ctrl+Shift+Z        | Active Orders product/grid or Loading history outside native editors. |
-| Alt+Shift+C / Alt+Shift+E              | Copy menu / Excel-image preview when available.                       |
+| Alt+Shift+C / Alt+Shift+E              | Copy menu / Excel... preview and export when available.               |
 | Alt+Shift+F / Alt+Shift+R              | Product / order search in Orders.                                     |
 | Alt+Shift+S / Alt+Shift+T              | Settings / Activity.                                                  |
 | Alt+Shift+I                            | Restore historical packing archive from Orders.                       |

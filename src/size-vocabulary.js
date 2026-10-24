@@ -1,5 +1,8 @@
 import { normalizePrice } from './money.js'
-import { recognitionProperties } from './spreadsheet-properties.js'
+import {
+  recognitionProperties,
+  spreadsheetDeclaration,
+} from './spreadsheet-properties.js'
 
 // Literal local aliases only. 1688 marketing titles and article numbers are not
 // size evidence; marked spreadsheet descriptions are. Compare compatible units
@@ -511,7 +514,7 @@ export function createSizeClassifier(vocabulary = DEFAULT_SIZE_VOCABULARY) {
 export function resolvePendingSizeMappings(
   preparation,
   vocabulary = DEFAULT_SIZE_VOCABULARY,
-  { snapshot, entryIds } = {}
+  { snapshot, entryIds, inferDeclaredSizes = false } = {}
 ) {
   const result = structuredClone(preparation)
   const classifier = createSizeClassifier(vocabulary)
@@ -546,6 +549,20 @@ export function resolvePendingSizeMappings(
         ).size !== 1)
     )
       continue
+    const declarations = group.variants.map((variant) => {
+      if (!sourceItems || snapshot.sourceType !== 'spreadsheet') return null
+      const entries = variant.entryIds.map((id) =>
+        spreadsheetDeclaration(sourceItems.get(id))
+      )
+      if (!entries.some(Boolean)) return null
+      if (
+        entries.some((entry) => !entry) ||
+        new Set(entries.map((entry) => JSON.stringify(entry))).size !== 1
+      )
+        return false
+      return entries[0]
+    })
+    if (!inferDeclaredSizes && declarations.includes(false)) continue
     const sourceSizes =
       sourceItems &&
       group.variants.map((variant) =>
@@ -553,18 +570,39 @@ export function resolvePendingSizeMappings(
           (id) => classifier.extract(sourceItems.get(id)).size
         )
       )
-    if (sourceSizes?.some((sizes) => new Set(sizes).size !== 1)) continue
+    if (
+      sourceSizes?.some(
+        (sizes, index) =>
+          (inferDeclaredSizes || !declarations[index]) &&
+          new Set(sizes).size !== 1
+      )
+    )
+      continue
     const sizes = group.variants.map((variant, index) => {
       if (!sourceItems || !variant.needsSizeMapping || variant.sizeSuffix)
         return variant.size
-      return sourceSizes[index][0]
+      return !inferDeclaredSizes && declarations[index]
+        ? variant.size
+        : sourceSizes[index][0]
     })
-    const suggestions = classifier.suggest(
-      sizes,
-      group.variants.map((variant) => variant.variantSuffix)
+    const inferredIndexes = group.variants.flatMap((variant, index) =>
+      inferDeclaredSizes || !declarations[index] ? [index] : []
+    )
+    const inferred = classifier.suggest(
+      inferredIndexes.map((index) => sizes[index]),
+      inferredIndexes.map((index) => group.variants[index].variantSuffix)
+    )
+    const suggestions = group.variants.map((variant, index) =>
+      !inferDeclaredSizes && declarations[index]
+        ? {
+            sizeSuffix: declarations[index].sizeSuffix,
+            needsSizeMapping: false,
+          }
+        : inferred[inferredIndexes.indexOf(index)]
     )
     const contradictsExisting = group.variants.some(
       (variant, index) =>
+        (inferDeclaredSizes || !declarations[index]) &&
         !variant.needsSizeMapping &&
         variant.sizeSuffix &&
         !suggestions[index].needsSizeMapping &&

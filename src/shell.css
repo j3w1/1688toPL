@@ -551,7 +551,8 @@ body > main {
 }
 .action-bar-selection {
   display: flex;
-  flex: 1 1 auto;
+  /* Totals changing digit count must not move the actions to another row. */
+  flex: 1 1 560px;
   align-items: center;
   gap: var(--space-3);
   min-inline-size: 0;
@@ -1860,10 +1861,10 @@ body.packing-active #packing-view {
     max-block-size: 180px;
   }
   #orders-view .sheet-pane .table-scroll {
-    /* A centered cell must have room below the sticky column headings. */
+    /* Keep both heading bands plus at least 48px of the first product visible. */
     min-block-size: max(
-      140px,
-      calc(2 * var(--virtual-table-heading-height, 48px) + 16px)
+      144px,
+      calc(2 * var(--virtual-table-heading-height, 48px) + 48px)
     );
   }
   #packing-view :is(.packing-order-chrome, .preparation-group) {

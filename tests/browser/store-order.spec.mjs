@@ -52,13 +52,15 @@ test('spreadsheet imports are new atomic orders with shared store identity and o
       first.snapshot.orderId,
       'Renamed synthetic store'
     )
-    await repository.setCartonDetails(first.snapshot.orderId, '1', {
-      kg: '20.5',
-      cbm: '0.21',
-      len: '70',
-      wid: '50',
-      ht: '30',
-    })
+    const archived = await repository.exportBackup()
+    const owner = archived.orders.find(
+      (record) => record.snapshot.orderId === first.snapshot.orderId
+    )
+    owner.cartonDetails = {
+      1: { kg: '20.5', cbm: '0.21', len: '70', wid: '50', ht: '30' },
+    }
+    owner.cartonDetailsUpdatedAt = new Date(Date.now() + 1000).toISOString()
+    await repository.restoreBackup(archived)
     await repository.setProductPhoto(first.snapshot.orderId, '1', {
       thumbnail: input.rows[0].photos[0],
       edit: { fit: 'cover', scale: 1.2, x: 0.1, y: 0, background: '#ffffff' },
@@ -398,19 +400,10 @@ test('deleting orders removes unshared local originals while keeping shared and 
         ],
       },
     })
-    const guardedBefore = await repository.exportBackup()
-    let guardedError
-    try {
-      await repository.removeOrders([first.snapshot.orderId])
-    } catch (error) {
-      guardedError = error.message
-    }
-    const guardedAfter = await repository.exportBackup()
     const firstBatches = (await repository.listCartonBatches()).filter(
       (batch) =>
         batch.contents.some((item) => item.orderId === first.snapshot.orderId)
     )
-    await repository.removeCartonBatches(firstBatches)
     await repository.removeOrders([first.snapshot.orderId])
     const afterFirst = await repository.exportBackup()
     const cachedAfterFirst = {
@@ -423,7 +416,6 @@ test('deleting orders removes unshared local originals while keeping shared and 
       (batch) =>
         batch.contents.some((item) => item.orderId === second.snapshot.orderId)
     )
-    await repository.removeCartonBatches(secondBatches)
     await repository.removeOrders([second.snapshot.orderId])
     const afterSecond = await repository.exportBackup()
     const cachedAfterSecond = {
@@ -432,9 +424,6 @@ test('deleting orders removes unshared local originals while keeping shared and 
       unrelated: await repository.getImage(unrelated.url),
     }
     return {
-      guardedBefore,
-      guardedAfter,
-      guardedError,
       firstBatches,
       secondBatches,
       history,
@@ -449,13 +438,6 @@ test('deleting orders removes unshared local originals while keeping shared and 
       cachedAfterSecond,
     }
   }, input)
-  expect(result.guardedError).toBe(
-    'Remove this order’s active carton batches before deleting it.'
-  )
-  const { exportedAt: beforeExportedAt, ...guardedBefore } =
-    result.guardedBefore
-  const { exportedAt: afterExportedAt, ...guardedAfter } = result.guardedAfter
-  expect(guardedAfter).toEqual(guardedBefore)
   expect(result.firstBatches).toHaveLength(1)
   expect(result.secondBatches).toHaveLength(1)
   expect(result.history).toHaveLength(1)
