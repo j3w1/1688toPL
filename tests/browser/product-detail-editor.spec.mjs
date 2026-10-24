@@ -187,6 +187,7 @@ test('variant editor discloses shared source identities and routes category edit
     .getByRole('button', { name: 'Edit group category', exact: true })
     .click()
   await expect(dialog).toHaveCount(0)
+  expect(await page.evaluate(() => detailsHarness.done)).toBe(false)
   expect(
     await page.evaluate(() => ({
       writes: detailsHarness.writes,
@@ -274,6 +275,7 @@ test('a portalled detail editor inherits its opener language without changing th
     .getByRole('dialog')
     .getByRole('button', { name: 'Cancel', exact: true })
     .click()
+  expect(await page.evaluate(() => detailsHarness.done)).toBe(false)
   await page.evaluate(async () => {
     const { createLanguageScope } = await import('/src/i18n.js')
     createLanguageScope(document.getElementById('launch'), 'es')
@@ -302,6 +304,7 @@ test('a category transition inherits the detached Spanish opener and resolves it
     .getByRole('dialog')
     .getByRole('button', { name: 'Cancel', exact: true })
     .click()
+  expect(await page.evaluate(() => detailsHarness.done)).toBe(false)
   await page.evaluate(async () => {
     const { createLanguageScope } = await import('/src/i18n.js')
     createLanguageScope(document.getElementById('launch'), 'es')
@@ -323,6 +326,7 @@ test('a category transition inherits the detached Spanish opener and resolves it
   await group.locator('[data-detail-field="category"]').fill('共享品类')
   await group.locator('[data-action="apply-product-details"]').click()
   await expect(group).toHaveCount(0)
+  expect(await page.evaluate(() => detailsHarness.done)).toBe(true)
   expect(await page.evaluate(() => detailsHarness.applied)).toBe(true)
   expect(
     await page.evaluate(() => detailsHarness.saved.groups[0].category)

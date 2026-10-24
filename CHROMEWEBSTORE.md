@@ -128,6 +128,8 @@ Earlier release and verification chronology remains in Git history. It is not cu
 
 The owner authorized publishing the accepted integration to `main` through one pull request and requiring green post-merge CI. The pull request and its linked workflow runs record final publication verification; the dated observations below retain their original scopes. At publication preparation, source/docs checks, all 1,460 unit tests and the complete 2.10.0 production build passed. Full local Chromium verification and hosted CI are required before merge. This is repository publication only; no Chrome Web Store submission is requested. No configured installed target is available, so installed-extension acceptance remains outstanding.
 
+The first hosted run exposed four dialog-test races: a closed dialog becomes hidden before its asynchronous `close` event resolves the caller. The deletion and scoped-detail tests now await the exposed completion promise before asserting results or reopening a review. Result, cancellation, no-write and nested-editor assertions remain intact; application behavior and test budgets are unchanged. Final results are recorded in [PR #26](https://github.com/j3w1/1688toPL/pull/26).
+
 ### Unified Excel preview and unused-workflow cleanup — local candidate
 
 The local candidate replaces the image-only opener with **Excel...** and a bundled document icon. The same configured product table supports **Copy image** and **Export Excel (.xlsx)**. The workbook contains one editable sheet, all captured products and only selected columns/details; photos and carton marks remain embedded media. Complete-container packing-list export retains its separate three-sheet revision scope and explicit optional-JSON disclosure.

@@ -198,6 +198,7 @@ test('review shows selected orders and related data; Cancel and Escape reserve a
   ).toBeFocused()
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
   await expect(dialog).toHaveCount(0)
+  expect(await page.evaluate(() => removalHarness.done)).toBe(false)
   expect(
     await page.evaluate(() => ({
       writes: removalHarness.writes,
@@ -208,6 +209,7 @@ test('review shows selected orders and related data; Cancel and Escape reserve a
   await expect(dialog).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(dialog).toHaveCount(0)
+  expect(await page.evaluate(() => removalHarness.done)).toBe(false)
   expect(await page.evaluate(() => removalHarness.writes)).toBe(0)
 })
 
@@ -229,6 +231,7 @@ test('one confirmation holds the dialog and prevents duplicate writes until comm
   expect(await page.evaluate(() => removalHarness.writes)).toBe(1)
   await page.evaluate(() => removalHarness.release())
   await expect(dialog).toHaveCount(0)
+  expect(await page.evaluate(() => removalHarness.done)).toBe(true)
   expect(await page.evaluate(() => removalHarness.result)).toBe(true)
 })
 
