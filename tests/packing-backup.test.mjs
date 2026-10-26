@@ -157,6 +157,51 @@ test('family evidence cannot import foreign identities or a mismatched source ke
   assert.throws(() => validateBackup(backup), /retained source evidence/)
 })
 
+for (const changedFact of ['title', 'skuProperties'])
+  test(`scoped family backup retains original ${changedFact} evidence after source refresh without cartons`, () => {
+    const { snapshot, preparation, backup } = fixture(),
+      original = structuredClone(backup.orders[0]),
+      originalPhoto = `local-image:${'a'.repeat(64)}`
+    original.snapshot.items[0].thumbnail = originalPhoto
+    preparation.productFamilies = {
+      version: 1,
+      sourceKey: productFamilySourceKey(original.snapshot),
+      families: [{ entryIds: ['1', '2'], kind: 'family' }],
+    }
+    snapshot.observedAt = '2026-10-03T12:00:00.000Z'
+    if (changedFact === 'title') snapshot.items[0].title += ' refreshed'
+    else snapshot.items[0].skuProperties[0].value = 'refreshed red'
+    backup.orders[0].lastCheckedAt = snapshot.observedAt
+    const unrelated = structuredClone(original),
+      foreign = structuredClone(original)
+    unrelated.snapshot.observedAt = '2026-09-30T12:00:00.000Z'
+    unrelated.snapshot.items[0].title = 'Unrelated historical product'
+    foreign.snapshot.accountId = 'foreign'
+    backup.history = [foreign, unrelated, original]
+    backup.images.push({
+      url: originalPhoto,
+      dataUrl: 'data:image/png;base64,AAAA',
+      storedAt: original.snapshot.observedAt,
+    })
+    const scoped = createPackingBackup(backup, selection(['1']))
+    assert.doesNotThrow(() => validateBackup(scoped))
+    assert.equal(scoped.history.length, 1)
+    assert.deepEqual(scoped.history[0].snapshot, original.snapshot)
+    assert.ok(scoped.images.some((image) => image.url === originalPhoto))
+    assert.deepEqual(
+      mergePackingPreparation(undefined, scoped.preparations[0], ['1']),
+      scoped.preparations[0]
+    )
+    assert.equal(
+      scoped.preparations[0].groups[0].baseCode,
+      preparation.groups[0].baseCode
+    )
+    assert.equal(
+      scoped.preparations[0].groups[0].variants[0].variantSuffix,
+      preparation.groups[0].variants[0].variantSuffix
+    )
+  })
+
 test('month-less physical facts require complete v5 order scope and retain exact facts and tombstones', () => {
   const { backup } = fixture()
   backup.version = 5

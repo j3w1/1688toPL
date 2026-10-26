@@ -12,6 +12,7 @@ import { cartonBatchesForItems } from './carton-confirmations.js'
 import { batchInPackingScope, cartonBatchMark } from './carton-batches.js'
 import { batchOrderIds } from './inventory-model.js'
 import { repeatProductStoreIdentity } from './repeat-products.js'
+import { productFamilySourceKey } from './product-families.js'
 import {
   collectImageReferences,
   imageCacheKey,
@@ -386,8 +387,8 @@ function packingPreferences(preferences, orders) {
   return { value: result, updatedAt: preferences.updatedAt }
 }
 
-/** Retain only historical observations required to prove included physical allocations. */
-function cartonSourceHistory(backup, batches, orders) {
+/** Retain historical source evidence required by included cartons and family reviews. */
+function scopedSourceHistory(backup, batches, orders, preparations) {
   const demands = new Map(),
     current = new Map(orders.map((order) => [key(order.snapshot), order])),
     history = [...(backup.history || [])].sort((a, b) =>
@@ -430,6 +431,22 @@ function cartonSourceHistory(backup, batches, orders) {
           record.snapshot.observedAt,
         ]),
         record
+      )
+  }
+  for (const preparation of preparations) {
+    const sourceKey = preparation.productFamilies?.sourceKey,
+      orderKey = key(preparation),
+      source = current.get(orderKey)
+    if (
+      sourceKey &&
+      (!source || productFamilySourceKey(source.snapshot) !== sourceKey)
+    )
+      keep(
+        history.find(
+          (record) =>
+            key(record.snapshot) === orderKey &&
+            productFamilySourceKey(record.snapshot) === sourceKey
+        )
       )
   }
   for (const demand of demands.values()) {
@@ -728,7 +745,12 @@ export function createPackingBackup(backup, selection) {
           batchInPackingScope(batch, scope.orders, preparations)
       )
     ),
-    history = cartonSourceHistory(backup, cartonBatches, selectedOrders)
+    history = scopedSourceHistory(
+      backup,
+      cartonBatches,
+      selectedOrders,
+      preparations
+    )
   const state = activePackingState(
     preparations,
     [],

@@ -103,17 +103,22 @@ test('reviewed family context and details survive atomic assignment, history, re
         ],
         { preserveNaming: true, preserveMaterials: true }
       )
-      const full = await repository.exportBackup(),
-        scoped = createPackingBackup(full, {
-          months: ['2026-10'],
-          orders: [{ ...ref, entryIds: [ids[0]] }],
-        })
       repository.close()
       repository = await openDatabase({ name })
       const reopened = (await repository.listPreparations())[0],
         sibling = await repository.reviewPurchaseCodes({
           orderRefs: [ref],
           entryRefs: [{ ...ref, entryId: ids[2] }],
+        })
+      const source = structuredClone(record.snapshot)
+      source.observedAt = '2026-10-26T12:00:00.000Z'
+      source.items[0].title += '（已更新）'
+      source.items[0].skuProperties[0].value += '-updated'
+      await repository.saveSnapshot(source)
+      const full = await repository.exportBackup(),
+        scoped = createPackingBackup(full, {
+          months: ['2026-10'],
+          orders: [{ ...ref, entryIds: [ids[0]] }],
         })
       const targets = await Promise.all(
         ['full', 'scoped'].map((suffix) =>
@@ -126,10 +131,9 @@ test('reviewed family context and details survive atomic assignment, history, re
         const restored = await Promise.all(
             targets.map((target) => target.listPreparations())
           ),
-          source = structuredClone(record.snapshot)
-        source.observedAt = '2026-10-26T12:00:00.000Z'
-        source.items[2].description += '\nUpdated source evidence'
-        await repository.saveSnapshot(source)
+          restoredBackups = await Promise.all(
+            targets.map((target) => target.exportBackup())
+          )
         let staleRejected = false
         try {
           await repository.assignPurchaseCodes({
@@ -158,6 +162,11 @@ test('reviewed family context and details survive atomic assignment, history, re
           reopened,
           restored,
           storedSource: full.orders[0].snapshot,
+          refreshedSource: source,
+          scopedHistory: scoped.history.map((record) => record.snapshot),
+          restoredHistories: restoredBackups.map((backup) =>
+            backup.history.map((record) => record.snapshot)
+          ),
           siblingIssues: sibling.issues,
           siblingBase: sibling.changes[0]?.baseCode,
           staleRejected,
@@ -183,6 +192,12 @@ test('reviewed family context and details survive atomic assignment, history, re
   expect(result.restored[1][0].productFamilies).toEqual(
     result.redone.productFamilies
   )
+  expect(result.restored[1][0].groups[0].baseCode).toBe(
+    result.redone.groups[0].baseCode
+  )
+  expect(result.restored[1][0].groups[0].variants[0]).toEqual(
+    result.redone.groups[0].variants[0]
+  )
   expect(
     result.restored[1][0].groups[0].variants.flatMap(
       (variant) => variant.entryIds
@@ -192,5 +207,8 @@ test('reviewed family context and details survive atomic assignment, history, re
   expect(result.siblingIssues).toEqual([])
   expect(result.siblingBase).toBe(result.assigned.groups[0].baseCode)
   expect(result.staleRejected).toBe(true)
-  expect(result.storedSource).toEqual(record.snapshot)
+  expect(result.storedSource).toEqual(result.refreshedSource)
+  expect(result.scopedHistory).toContainEqual(record.snapshot)
+  for (const history of result.restoredHistories)
+    expect(history).toContainEqual(record.snapshot)
 })
