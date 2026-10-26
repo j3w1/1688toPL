@@ -514,12 +514,12 @@ async function editPreparedDetails(
   review,
   page,
   fields,
-  { replace = false, scope = 'order', index = 0 } = {}
+  { replace = false, scope = 'order', index = 0, expectApplied = true } = {}
 ) {
-  await review
+  const opener = review
     .locator(`[data-review-details="edit-${scope}-details"]`)
     .nth(index)
-    .click()
+  await opener.click()
   const editor = page.locator('.product-detail-dialog')
   for (const [field, value] of Object.entries(fields)) {
     await editor.locator(`[data-detail-select="${field}"]`).check()
@@ -528,6 +528,13 @@ async function editPreparedDetails(
   if (replace)
     await editor.locator('input[name="custom-values"][value="replace"]').check()
   await editor.locator('[data-action="apply-product-details"]').click()
+  if (expectApplied) {
+    // Click completion does not await the asynchronous draft preview. An open
+    // child modal makes the parent inert even though fill() can return there.
+    await expect(editor).toBeHidden()
+    await expect(review).toHaveAttribute('aria-busy', 'false')
+    await expect(opener).toBeEnabled()
+  }
   return editor
 }
 
@@ -747,9 +754,14 @@ test('unsaved scoped details keep manual blanks by default, allow explicit repla
   await page.locator('#select-rows').click()
   const before = await libraryBackup(extension),
     review = await openSelection(page)
-  let editor = await editPreparedDetails(review, page, {
-    spanishName: 'SUGGESTED BULK NAME',
-  })
+  let editor = await editPreparedDetails(
+    review,
+    page,
+    {
+      spanishName: 'SUGGESTED BULK NAME',
+    },
+    { expectApplied: false }
+  )
   // Existing authored names, including the deliberate blank, are protected by Keep custom values.
   await expect(editor).toBeVisible()
   await expect(editor.getByRole('status')).toContainText(
