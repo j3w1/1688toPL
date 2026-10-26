@@ -372,7 +372,7 @@ test('Orders authoring and named containers replace Prepare while full refresh a
   await expect(page.locator('.brand img')).toHaveJSProperty('naturalWidth', 48)
   await expect(
     page.getByRole('button', {
-      name: 'Review purchase-month codes',
+      name: 'Prepare products...',
       exact: true,
     })
   ).toBeVisible()

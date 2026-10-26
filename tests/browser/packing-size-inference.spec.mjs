@@ -1,5 +1,6 @@
 import { test, expect } from './extension-fixture.mjs'
 import { createDemoRecords } from '../../preview/library-fixture.js'
+import { createPreparation } from '../../src/packing-model.js'
 import {
   assignSelectedPurchaseCodes,
   editOrderProduct,
@@ -41,6 +42,20 @@ async function openSizes(extension, sizes, colors = ['透明', '透明']) {
     record
   )
   expect(restored.ok, restored.error).toBe(true)
+  const legacyDraft = createPreparation(
+      record.snapshot,
+      record.snapshot.purchasedAt.slice(0, 7)
+    ),
+    unfinished = legacyDraft.groups.some((group) =>
+      group.variants.some((variant) => variant.needsSizeMapping)
+    )
+  if (unfinished)
+    // Older saved preparations may retain unresolved sizes. The selected-row
+    // preparation flow now requires resolution before its final confirmation.
+    await extension.inspector.evaluate(async (draft) => {
+      const repository = await window.testRepository
+      await repository.savePreparation(draft)
+    }, legacyDraft)
   const page = await extension.context.newPage()
   await page.clock.setFixedTime(new Date('2026-10-16T04:00:00Z'))
   await page.goto(`${extension.extensionBaseUrl}/library.html`)
@@ -48,7 +63,7 @@ async function openSizes(extension, sizes, colors = ['透明', '透明']) {
   await expect(rows).toHaveCount(3)
   await rows.first().focus()
   await page.keyboard.press('Control+a')
-  await assignSelectedPurchaseCodes(page)
+  if (!unfinished) await assignSelectedPurchaseCodes(page)
   const editor = await editOrderProduct(page, 0)
   return { page, view: editor, group: editor, record }
 }

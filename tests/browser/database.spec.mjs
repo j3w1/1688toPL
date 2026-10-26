@@ -2517,6 +2517,7 @@ test('saved product codes roundtrip and released barcode endings can be reused',
     first.items[1].description = first.items[0].description
     first.items.forEach((item, index) => {
       const color = index ? 'blue' : 'red'
+      item.productNumber = 'SYNTHETIC-ROUNDTRIP-CUP'
       item.skuProperties = [
         { label: '颜色', value: color, raw: `颜色：${color}` },
       ]
@@ -2658,7 +2659,10 @@ test('backups preserve independent authoring and preferences without reviving re
     settings: {
       fontSize: 12,
       vocabularyInitialized: true,
-      vocabularyVersion: 1,
+      vocabularyVersion: 2,
+      materialVocabularyVersion: 2,
+      colorVocabularyVersion: 2,
+      sizeVocabularyVersion: 2,
     },
     vocabulary: [{ match: 'box', spanishName: 'CAJA', category: '盒子' }],
     logoDataUrl: image.dataUrl,

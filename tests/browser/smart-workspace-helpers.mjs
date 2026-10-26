@@ -12,6 +12,7 @@ export async function seedSmartOrder(
     uneven = false,
     orderId = '100000000000000001',
     supplierId = 'synthetic-smart-cartons',
+    purchasedAt = '2026-09-12T12:00:00+08:00',
     assignCodes = true,
   } = {}
 ) {
@@ -23,7 +24,7 @@ export async function seedSmartOrder(
   snapshot.accountId = 'local'
   snapshot.sellerName = 'Synthetic smart cartons'
   snapshot.sellerMemberLogin = supplierId
-  snapshot.purchasedAt = '2026-09-12T12:00:00+08:00'
+  snapshot.purchasedAt = purchasedAt
   snapshot.observedAt = '2026-10-22T12:00:00.000Z'
   snapshot.sourceUrl = `https://air.1688.com/app/ctf-page/trade-order-detail/index.html?orderId=${snapshot.orderId}`
   snapshot.items = Array.from({ length: count }, (_, index) => ({
@@ -226,7 +227,10 @@ export async function assignSelectedPurchaseCodes(page) {
   await page.locator('#review-purchase-codes').click()
   const review = page.locator('dialog[data-action="purchase-code-review"]')
   await expect(review).toBeVisible()
-  await review.locator('[data-action="assign-purchase-codes"]').click()
+  await expect(review).toHaveAttribute('aria-busy', 'false')
+  const confirm = review.locator('[data-action="assign-purchase-codes"]')
+  await expect(confirm, await review.innerText()).toBeEnabled()
+  await confirm.click()
   await expect(review).toBeHidden()
   await expect(page.locator('#orders-view')).toBeVisible()
 }

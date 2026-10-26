@@ -23,6 +23,7 @@ function source(orderId = '1001') {
       {
         entryId: '1',
         title: 'Cup',
+        productNumber: 'SYNTHETIC-CUP',
         description: 'Red cup',
         thumbnail: 'https://cbu01.alicdn.com/synthetic-red.png',
         skuProperties: [{ label: '颜色', value: 'red' }],
@@ -30,6 +31,7 @@ function source(orderId = '1001') {
       {
         entryId: '2',
         title: 'Cup',
+        productNumber: 'SYNTHETIC-CUP',
         description: 'Blue cup',
         thumbnail: 'https://cbu01.alicdn.com/synthetic-blue.png',
         skuProperties: [{ label: '颜色', value: 'blue' }],
@@ -37,6 +39,7 @@ function source(orderId = '1001') {
       {
         entryId: '3',
         title: 'Bowl',
+        productNumber: 'SYNTHETIC-BOWL',
         description: 'Bowl',
         thumbnail: 'https://cbu01.alicdn.com/synthetic-bowl.png',
       },

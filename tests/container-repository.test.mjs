@@ -447,6 +447,7 @@ test('native explicit preparation and material rule saves persist automatic evid
           ...record.snapshot.items[0],
           entryId: String(2001 + index),
           title: '合成材质物品',
+          productNumber: 'SYNTHETIC-MATERIAL-FAMILY',
           description: `合成材质物品\n材质：${material}`,
           skuProperties: [{ label: '材质', value: material }],
           quantity: '1',
@@ -705,6 +706,7 @@ test('native base identity remains stable while unresolved variant sizes stay wa
           ...record.snapshot.items[0],
           entryId: String(2001 + index),
           title: '合成玻璃花瓶',
+          productNumber: 'SYNTHETIC-VASE-FAMILY',
           description: `合成玻璃花瓶\n颜色：${['金色', '银色'][index]}\n规格：${size}`,
           skuProperties: [
             { label: '颜色', value: ['金色', '银色'][index] },

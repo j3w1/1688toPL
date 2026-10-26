@@ -23,6 +23,7 @@ function fixture() {
     items: ['玻璃', '不锈钢'].map((material, index) => ({
       entryId: String(index + 1),
       title: '合成容器',
+      productNumber: 'SYNTHETIC-CONTAINER',
       description: `合成容器\n材质：${material}`,
       skuProperties: [{ label: '材质', value: material }],
     })),

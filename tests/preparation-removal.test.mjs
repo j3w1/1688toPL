@@ -21,16 +21,24 @@ function fixture() {
       {
         entryId: '1',
         title: 'Cup',
+        productNumber: 'SYNTHETIC-CUP',
         description: 'Cup red',
         skuProperties: [{ label: '颜色', value: '红色' }],
       },
       {
         entryId: '2',
         title: 'Cup',
+        productNumber: 'SYNTHETIC-CUP',
         description: 'Cup blue',
         skuProperties: [{ label: '颜色', value: '蓝色' }],
       },
-      { entryId: '3', title: 'Box', description: 'Box', skuProperties: [] },
+      {
+        entryId: '3',
+        title: 'Box',
+        productNumber: 'SYNTHETIC-BOX',
+        description: 'Box',
+        skuProperties: [],
+      },
     ],
   }
   const baseline = allocatePreparation(

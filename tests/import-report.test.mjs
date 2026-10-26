@@ -1,6 +1,58 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createImportReport } from '../src/import-report.js'
+import { createImportReport, importJobView } from '../src/import-report.js'
+
+test('reader reports bound and sanitize lifecycle evidence without exposing provisional IDs or API text', () => {
+  const job = {
+    orders: [],
+    readerAttempt: {
+      tabId: 8001,
+      sourceUrl: 'https://private.invalid/',
+      check: 4,
+    },
+    readerDiagnostics: Array.from({ length: 40 }, () => ({
+      method: 'background',
+      outcome: 'missing',
+      stage: 'registering',
+      code: 'MISSING_TAB',
+      check: 2,
+      elapsedMs: 250,
+      tabId: 8001,
+      error: 'private API text',
+    })),
+  }
+  job.readerDiagnostics.push({ method: 'private', outcome: 'missing' })
+  const report = createImportReport(job, 'test')
+  assert.equal(report.job.readerDiagnostics.length, 23)
+  assert.deepEqual(report.job.readerDiagnostics[0], {
+    method: 'background',
+    outcome: 'missing',
+    stage: 'registering',
+    code: 'MISSING_TAB',
+    check: 2,
+    elapsedMs: 250,
+  })
+  assert.doesNotMatch(JSON.stringify(report), /tabId|private|8001|sourceUrl/)
+  assert.equal(importJobView(job).readerAttempt, undefined)
+  assert.equal(importJobView(job).readerDiagnostics, undefined)
+  const invalid = createImportReport(
+    {
+      orders: [],
+      readerDiagnostics: [
+        {
+          method: 'background',
+          outcome: 'api-error',
+          stage: 'private URL',
+          code: 'private error text',
+        },
+      ],
+    },
+    'test'
+  )
+  assert.deepEqual(invalid.job.readerDiagnostics, [
+    { method: 'background', outcome: 'api-error' },
+  ])
+})
 
 test('import reports retain every failure and separate discovery from successful saves', () => {
   const job = {
@@ -34,6 +86,8 @@ test('import reports retain every failure and separate discovery from successful
     discovered: 20,
     saved: 6,
     failed: 4,
+    reviewRequired: 0,
+    failures: 4,
     pending: 10,
     undiscovered: 647,
     remaining: 661,
@@ -70,4 +124,45 @@ test('an undiscovered legacy queue is not reported as complete and invalid links
     'test'
   )
   assert.equal(invalid.orders[0].sourceUrl, null)
+})
+
+test('reports explicitly distinguish discount review from actual failures while preserving legacy counts', () => {
+  const source = {
+    total: 4,
+    orders: [
+      { orderId: '10001', state: 'done', reviewRequired: true },
+      {
+        orderId: '10002',
+        state: 'failed',
+        reviewRequired: true,
+        error:
+          'The order total balances, but the discount allocation needs your review.',
+      },
+      {
+        orderId: '10003',
+        state: 'failed',
+        error: 'Product rows are incomplete.',
+      },
+      { orderId: '10004', state: 'pending' },
+    ],
+  }
+  const before = structuredClone(source)
+  const report = createImportReport(source, 'test')
+  assert.deepEqual(report.counts, {
+    expected: 4,
+    discovered: 4,
+    saved: 1,
+    failed: 2,
+    reviewRequired: 1,
+    failures: 1,
+    pending: 1,
+    undiscovered: 0,
+    remaining: 3,
+  })
+  assert.deepEqual(
+    report.orders.map((order) => order.reviewRequired),
+    [false, true, false, false]
+  )
+  assert.equal(report.errors.length, 2)
+  assert.deepEqual(source, before)
 })

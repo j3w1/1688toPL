@@ -17,6 +17,7 @@ import { openPackingExportDialog } from '../src/packing-export-dialog.js'
 import { createProductAuthoring } from '../src/product-authoring.js'
 import { getLanguage, setLanguage } from '../src/i18n.js'
 import { validatePackingPreferences } from '../src/packing-model.js'
+import { planPurchaseCodeReview } from '../src/purchase-codes.js'
 import {
   mountOrderCartonGrid,
   createPackingReportIntakeController,
@@ -2812,6 +2813,372 @@ test('purchase-code review excludes documented fee quantities but retains unknow
   ])
   assert.deepEqual({ record, selected }, original)
   document.querySelector('.purchase-code-review').close()
+})
+
+test('a new preparation review reads current scoped source facts after capacity saves while preserving the library cache', async (context) => {
+  const { document } = authoringEnvironment(context),
+    cached = syntheticOrder('1001'),
+    live = structuredClone(cached),
+    reads = [],
+    writes = []
+  live.unitsPerCarton = { 2001: '10' }
+  const before = structuredClone({ cached, live }),
+    selected = [{ accountId: 'local', orderId: '1001', entryId: '2001' }]
+  const authoring = await createProductAuthoring({
+    getRecords: () => [cached],
+    repository: {
+      listPreparations: async () => [],
+      getPackingPreferences: async () => validatePackingPreferences({}),
+      getOrder: async (orderId, options) => {
+        reads.push({ orderId, ...options })
+        return structuredClone(live)
+      },
+      reviewPurchaseCodes: async (selection) =>
+        planPurchaseCodeReview(
+          {
+            records: [live],
+            preparations: [],
+            allocations: [],
+            issuedCodes: [],
+            locks: [],
+          },
+          selection
+        ),
+      assignPurchaseCodes: async (input) => writes.push(input),
+    },
+  })
+  context.after(() => authoring.dispose())
+  await authoring.reviewCodes(selected)
+  const review = document.querySelector('[data-action="purchase-code-review"]'),
+    confirm = review.querySelector('[data-action="assign-purchase-codes"]')
+  assert.deepEqual(reads, [{ accountId: 'local', orderId: '1001' }])
+  assert.equal(confirm.disabled, false)
+  assert.match(
+    review.querySelector('.purchase-code').textContent,
+    /^CE2609\d{4}$/
+  )
+  assert.doesNotMatch(review.textContent, /selected purchase changed/)
+  assert.deepEqual({ cached, live }, before)
+  review.close()
+  assert.deepEqual(writes, [])
+})
+
+test('a preparation review still blocks source changes between its current source read and the first proposal', async (context) => {
+  const { document } = authoringEnvironment(context),
+    cached = syntheticOrder('1001'),
+    live = structuredClone(cached)
+  live.unitsPerCarton = { 2001: '10' }
+  const authoring = await createProductAuthoring({
+    getRecords: () => [cached],
+    repository: {
+      listPreparations: async () => [],
+      getPackingPreferences: async () => validatePackingPreferences({}),
+      getOrder: async () => structuredClone(live),
+      reviewPurchaseCodes: async (selection) => {
+        live.unitsPerCarton['2001'] = '20'
+        return planPurchaseCodeReview(
+          {
+            records: [live],
+            preparations: [],
+            allocations: [],
+            issuedCodes: [],
+            locks: [],
+          },
+          selection
+        )
+      },
+    },
+  })
+  context.after(() => authoring.dispose())
+  await authoring.reviewCodes([
+    { accountId: 'local', orderId: '1001', entryId: '2001' },
+  ])
+  const review = document.querySelector('[data-action="purchase-code-review"]')
+  assert.equal(
+    review.querySelector('[data-action="assign-purchase-codes"]').disabled,
+    true
+  )
+  assert.match(review.textContent, /selected purchase changed/)
+  assert.equal(review.querySelector('.purchase-code').textContent, '—')
+  assert.equal(cached.unitsPerCarton, undefined)
+  review.close()
+})
+
+test('preparation code edits update every shared preview, validate after editing and reset only code choices', async (context) => {
+  const { document, window } = authoringEnvironment(context),
+    record = syntheticOrder('1001'),
+    previews = [],
+    selection = [{ accountId: 'local', orderId: '1001', entryId: '2001' }],
+    authoring = await createProductAuthoring({
+      getRecords: () => [record],
+      repository: {
+        listPreparations: async () => [],
+        getPackingPreferences: async () => validatePackingPreferences({}),
+        reviewPurchaseCodes: async (selected) =>
+          planPurchaseCodeReview(
+            { records: [record], preparations: [] },
+            selected
+          ),
+        previewPreparations: async (preparations) =>
+          previews.push(structuredClone(preparations)),
+      },
+    })
+  context.after(() => authoring.dispose())
+  await authoring.reviewCodes(selection)
+  const review = document.querySelector('[data-action="purchase-code-review"]'),
+    suggested = review.querySelector('.purchase-code').textContent,
+    base = review.querySelector('[data-review-code="baseCode"]'),
+    ending = review.querySelector('[data-review-code="variantSuffix"]'),
+    confirm = review.querySelector('[data-action="assign-purchase-codes"]')
+  base.value = 'CE26090109'
+  base.dispatchEvent(new window.Event('input'))
+  assert.equal(review.querySelector('.purchase-code').textContent, 'CE26090109')
+  assert.equal(confirm.disabled, true)
+  base.dispatchEvent(new window.Event('blur'))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(confirm.disabled, false)
+  assert.equal(previews.at(-1)[0].groups[0].baseCode, 'CE26090109')
+  ending.value = '?'
+  ending.dispatchEvent(new window.Event('input'))
+  assert.equal(ending.getAttribute('aria-invalid'), null)
+  assert.equal(confirm.disabled, true)
+  ending.dispatchEvent(new window.Event('blur'))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(ending.getAttribute('aria-invalid'), 'true')
+  assert.equal(confirm.disabled, true)
+  assert.equal(review.querySelector('.purchase-code').textContent, '—')
+  ending.value = 'B'
+  ending.dispatchEvent(new window.Event('input'))
+  ending.dispatchEvent(new window.Event('blur'))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(confirm.disabled, false)
+  assert.equal(
+    review.querySelector('.purchase-code').textContent,
+    'CE26090109B'
+  )
+  review
+    .querySelector('[data-action="reset-preparation-code-suggestions"]')
+    .click()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(review.querySelector('.purchase-code').textContent, suggested)
+  assert.equal(confirm.disabled, false)
+  review.close()
+})
+
+test('family review exposes full order context while only selected membership and identities are editable', async (context) => {
+  const { document } = authoringEnvironment(context),
+    record = syntheticOrder('1001'),
+    calls = []
+  record.snapshot.items.push({
+    ...structuredClone(record.snapshot.items[0]),
+    entryId: '2002',
+    productNumber: 'MODEL123A-02',
+  })
+  record.snapshot.items[0].productNumber = 'MODEL123A-01'
+  Object.assign(record.snapshot.totals, {
+    goodsGross: '2000.00',
+    goodsNet: '2000.00',
+    payable: '2000.00',
+  })
+  const authoring = await createProductAuthoring({
+    getRecords: () => [record],
+    repository: {
+      listPreparations: async () => [],
+      getPackingPreferences: async () => validatePackingPreferences({}),
+      reviewPurchaseCodes: async (selection) => {
+        calls.push(structuredClone(selection))
+        return planPurchaseCodeReview(
+          { records: [record], preparations: [] },
+          selection
+        )
+      },
+    },
+  })
+  context.after(() => authoring.dispose())
+  await authoring.reviewCodes([
+    { accountId: 'local', orderId: '1001', entryId: '2001' },
+  ])
+  const review = document.querySelector('[data-action="purchase-code-review"]')
+  review.querySelector('[data-action="review-product-families"]').click()
+  const family = document.querySelector(
+      '[data-action="product-family-review"]'
+    ),
+    rows = [...family.querySelectorAll('[data-family-entry]')]
+  assert.equal(rows.length, 2)
+  assert.equal(
+    rows[0].querySelector('[data-action="review-family-family"]').disabled,
+    false
+  )
+  assert.equal(
+    rows[1].querySelector('[data-action="review-family-family"]').disabled,
+    true
+  )
+  assert.equal(
+    rows[0].querySelector('[data-action="review-family-style"]').disabled,
+    false
+  )
+  assert.equal(
+    rows[1].querySelector('[data-action="review-family-style"]').disabled,
+    true
+  )
+  assert.match(rows[1].textContent, /Not selected/)
+  assert.equal(family.querySelector('input[type="checkbox"]'), null)
+  family.close()
+  assert.equal(calls.length, 1)
+  review.close()
+})
+
+test('saved family membership stays read-only even when every product is selected and directs corrections to Orders', async (context) => {
+  const { document } = authoringEnvironment(context),
+    { record, preparation } = syntheticManifest().orders[0],
+    before = structuredClone(preparation),
+    authoring = await createProductAuthoring({
+      getRecords: () => [record],
+      repository: {
+        listPreparations: async () => [structuredClone(preparation)],
+        getPackingPreferences: async () => validatePackingPreferences({}),
+        reviewPurchaseCodes: async (selection) =>
+          planPurchaseCodeReview(
+            { records: [record], preparations: [preparation] },
+            selection
+          ),
+      },
+    })
+  context.after(() => authoring.dispose())
+  await authoring.reviewCodes(
+    record.snapshot.items.map((item) => ({
+      accountId: 'local',
+      orderId: record.snapshot.orderId,
+      entryId: item.entryId,
+    }))
+  )
+  const review = document.querySelector('[data-action="purchase-code-review"]')
+  review.querySelector('[data-action="review-product-families"]').click()
+  const family = document.querySelector('[data-action="product-family-review"]')
+  for (const control of family.querySelectorAll('[data-family-field]'))
+    assert.equal(control.disabled, true)
+  assert.match(family.textContent, /Use Edit product in Orders/)
+  family.close()
+  assert.equal(
+    review.querySelector('[data-review-code="baseCode"]').disabled,
+    false
+  )
+  assert.deepEqual(preparation, before)
+  review.close()
+})
+
+test('closing a scoped preparation editor keeps a newer unfinished code focus and restores focus only when needed', async (context) => {
+  const { document, window } = authoringEnvironment(context),
+    record = syntheticOrder('1001')
+  let focused = document.body,
+    restores = 0
+  Object.defineProperty(document, 'activeElement', {
+    configurable: true,
+    get: () => focused,
+  })
+  const authoring = await createProductAuthoring({
+    getRecords: () => [record],
+    repository: {
+      listPreparations: async () => [],
+      getPackingPreferences: async () => validatePackingPreferences({}),
+      reviewPurchaseCodes: async (selection) =>
+        planPurchaseCodeReview(
+          { records: [record], preparations: [] },
+          selection
+        ),
+    },
+  })
+  context.after(() => authoring.dispose())
+  await authoring.reviewCodes([
+    { accountId: 'local', orderId: '1001', entryId: '2001' },
+  ])
+  const review = document.querySelector('[data-action="purchase-code-review"]'),
+    opener = review.querySelector('[data-review-details="edit-order-details"]'),
+    base = review.querySelector('[data-review-code="baseCode"]')
+  opener.focus = () => {
+    restores++
+    const previous = focused
+    focused = opener
+    previous?.dispatchEvent(new window.Event('blur'))
+  }
+  base.focus = () => {
+    focused = base
+  }
+  opener.click()
+  document.querySelector('.product-detail-dialog').close()
+  base.focus()
+  base.value = 'CE'
+  base.dispatchEvent(new window.Event('input'))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(document.activeElement, base)
+  assert.equal(base.value, 'CE')
+  assert.equal(base.getAttribute('aria-invalid'), null)
+  assert.equal(restores, 0)
+  opener.click()
+  focused = document.body
+  document.querySelector('.product-detail-dialog').close()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(document.activeElement, opener)
+  assert.equal(restores, 1)
+  review.close()
+})
+
+test('an unprepared product shortcut retains selected rows across orders and empty product scope never expands an order', async (context) => {
+  const { document } = authoringEnvironment(context),
+    first = syntheticOrder('1001'),
+    second = syntheticOrder('1002'),
+    other = syntheticOrder('1003'),
+    calls = []
+  first.snapshot.items = Array.from({ length: 17 }, (_, index) => ({
+    ...first.snapshot.items[0],
+    entryId: String(2001 + index),
+  }))
+  Object.assign(first.snapshot.totals, {
+    goodsGross: '17000.00',
+    goodsNet: '17000.00',
+    payable: '17000.00',
+  })
+  Object.assign(other.snapshot, { source: 'other', sourceUrl: '' })
+  const records = [first, second, other],
+    before = structuredClone(records),
+    authoring = await createProductAuthoring({
+      repository: {
+        listPreparations: async () => [],
+        getPackingPreferences: async () => validatePackingPreferences({}),
+        reviewPurchaseCodes: async (selection) => {
+          calls.push(structuredClone(selection))
+          return { changes: [], issues: [] }
+        },
+      },
+      getRecords: () => records,
+      getSelectedRows: () => [
+        { accountId: 'local', orderId: '1001', entryId: '2001' },
+        { accountId: 'local', orderId: '1002', entryId: '2001' },
+      ],
+    })
+  context.after(() => authoring.dispose())
+  await authoring.openEditor({
+    accountId: 'local',
+    orderId: '1001',
+    entryId: '2001',
+  })
+  assert.deepEqual(calls[0].entryRefs, [
+    { accountId: 'local', orderId: '1001', entryId: '2001' },
+    { accountId: 'local', orderId: '1002', entryId: '2001' },
+  ])
+  assert.deepEqual(calls[0].orderRefs, [
+    { accountId: 'local', orderId: '1001' },
+    { accountId: 'local', orderId: '1002' },
+  ])
+  document.querySelector('.purchase-code-review').close()
+  await assert.rejects(
+    authoring.reviewCodes([], {
+      orderRefs: [{ accountId: 'local', orderId: '1001' }],
+    }),
+    /Select at least one product/
+  )
+  assert.equal(calls.length, 1)
+  assert.deepEqual(records, before)
 })
 
 test('grouping separates complete source scope from chosen variants and protects unselected shared source rows', async (testContext) => {

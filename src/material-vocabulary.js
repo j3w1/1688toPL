@@ -1,6 +1,6 @@
 // Local material hints, derived from seller wording. These helpers never rewrite
 // source descriptions and do not infer composition from a product's appearance.
-export const MATERIAL_VOCABULARY_VERSION = 1
+export const MATERIAL_VOCABULARY_VERSION = 2
 
 const definitions = [
   ['glass', '玻璃', 'Glass', 'Vidrio', '玻璃|玻璃材质|耐热玻璃|高硼硅玻璃', ''],
@@ -20,6 +20,14 @@ const definitions = [
   ['marble', '大理石', 'Marble', 'Mármol', '大理石|marble', 'stone'],
   ['plastic', '塑料', 'Plastic', 'Plástico', '塑料|塑胶|plastic', ''],
   ['abs', 'ABS', 'ABS', 'ABS', 'ABS|丙烯腈丁二烯苯乙烯', 'plastic'],
+  [
+    'pc',
+    'PC',
+    'Polycarbonate',
+    'Policarbonato',
+    'PC|聚碳酸酯|polycarbonate',
+    'plastic',
+  ],
   ['pvc', 'PVC', 'PVC', 'PVC', 'PVC|聚氯乙烯', 'plastic'],
   ['pp', 'PP', 'PP', 'PP', 'PP|聚丙烯', 'plastic'],
   ['pet', 'PET', 'PET', 'PET', 'PET|聚对苯二甲酸乙二醇酯', 'plastic'],
@@ -94,7 +102,14 @@ const definitions = [
   ],
   ['mdf', '密度板', 'MDF', 'MDF', '密度板|中密度纤维板|MDF', 'wood'],
   ['bamboo', '竹', 'Bamboo', 'Bambú', '楠竹|竹制|竹质|竹编|bamboo', ''],
-  ['bamboo-wood', '竹木', 'Bamboo / wood', 'Bambú / madera', '竹木', ''],
+  [
+    'bamboo-wood',
+    '竹木',
+    'Bamboo / wood',
+    'Bambú / madera',
+    '竹木|竹木制|竹木材质',
+    '',
+  ],
   ['rattan', '藤', 'Rattan', 'Ratán', '藤编|藤制|藤织|rattan', ''],
   ['willow', '柳', 'Willow', 'Mimbre', '柳编|柳制|willow|wicker', ''],
   ['straw', '草编', 'Woven straw', 'Paja tejida', '草编|woven straw', ''],
@@ -340,6 +355,16 @@ export const MATERIAL_VOCABULARY = Object.freeze(
   )
 )
 
+export const MATERIAL_VOCABULARY_UPDATE = Object.freeze({
+  additions: ['pc'],
+  previous: [
+    {
+      ...MATERIAL_VOCABULARY.find((entry) => entry.id === 'bamboo-wood'),
+      aliases: ['竹木'],
+    },
+  ],
+})
+
 const normalize = (value) =>
   String(value ?? '')
     .normalize('NFKC')
@@ -452,6 +477,8 @@ export function translateMaterial(value, language = 'en') {
 const explicitLabel =
   /^(?:材质|材料|产品材质|商品材质|主要材质|主体材质|面料|面料材质|面料成分|材质成分|主要成分|成分|material|materials|materiales|composition)$/i
 const ambiguousAfter = /^(?:色|纹|风格|效果|质感|感|宝宝)/u
+const finishAfter =
+  /^\s+(?:grain|grained|style|effect|finish|texture|look|colou?r(?:ed)?)(?:\b|$)/iu
 const accessoryAfter =
   /^(?:(?:空心|实心)?(?:盖(?!布)|塞|手柄|柄|底座|底托|托|绳|扣|包装|袋装|包边|龙头|油嘴|刷头))/u
 const auxiliaryBefore =
@@ -488,8 +515,15 @@ function materialMatches(value, explicit = false, materialAliases = aliases) {
         (accessoryAfter.test(after) || auxiliaryBefore.test(before))
       const useContext =
         !explicit &&
-        ((material.id === 'glass' &&
-          /^(?:刷|清洁|清洗|清理|刮|擦|笔|贴膜)/u.test(after)) ||
+        ((alias === 'pc' &&
+          (/^(?:电脑|计算机|主机|游戏|客户端|软件|版|端|机|网站)/u.test(
+            after
+          ) ||
+            /^\s+(?:computer|gaming|software|desktop|laptop)\b/iu.test(
+              after
+            ))) ||
+          (material.id === 'glass' &&
+            /^(?:刷|清洁|清洗|清理|刮|擦|笔|贴膜)/u.test(after)) ||
           (material.id === 'cement' && /^灰/u.test(after)) ||
           (material.id === 'foam' &&
             /^(?:洗手液|沐浴|洗面奶|洁面|起泡|打泡|瓶)/u.test(after)))
@@ -501,6 +535,7 @@ function materialMatches(value, explicit = false, materialAliases = aliases) {
         !imitation &&
         !notMaterial &&
         !ambiguousAfter.test(after) &&
+        !finishAfter.test(after) &&
         !auxiliary &&
         !useContext
       ) {
@@ -600,6 +635,7 @@ function suggestWithAliases(item = {}, materialAliases) {
   const conflictingFamilies = [
     [
       'pvc',
+      'pc',
       'pp',
       'pet',
       'pe',

@@ -1,6 +1,7 @@
 import { createProgressView, importProgressStyles } from './import-progress.js'
 import { mountFloatingPanel, floatingPanelStyles } from './floating-panel.js'
 import { mountPanelAppearance } from './panel-appearance.js'
+import { bindText, message as m } from './i18n.js'
 
 const controlKey = Symbol.for('1688topl.pageDownloadCleanup')
 
@@ -69,6 +70,27 @@ export function mountPageDownload(document, prepareFile, actions = {}) {
   status.className = 'status'
   status.setAttribute('role', 'status')
   status.setAttribute('aria-live', 'polite')
+  const reviewDiscounts = actions.reviewDiscounts
+    ? element('button', '', panelBody)
+    : null
+  if (reviewDiscounts) {
+    reviewDiscounts.type = 'button'
+    bindText(reviewDiscounts, m('Review discounts'))
+    reviewDiscounts.hidden = true
+    reviewDiscounts.dataset.action = 'review-order-discounts'
+    reviewDiscounts.addEventListener('click', async () => {
+      reviewDiscounts.disabled = true
+      try {
+        status.dataset.tone = 'notice'
+        status.textContent = (await actions.reviewDiscounts()) || ''
+      } catch (error) {
+        status.dataset.tone = 'error'
+        status.textContent = error.message
+      } finally {
+        reviewDiscounts.disabled = false
+      }
+    })
+  }
   if (actions.saveOrder || actions.openLibrary) {
     const buttons = element('div', '', panelBody)
     buttons.className = 'library-actions'
@@ -172,5 +194,21 @@ export function mountPageDownload(document, prepareFile, actions = {}) {
   view.addEventListener('pagehide', pageHidden)
   view.addEventListener('pageshow', pageShown)
   document.body.appendChild(host)
-  return { updateProgress, dispose: cleanup }
+  return {
+    updateProgress,
+    setDiscountReviewRequired(required) {
+      if (!reviewDiscounts) return
+      reviewDiscounts.hidden = !required
+      if (required) {
+        status.dataset.tone = 'notice'
+        bindText(
+          status,
+          m(
+            'The order total balances, but the discount allocation needs your review.'
+          )
+        )
+      }
+    },
+    dispose: cleanup,
+  }
 }

@@ -7,7 +7,7 @@ import {
 // Literal local aliases only. 1688 marketing titles and article numbers are not
 // size evidence; marked spreadsheet descriptions are. Compare compatible units
 // without area guesses.
-export const SIZE_VOCABULARY_VERSION = 1
+export const SIZE_VOCABULARY_VERSION = 2
 
 export const DEFAULT_SIZE_VOCABULARY = Object.freeze(
   [
@@ -16,9 +16,9 @@ export const DEFAULT_SIZE_VOCABULARY = Object.freeze(
     ['XXS', 'XXS'],
     ['2XS', '2XS'],
     ['XS|加小号|特小号|特别小号|超小号|特小', 'XS'],
-    ['S|小号|小码|小尺寸|小', 'S'],
+    ['S|小号|小码|小尺寸|小|短|短款|短版|short', 'S'],
     ['M|中号|中码|中尺寸|中', 'M'],
-    ['L|大号|大码|大尺寸|大', 'L'],
+    ['L|大号|大码|大尺寸|大|长|长款|长版|long', 'L'],
     ['XL|加大号|特大号|特别大号|超大号|特大|超大|加大', 'XL'],
     ['XXL|加加大号', 'XXL'],
     ['2XL', '2XL'],
@@ -33,6 +33,14 @@ export const DEFAULT_SIZE_VOCABULARY = Object.freeze(
     ['A6', 'A6'],
   ].map(([match, suffix]) => Object.freeze({ match, suffix }))
 )
+
+export const SIZE_VOCABULARY_UPDATE = Object.freeze({
+  additions: [],
+  previous: [
+    { match: 'S|小号|小码|小尺寸|小', suffix: 'S' },
+    { match: 'L|大号|大码|大尺寸|大', suffix: 'L' },
+  ],
+})
 
 const rankedSuffixes = {
   2: ['S', 'L'],
@@ -336,11 +344,16 @@ function descriptionProperties(item) {
   })
 }
 
-function extract(item, aliases) {
+/** Shared structured/legacy source attributes before any identity inference. */
+export function sizeSourceProperties(item) {
   const sourceProperties = recognitionProperties(item)
-  const properties = sourceProperties.length
+  return sourceProperties.length
     ? sourceProperties
     : descriptionProperties(item)
+}
+
+function extract(item, aliases) {
+  const properties = sizeSourceProperties(item)
   const variantProperties = []
   const sizeSources = []
   for (const property of properties) {

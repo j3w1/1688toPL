@@ -117,6 +117,7 @@ async function actualCodeReview(extension, count, options = {}) {
   await page.locator('#review-purchase-codes').click()
   const review = page.locator('dialog[data-action="purchase-code-review"]')
   await expect(review).toBeVisible()
+  await expect(review).toHaveAttribute('aria-busy', 'false')
   return { page, review, before }
 }
 

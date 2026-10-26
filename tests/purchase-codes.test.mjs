@@ -44,6 +44,7 @@ function records(months = ['2026-09', '2026-10', '2026-11']) {
         {
           entryId: '1',
           title: 'Cup',
+          productNumber: 'SYNTHETIC-CUP',
           description: 'White cup',
           sourceSize: 'S',
           quantity: String((index + 1) * 10),
@@ -56,6 +57,649 @@ function records(months = ['2026-09', '2026-10', '2026-11']) {
     revision: 1,
   }))
 }
+
+test('explicit current-order code scope includes all 17 logical source products without touching unrelated purchases or accounts', () => {
+  const source = records(['2026-09', '2026-10'])
+  source[0].snapshot.items = Array.from({ length: 17 }, (_, index) => ({
+    ...source[0].snapshot.items[0],
+    entryId: String(index + 1),
+    title: `Synthetic product ${index + 1}`,
+    productNumber: `SYNTHETIC-PRODUCT-${index + 1}`,
+    description: `Synthetic product ${index + 1}`,
+  }))
+  delete source[1].snapshot.sellerMemberLogin
+  source[1].snapshot.sellerUnavailable = true
+  const foreign = structuredClone(source[0]),
+    spreadsheet = structuredClone(source[1])
+  foreign.snapshot.accountId = 'another-account'
+  delete foreign.snapshot.sellerMemberLogin
+  foreign.snapshot.sellerUnavailable = true
+  Object.assign(spreadsheet.snapshot, {
+    orderId: '104',
+    sourceType: 'spreadsheet',
+    sourceUrl: '',
+  })
+  const s = {
+      records: [...source, foreign, spreadsheet],
+      preparations: [],
+      allocations: [],
+      issuedCodes: [],
+      locks: [],
+    },
+    before = structuredClone(s),
+    refs = source[0].snapshot.items.map((item) => ({
+      accountId: 'local',
+      orderId: '101',
+      entryId: item.entryId,
+    })),
+    review = planPurchaseCodeReview(s, { entryRefs: refs })
+  assert.equal(refs.length, 17)
+  assert.ok(
+    refs.every((row) => row.accountId === 'local' && row.orderId === '101')
+  )
+  assert.equal(review.changes.length, 17)
+  assert.deepEqual(review.issues, [])
+  assert.ok(review.changes.every((row) => row.after.startsWith('CE2609')))
+  assert.deepEqual(s, before)
+})
+
+test('a source subset code review preserves unselected assignments and excludes other purchases and unselected missing rows', () => {
+  const s = state(['2026-09', '2026-10'])
+  s.records[0].snapshot.items.push(
+    ...['2', '3'].map((entryId) => ({
+      ...s.records[0].snapshot.items[0],
+      entryId,
+      title: `Source product ${entryId}`,
+      productNumber: `SYNTHETIC-PRODUCT-${entryId}`,
+      description: `Source product ${entryId}`,
+    }))
+  )
+  const before = structuredClone(s),
+    review = planPurchaseCodeReview(s, {
+      orderRefs: [{ accountId: 'local', orderId: '101' }],
+      entryRefs: [{ accountId: 'local', orderId: '101', entryId: '2' }],
+    })
+  assert.deepEqual(review.issues, [])
+  assert.equal(review.changes.length, 1)
+  assert.equal(review.changes[0].entryId, '2')
+  assert.equal(review.changes[0].before, '')
+  assert.match(review.changes[0].after, /^CE2609/)
+  assert.equal(review.plan.preparations.length, 1)
+  const proposed = review.plan.preparations[0]
+  assert.equal(proposed.orderId, '101')
+  assert.deepEqual(
+    proposed.groups.find(
+      (group) => group.id === before.preparations[0].groups[0].id
+    ),
+    before.preparations[0].groups[0]
+  )
+  assert.ok(
+    !proposed.groups.some((group) =>
+      group.variants.some((variant) => variant.entryIds.includes('3'))
+    )
+  )
+  assert.deepEqual(s.preparations[1], before.preparations[1])
+  assert.deepEqual(s, before)
+})
+
+test('selecting one of two identical source identities never prepares the unchecked source row', () => {
+  const source = records(['2026-09'])
+  source[0].snapshot.items.push({
+    ...source[0].snapshot.items[0],
+    entryId: '2',
+    quantity: '25',
+  })
+  const s = {
+      records: source,
+      preparations: [],
+      allocations: [],
+      issuedCodes: [],
+      locks: [],
+    },
+    before = structuredClone(s),
+    review = planPurchaseCodeReview(s, {
+      orderRefs: [{ accountId: 'local', orderId: '101' }],
+      entryRefs: [{ accountId: 'local', orderId: '101', entryId: '1' }],
+    })
+  assert.deepEqual(review.issues, [])
+  assert.deepEqual(
+    review.changes.map((change) => change.entryId),
+    ['1']
+  )
+  assert.deepEqual(
+    review.plan.preparations.flatMap((preparation) =>
+      preparation.groups.flatMap((group) =>
+        group.variants.flatMap((variant) => variant.entryIds)
+      )
+    ),
+    ['1']
+  )
+  assert.deepEqual(s, before)
+})
+
+test('a selected row preserves previously shared unchecked identities without adding another identical source row', () => {
+  const source = records(['2026-09'])
+  source[0].snapshot.items.push({
+    ...source[0].snapshot.items[0],
+    entryId: '2',
+    quantity: '25',
+  })
+  const allocation = allocatePreparation(
+      createPreparation(source[0].snapshot, '2026-09'),
+      [],
+      [],
+      { snapshot: source[0].snapshot }
+    ),
+    preparation = { ...allocation.preparation, revision: 1 },
+    variant = preparation.groups[0].variants[0]
+  assert.deepEqual(variant.entryIds, ['1', '2'])
+  source[0].snapshot.items.push({
+    ...source[0].snapshot.items[0],
+    entryId: '3',
+    quantity: '40',
+  })
+  const s = {
+      records: source,
+      preparations: [preparation],
+      allocations: allocation.allocations,
+      issuedCodes: allocation.issuedCodes,
+      locks: [],
+    },
+    before = structuredClone(s),
+    review = planPurchaseCodeReview(s, {
+      orderRefs: [{ accountId: 'local', orderId: '101' }],
+      entryRefs: [{ accountId: 'local', orderId: '101', entryId: '1' }],
+    })
+  assert.deepEqual(review.issues, [])
+  assert.equal(review.changes.length, 1)
+  assert.equal(review.changes[0].after, review.changes[0].before)
+  assert.deepEqual(review.plan.preparations[0], before.preparations[0])
+  assert.deepEqual(s, before)
+})
+
+function unassignedState(source = records(['2026-10'])) {
+  return {
+    records: source,
+    preparations: [],
+    allocations: [],
+    issuedCodes: [],
+    locks: [],
+  }
+}
+function colourState() {
+  const s = unassignedState(),
+    original = s.records[0].snapshot.items[0]
+  s.records[0].snapshot.items = ['Red', 'Blue', 'Green'].map(
+    (colour, index) => ({
+      ...original,
+      entryId: String(index + 1),
+      title: 'Synthetic cup',
+      description: `Synthetic cup ${colour}`,
+      sourceSize: '',
+      skuProperties: [{ label: 'Color', value: colour }],
+    })
+  )
+  return s
+}
+function selectedReview(s, entries, orderId = '101') {
+  return planPurchaseCodeReview(s, {
+    entryRefs: entries.map((entryId) => ({
+      accountId: 'local',
+      orderId,
+      entryId,
+    })),
+  })
+}
+function acceptReview(s, review) {
+  assert.deepEqual(review.issues, [])
+  const preparations = review.plan.preparations.map((preparation) => ({
+      ...preparation,
+      revision: preparation.revision + 1,
+    })),
+    packing = activePackingState(preparations, s.allocations, s.issuedCodes)
+  return {
+    ...s,
+    preparations,
+    allocations: packing.allocations,
+    issuedCodes: packing.issuedCodes,
+  }
+}
+
+test('selected B retains the complete order A/B/C identity without preparing A or C', () => {
+  const s = colourState(),
+    before = structuredClone(s),
+    review = selectedReview(s, ['2'])
+  assert.deepEqual(review.issues, [])
+  assert.equal(review.changes[0].after, 'CE26100101B')
+  assert.deepEqual(
+    review.plan.preparations[0].groups[0].variants.map(
+      (variant) => variant.entryIds
+    ),
+    [['2']]
+  )
+  assert.deepEqual(s, before)
+})
+
+test('ambiguous family review requires a source-scoped choice and retains the same revision guards before confirmation', () => {
+  const s = colourState()
+  for (const item of s.records[0].snapshot.items) item.productNumber = ''
+  const before = structuredClone(s),
+    selection = {
+      entryRefs: [{ accountId: 'local', orderId: '101', entryId: '2' }],
+    },
+    unresolved = planPurchaseCodeReview(s, selection),
+    joined = planPurchaseCodeReview(s, {
+      ...selection,
+      familyChoices: [
+        {
+          accountId: 'local',
+          orderId: '101',
+          entryIds: ['1', '2', '3'],
+          kind: 'family',
+        },
+      ],
+    }),
+    separate = planPurchaseCodeReview(s, {
+      ...selection,
+      familyChoices: [
+        {
+          accountId: 'local',
+          orderId: '101',
+          entryIds: ['1', '2', '3'],
+          kind: 'standalone',
+        },
+      ],
+    })
+  assert.ok(
+    unresolved.issues.some(
+      (issue) => issue.code === 'PRODUCT_FAMILY_REVIEW_REQUIRED'
+    )
+  )
+  assert.deepEqual(unresolved.familyReview[0].issues[0].entryIds, [
+    '1',
+    '2',
+    '3',
+  ])
+  assert.equal(unresolved.plan.preparations.length, 0)
+  assert.deepEqual(joined.issues, [])
+  assert.equal(joined.changes[0].after, 'CE26100101B')
+  assert.deepEqual(separate.issues, [])
+  assert.equal(separate.changes[0].after, 'CE26100101')
+  assert.deepEqual(
+    joined.plan.expectedSnapshots,
+    unresolved.plan.expectedSnapshots
+  )
+  assert.deepEqual(joined.expectedRevisions, unresolved.expectedRevisions)
+  assert.deepEqual(
+    joined.plan.preparations[0].groups.flatMap((group) =>
+      group.variants.flatMap((variant) => variant.entryIds)
+    ),
+    ['2']
+  )
+  const accepted = acceptReview(s, joined),
+    next = selectedReview(accepted, ['3'])
+  assert.deepEqual(next.issues, [])
+  assert.equal(next.changes[0].after, 'CE26100101C')
+  assert.deepEqual(s, before)
+})
+
+test('partial family inference gives standalone horse no suffix and preserves elephant family letters from all source siblings', () => {
+  const s = unassignedState(),
+    original = s.records[0].snapshot.items[0]
+  s.records[0].snapshot.items = ['7128F-02', '7128K-01', '7128K-02'].map(
+    (productNumber, index) => ({
+      ...original,
+      entryId: String(index + 1),
+      title: 'Synthetic generic decoration',
+      description: 'Synthetic generic decoration',
+      productNumber,
+      sourceSize: '',
+      skuProperties: [
+        {
+          label: '颜色',
+          value: ['大号—吻情深-金色', '吉象-金色', '吉象-银色'][index],
+        },
+        { label: '尺寸', value: '如图所示' },
+      ],
+    })
+  )
+  const horse = selectedReview(s, ['1']),
+    elephant = selectedReview(s, ['3'])
+  assert.deepEqual(horse.issues, [])
+  assert.equal(horse.changes[0].after, 'CE26100101')
+  assert.deepEqual(elephant.issues, [])
+  assert.equal(elephant.changes[0].after, 'CE26100101B')
+  assert.deepEqual(
+    elephant.plan.preparations[0].groups[0].variants[0].entryIds,
+    ['3']
+  )
+})
+
+test('separate A then B assignments reuse one product base and preserve assigned A', () => {
+  let s = colourState()
+  s = acceptReview(s, selectedReview(s, ['1']))
+  const first = structuredClone(s.preparations[0].groups[0]),
+    review = selectedReview(s, ['2'])
+  assert.deepEqual(review.issues, [])
+  assert.equal(review.changes[0].after, 'CE26100101B')
+  const [group] = review.plan.preparations[0].groups
+  assert.equal(group.id, first.id)
+  assert.equal(group.baseCode, first.baseCode)
+  assert.deepEqual(group.variants[0], first.variants[0])
+  assert.deepEqual(
+    group.variants.flatMap((variant) => variant.entryIds),
+    ['1', '2']
+  )
+  assert.ok(!group.variants.some((variant) => variant.entryIds.includes('3')))
+})
+
+test('later identical source identity reuses custom assigned endings and separately accounted entry membership', () => {
+  let s = colourState()
+  s.records[0].snapshot.items.push({
+    ...structuredClone(s.records[0].snapshot.items[0]),
+    entryId: '4',
+    quantity: '29',
+    price: '3.25',
+  })
+  s = acceptReview(s, selectedReview(s, ['1']))
+  s.preparations[0].groups[0].variants[0].variantSuffix = 'CUSTOM'
+  const before = structuredClone(s),
+    review = selectedReview(s, ['4'])
+  assert.deepEqual(review.issues, [])
+  assert.equal(review.changes[0].after, 'CE26100101CUSTOM')
+  assert.equal(review.changes[0].quantity, '29')
+  assert.equal(review.changes[0].price, '3.25')
+  assert.deepEqual(review.plan.preparations[0].groups[0].variants[0].entryIds, [
+    '1',
+    '4',
+  ])
+  assert.deepEqual(s, before)
+})
+
+test('new selected groups consume consecutive available numbers, not unselected source positions', () => {
+  const s = unassignedState(),
+    original = s.records[0].snapshot.items[0]
+  s.records[0].snapshot.items = [
+    'Unselected first',
+    'Selected second',
+    'Unselected third',
+    'Selected fourth',
+  ].map((title, index) => ({
+    ...original,
+    entryId: String(index + 1),
+    title,
+    productNumber: `SYNTHETIC-PRODUCT-${index + 1}`,
+    description: title,
+  }))
+  const review = selectedReview(s, ['4', '2'])
+  assert.deepEqual(review.issues, [])
+  assert.deepEqual(
+    review.changes.map(({ entryId, after }) => [entryId, after]),
+    [
+      ['2', 'CE26100101'],
+      ['4', 'CE26100102'],
+    ]
+  )
+  const accepted = acceptReview(s, review)
+  assert.equal(
+    accepted.issuedCodes.filter((code) => code.kind === 'base').length,
+    2
+  )
+  assert.deepEqual(
+    accepted.preparations[0].groups.flatMap((group) =>
+      group.variants.flatMap((variant) => variant.entryIds)
+    ),
+    ['2', '4']
+  )
+})
+
+for (const sourceType of ['1688', 'spreadsheet']) {
+  test(`nonadjacent equal ${sourceType} groups keep complete-source numbering when only a later sibling is selected`, () => {
+    const s = unassignedState(),
+      snapshot = s.records[0].snapshot,
+      original = snapshot.items[0]
+    if (sourceType === 'spreadsheet')
+      Object.assign(snapshot, {
+        sourceType: 'spreadsheet',
+        store: { key: 'market:100', name: 'Synthetic market' },
+      })
+    snapshot.items = ['A', 'B', 'A'].map((group, index) => ({
+      ...original,
+      entryId: String(index + 1),
+      title: sourceType === 'spreadsheet' ? `Source row ${index + 1}` : group,
+      productNumber: `SYNTHETIC-${group}`,
+      description: `Source row ${index + 1}`,
+      sourceSize: '',
+      skuProperties: [],
+      ...(sourceType === 'spreadsheet'
+        ? { sourceGroup: group, sourceVariant: 'a' }
+        : {}),
+    }))
+    const firstSibling = selectedReview(s, ['1', '2']),
+      laterSibling = selectedReview(s, ['2', '3']),
+      suffix = sourceType === 'spreadsheet' ? 'A' : ''
+    assert.deepEqual(firstSibling.issues, [])
+    assert.deepEqual(laterSibling.issues, [])
+    assert.deepEqual(
+      firstSibling.changes.map(({ entryId, after }) => [entryId, after]),
+      [
+        ['1', `CE26100101${suffix}`],
+        ['2', `CE26100102${suffix}`],
+      ]
+    )
+    assert.deepEqual(
+      laterSibling.changes.map(({ entryId, after }) => [entryId, after]),
+      [
+        ['3', `CE26100101${suffix}`],
+        ['2', `CE26100102${suffix}`],
+      ]
+    )
+    assert.deepEqual(
+      laterSibling.plan.preparations[0].groups.flatMap((group) =>
+        group.variants.flatMap((variant) => variant.entryIds)
+      ),
+      ['3', '2']
+    )
+  })
+}
+
+test('multi-order assignment follows purchase date and identity across suppliers/months independently of reference order', () => {
+  const source = records(['2026-10', '2026-10', '2026-10', '2026-11'])
+  source[0].snapshot.purchasedAt = '2026-10-20'
+  source[1].snapshot.purchasedAt = '2026-10-10'
+  source[2].snapshot.purchasedAt = '2026-10-25'
+  source[2].snapshot.sellerMemberLogin = 'another-factory'
+  const s = unassignedState(source),
+    refs = source.map(({ snapshot }) => ({
+      accountId: snapshot.accountId,
+      orderId: snapshot.orderId,
+      entryId: '1',
+    })),
+    values = (review) => {
+      assert.deepEqual(review.issues, [])
+      return review.changes.map(({ orderId, after }) => [orderId, after])
+    }
+  assert.deepEqual(
+    values(planPurchaseCodeReview(s, { entryRefs: [...refs].reverse() })),
+    [
+      ['102', 'CE26100101'],
+      ['101', 'CE26100102'],
+      ['103', 'CE26100201'],
+      ['104', 'CE26110101'],
+    ]
+  )
+  assert.deepEqual(
+    values(planPurchaseCodeReview(s, { entryRefs: refs })),
+    values(planPurchaseCodeReview(s, { entryRefs: [...refs].reverse() }))
+  )
+})
+
+test('equal purchase dates use account/order identity and source order rather than selection order', () => {
+  const source = records(['2026-10', '2026-10']),
+    s = unassignedState(source),
+    refs = source.map(({ snapshot }) => ({
+      accountId: 'local',
+      orderId: snapshot.orderId,
+      entryId: '1',
+    }))
+  assert.deepEqual(
+    planPurchaseCodeReview(s, { entryRefs: [...refs].reverse() }).changes.map(
+      ({ orderId, after }) => [orderId, after]
+    ),
+    [
+      ['101', 'CE26100101'],
+      ['102', 'CE26100102'],
+    ]
+  )
+})
+
+test('full-order context keeps explicit spreadsheet endings despite different measurement descriptions', () => {
+  const s = colourState()
+  Object.assign(s.records[0].snapshot, {
+    sourceType: 'spreadsheet',
+    store: { key: 'market:100', name: 'Synthetic market' },
+  })
+  for (const [index, item] of s.records[0].snapshot.items.entries()) {
+    item.sourceGroup = '5'
+    item.sourceVariant = ['a', 'b', 'c'][index]
+    item.description = `Synthetic ${['6寸', '10寸', '20寸'][index]}`
+  }
+  const review = selectedReview(s, ['2'])
+  assert.deepEqual(review.issues, [])
+  assert.equal(review.changes[0].after, 'CE26100101B')
+})
+
+test('unselected unresolved size in another source group cannot block a valid selected product', () => {
+  const s = colourState(),
+    item = s.records[0].snapshot.items[0]
+  s.records[0].snapshot.items.push({
+    ...item,
+    entryId: '4',
+    title: 'Other group',
+    productNumber: 'SYNTHETIC-OTHER',
+    description: 'Other group',
+    sourceSize: 'unknown-size',
+    skuProperties: [],
+  })
+  const review = selectedReview(s, ['2'])
+  assert.deepEqual(review.issues, [])
+  assert.equal(review.changes[0].after, 'CE26100101B')
+})
+
+test('ambiguous previously separated source groups require review instead of assigning a third base', () => {
+  const s = colourState(),
+    full = createPreparation(s.records[0].snapshot, '2026-10'),
+    original = full.groups[0]
+  full.groups = original.variants.slice(0, 2).map((variant) => ({
+    ...structuredClone(original),
+    id: crypto.randomUUID(),
+    variants: [variant],
+  }))
+  const allocation = allocatePreparation(full, [], [], {
+    snapshot: s.records[0].snapshot,
+  })
+  s.preparations = [allocation.preparation]
+  s.allocations = allocation.allocations
+  s.issuedCodes = allocation.issuedCodes
+  const before = structuredClone(s),
+    review = selectedReview(s, ['3'])
+  assert.equal(review.plan.preparations.length, 0)
+  assert.ok(
+    review.issues.some(
+      (issue) => issue.code === 'PURCHASE_GROUP_REVIEW_REQUIRED'
+    )
+  )
+  assert.deepEqual(s, before)
+})
+
+test('a custom assigned ending is preserved and a colliding new canonical ending blocks the review', () => {
+  let s = colourState()
+  s = acceptReview(s, selectedReview(s, ['1']))
+  s.preparations[0].groups[0].variants[0].variantSuffix = 'B'
+  const before = structuredClone(s),
+    review = selectedReview(s, ['2'])
+  assert.equal(review.plan.preparations.length, 0)
+  assert.ok(
+    review.issues.some((issue) => issue.code === 'PACKING_CODE_CONFLICT')
+  )
+  assert.deepEqual(s, before)
+})
+
+test('adding selected members preserves scoped-restore coverage without changing existing scope evidence', () => {
+  let s = colourState()
+  s = acceptReview(s, selectedReview(s, ['1', '2']))
+  s.preparations[0].restoreScopes = [['1'], ['2']]
+  const review = selectedReview(s, ['3'])
+  assert.deepEqual(review.issues, [])
+  assert.deepEqual(review.plan.preparations[0].restoreScopes, [
+    ['1'],
+    ['2'],
+    ['3'],
+  ])
+})
+
+test('later same-identity source rows retain existing shared group and variant identities', () => {
+  const s = linkedState(),
+    record = s.records[0],
+    old = structuredClone(s.preparations[0].groups[0])
+  record.snapshot.items.push({
+    ...structuredClone(record.snapshot.items[0]),
+    entryId: '2',
+    quantity: '35',
+    price: '7.25',
+  })
+  const review = selectedReview(s, ['2'])
+  assert.deepEqual(review.issues, [])
+  const group = review.plan.preparations[0].groups[0]
+  assert.equal(group.id, old.id)
+  assert.equal(group.sharedProductId, old.sharedProductId)
+  assert.equal(
+    group.variants[0].sharedVariantId,
+    old.variants[0].sharedVariantId
+  )
+  assert.equal(review.changes[0].after, barcodeValue(old, old.variants[0]))
+  assert.deepEqual(group.variants[0].entryIds, ['1', '2'])
+})
+
+test('selected new memberships cannot extend a positively consumed product identity', () => {
+  const s = state(['2026-10'])
+  s.locks = consumptionLocksForManifest(manifest(s))
+  s.records[0].snapshot.items.push({
+    ...structuredClone(s.records[0].snapshot.items[0]),
+    entryId: '2',
+    quantity: '35',
+  })
+  const before = structuredClone(s),
+    review = selectedReview(s, ['2'])
+  assert.ok(
+    review.issues.some((issue) => issue.code === 'CONSUMED_CODE_LINEAGE')
+  )
+  assert.equal(review.plan.preparations.length, 0)
+  assert.deepEqual(s, before)
+})
+
+test('identical selected order and supplier IDs in separate accounts allocate independent namespaces', () => {
+  const source = records(['2026-10']),
+    foreign = structuredClone(source[0])
+  foreign.snapshot.accountId = 'another-account'
+  const s = unassignedState([...source, foreign]),
+    refs = s.records.map(({ snapshot }) => ({
+      accountId: snapshot.accountId,
+      orderId: snapshot.orderId,
+      entryId: '1',
+    })),
+    review = planPurchaseCodeReview(s, { entryRefs: refs })
+  assert.deepEqual(review.issues, [])
+  assert.equal(review.plan.preparations.length, 2)
+  assert.deepEqual(
+    review.changes.map(({ accountId, after }) => [accountId, after]),
+    [
+      ['another-account', 'CE26100101'],
+      ['local', 'CE26100101'],
+    ]
+  )
+})
+
 function state(months) {
   const source = records(months),
     preparations = []
@@ -423,7 +1067,12 @@ test('positive seal permanently freezes unshipped aliases and all prepared group
     {
       ...s.records[0].snapshot,
       items: [
-        { ...s.records[0].snapshot.items[0], entryId: '2', title: 'Plate' },
+        {
+          ...s.records[0].snapshot.items[0],
+          entryId: '2',
+          title: 'Plate',
+          productNumber: 'SYNTHETIC-PLATE',
+        },
       ],
     },
     '2026-09'
@@ -724,8 +1373,18 @@ test('partial purchase review preserves unselected old identities and adds only 
   const s = state(['2026-09']),
     existing = structuredClone(s.preparations[0].groups[0])
   s.records[0].snapshot.items.push(
-    { ...s.records[0].snapshot.items[0], entryId: '2', title: 'Plate' },
-    { ...s.records[0].snapshot.items[0], entryId: '3', title: 'Fork' }
+    {
+      ...s.records[0].snapshot.items[0],
+      entryId: '2',
+      title: 'Plate',
+      productNumber: 'SYNTHETIC-PLATE',
+    },
+    {
+      ...s.records[0].snapshot.items[0],
+      entryId: '3',
+      title: 'Fork',
+      productNumber: 'SYNTHETIC-FORK',
+    }
   )
   const review = planPurchaseCodeReview(s, {
     orderRefs: [{ accountId: 'local', orderId: '101' }],

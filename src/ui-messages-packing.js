@@ -1,4 +1,147 @@
 export const PACKING_MESSAGES = {
+  'These products share a title, but their product-family identity needs your review.':
+    {
+      zh: '这些商品的名称相同，但其商品系列身份需要您核对。',
+      es: 'Estos productos comparten un título, pero debes revisar su identidad de familia.',
+    },
+
+  'Prepare products': { zh: '准备商品', es: 'Preparar productos' },
+  'Review product families': {
+    zh: '核对商品系列',
+    es: 'Revisar familias de productos',
+  },
+  'Choose which source products share one product family. Only the products selected in Orders will be prepared.':
+    {
+      zh: '选择哪些原始商品属于同一商品系列。仅准备在订单中选中的商品。',
+      es: 'Elige qué productos de origen comparten una familia. Solo se prepararán los productos seleccionados en Pedidos.',
+    },
+  'Use one product family': {
+    zh: '归入同一商品系列',
+    es: 'Usar una sola familia',
+  },
+  'Keep products separate': {
+    zh: '保持商品独立',
+    es: 'Mantener los productos separados',
+  },
+  'Apply family choices': {
+    zh: '应用系列选择',
+    es: 'Aplicar decisiones de familia',
+  },
+  'Choose a family treatment for every listed group.': {
+    zh: '请为列出的每组选择商品系列处理方式。',
+    es: 'Elige cómo tratar la familia de cada grupo de la lista.',
+  },
+  'Product family': { zh: '商品系列', es: 'Familia de productos' },
+  'Product family: {family}': {
+    zh: '商品系列：{family}',
+    es: 'Familia de productos: {family}',
+  },
+  'Article: {article}': {
+    zh: '原始货号：{article}',
+    es: 'Artículo: {article}',
+  },
+  'Article family: {article}': {
+    zh: '货号系列：{article}',
+    es: 'Familia de artículos: {article}',
+  },
+  'Existing prepared family': {
+    zh: '现有已准备系列',
+    es: 'Familia preparada existente',
+  },
+  'Reviewed family': { zh: '已核对系列', es: 'Familia revisada' },
+  'Suggested source family': {
+    zh: '建议原始系列',
+    es: 'Familia sugerida del origen',
+  },
+  'Select every source row sharing this product identity before changing its shared details.':
+    {
+      zh: '更改共用资料前，请选择共用此商品身份的所有原始行。',
+      es: 'Selecciona todas las filas que comparten esta identidad antes de cambiar sus detalles comunes.',
+    },
+  'Select every prepared source row in this family before changing its shared name or category.':
+    {
+      zh: '更改共用名称或类别前，请选择此系列中的所有已准备原始行。',
+      es: 'Selecciona todas las filas preparadas de esta familia antes de cambiar su nombre o categoría comunes.',
+    },
+  'These products have different custom details. Keep them separate or apply the same details before joining their family.':
+    {
+      zh: '这些商品具有不同的自定义资料。请保持独立，或在归入同一系列前应用相同资料。',
+      es: 'Estos productos tienen detalles personalizados diferentes. Mantenlos separados o aplica los mismos detalles antes de unir su familia.',
+    },
+  'Custom value': { zh: '自定义值', es: 'Valor personalizado' },
+  'Add a Spanish name and Chinese category when needed for labels. Product details remain optional.':
+    {
+      zh: '标签需要时请添加西班牙文名称和中文类别。商品资料仍为选填。',
+      es: 'Añade un nombre en español y una categoría china cuando se necesiten para las etiquetas. Los detalles del producto siguen siendo opcionales.',
+    },
+
+  Apply: { zh: '应用', es: 'Aplicar' },
+  'The selected purchase changed. Close this review and select its products again.':
+    {
+      zh: '所选采购已更改。请关闭核对窗口并重新选择其商品。',
+      es: 'La compra seleccionada cambió. Cierra esta revisión y vuelve a seleccionar sus productos.',
+    },
+
+  'Resolve size endings': {
+    zh: '确认尺寸尾码',
+    es: 'Resolver terminaciones de talla',
+  },
+  'Choose a size ending or explicitly keep no size ending. These changes stay in this review until you confirm preparation.':
+    {
+      zh: '选择尺寸尾码，或明确选择不添加尺寸尾码。确认准备前，这些修改仅保留在核对草稿中。',
+      es: 'Elige una terminación de talla o indica que no debe añadirse. Estos cambios permanecen en la revisión hasta confirmar la preparación.',
+    },
+  'Enter a size ending or choose Do not add size endings.': {
+    zh: '请输入尺寸尾码，或选择不添加尺寸尾码。',
+    es: 'Introduce una terminación de talla o elige No añadir terminaciones de talla.',
+  },
+  'Select every source row sharing this barcode identity before resolving its size.':
+    {
+      zh: '确认尺寸前，请选择共用此条码身份的所有原始商品行。',
+      es: 'Selecciona todas las filas que comparten este código de barras antes de resolver su talla.',
+    },
+  'The selected product evidence changed. Review its size endings again.': {
+    zh: '所选商品的依据已更改。请重新核对其尺寸尾码。',
+    es: 'Los datos del producto seleccionado cambiaron. Revisa sus terminaciones de talla otra vez.',
+  },
+
+  'Prepare products...': { zh: '准备商品…', es: 'Preparar productos…' },
+  'Review codes and product details for the selected products. Go back to Orders to change the selection.':
+    {
+      zh: '核对所选商品的编码和商品资料。返回订单可更改选择。',
+      es: 'Revisa los códigos y los detalles de los productos seleccionados. Vuelve a Pedidos para cambiar la selección.',
+    },
+  'Selected products: {count} · Orders: {orders}': {
+    zh: '所选商品：{count} · 订单：{orders}',
+    es: 'Productos seleccionados: {count} · Pedidos: {orders}',
+  },
+  'Select at least one product to prepare.': {
+    zh: '请至少选择一个要准备的商品。',
+    es: 'Selecciona al menos un producto para preparar.',
+  },
+  'Confirm preparation': { zh: '确认准备', es: 'Confirmar preparación' },
+  'Already assigned — unchanged': {
+    zh: '已分配 — 保持不变',
+    es: 'Ya asignado — sin cambios',
+  },
+  'New assignment': { zh: '新分配', es: 'Nueva asignación' },
+  'Purchase month: {month}': {
+    zh: '采购月份：{month}',
+    es: 'Mes de compra: {month}',
+  },
+  'Codes were reviewed again. Check the current proposal and confirm again to retry.':
+    {
+      zh: '已重新核对编码。请检查当前建议并再次确认以重试。',
+      es: 'Se revisaron los códigos de nuevo. Comprueba la propuesta actual y confirma otra vez para reintentar.',
+    },
+  'Reviewing selected products…': {
+    zh: '正在核对所选商品…',
+    es: 'Revisando los productos seleccionados…',
+  },
+  'Quantity: {quantity}': {
+    zh: '数量：{quantity}',
+    es: 'Cantidad: {quantity}',
+  },
   'Variants: {0}': { zh: '规格：{0}', es: 'Variantes: {0}' },
   Packing: { zh: '装箱', es: 'Empaque' },
   'In this packing': { zh: '在此装箱中', es: 'En este empaque' },

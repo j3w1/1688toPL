@@ -15,6 +15,7 @@ async function openPacking(extension) {
   record.snapshot.sellerMemberLogin = 'synthetic-materials'
   for (const [index, item] of record.snapshot.items.entries()) {
     item.title = index < 2 ? '合成杯具' : '合成收纳盘'
+    item.productNumber = index < 2 ? 'SYNTHETIC-MATERIAL-CUP' : 'SYNTHETIC-TRAY'
     item.skuProperties = [
       { label: '颜色', value: index === 0 ? '白色' : '灰色' },
       { label: '材质', value: ['玻璃', '不锈钢', '塑料'][index] },

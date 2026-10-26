@@ -6,6 +6,7 @@ import {
   progressPresentation,
   createProgressView,
 } from '../src/import-progress.js'
+import { setLanguage } from '../src/i18n.js'
 
 const job = (extra = {}) => ({
   id: 'synthetic',
@@ -143,4 +144,73 @@ test('latest result shows only confirmed success or explicit failure and uses te
     })
   )
   assert.match(failure.latest, /not saved — Totals missing/)
+})
+
+test('discount reviews are terminal attempts, not genuine failures, in full and compact progress', () => {
+  const source = job({
+    state: 'completed-with-errors',
+    total: 10,
+    orders: [
+      ...Array.from({ length: 9 }, (_, index) => ({
+        orderId: String(11000 + index),
+        state: 'done',
+        savedRows: 1,
+      })),
+      { orderId: '12000', state: 'failed', reviewRequired: true },
+    ],
+  })
+  const before = structuredClone(source)
+  const compact = importProgress(source)
+  assert.equal(compact.failed, 1, 'Retain the legacy terminal-failure count')
+  assert.equal(compact.reviewRequired, 1)
+  assert.equal(compact.failures, 0)
+  const display = progressPresentation(source)
+  assert.equal(display.title, 'Finished · discount review required')
+  assert.equal(display.counts, '9 saved · 1 need discount review')
+  assert.equal(display.value, 10)
+  assert.deepEqual(display, progressPresentation(compact))
+  assert.deepEqual(source, before)
+
+  const mixed = progressPresentation(
+    job({
+      orders: [
+        { state: 'done', savedRows: 2 },
+        { state: 'failed', reviewRequired: true },
+        { state: 'failed', reviewRequired: false },
+        { state: 'pending' },
+      ],
+    })
+  )
+  assert.equal(
+    mixed.counts,
+    '1 saved · 1 need discount review · 1 failed · 1 pending'
+  )
+  assert.equal(mixed.value, 3)
+})
+
+test('discount-review progress is translated without changing durable job state', () => {
+  const source = job({
+    state: 'completed-with-errors',
+    total: 1,
+    orders: [{ state: 'failed', reviewRequired: true }],
+  })
+  try {
+    setLanguage('es', { persist: false })
+    assert.equal(
+      progressPresentation(source).counts,
+      '0 guardados · 1 requieren revisar descuentos'
+    )
+    assert.equal(
+      progressPresentation(source).title,
+      'Finalizado · requiere revisar descuentos'
+    )
+    setLanguage('zh', { persist: false })
+    assert.equal(
+      progressPresentation(source).counts,
+      '已保存 0 · 1 个需核对优惠'
+    )
+    assert.equal(progressPresentation(source).title, '已完成 · 需核对优惠')
+  } finally {
+    setLanguage('en', { persist: false })
+  }
 })

@@ -247,7 +247,7 @@ test('whitespace and malformed code values stay editable and cannot escape inlin
 
 test('unresolved source sizes block even with a forged resolved flag, while explicit no-size and mapped endings are accepted', async () => {
   const raw = input()
-  raw.rows = ['short', 'long'].map((size, index) => ({
+  raw.rows = ['10-20cm', '20-30cm'].map((size, index) => ({
     ...raw.rows[1],
     row: index + 3,
     group: '1',
@@ -418,7 +418,7 @@ test('native atomic reviewed import preserves edits, retries once, rejects concu
       const backup = () => db.exportBackup({})
       const before = await backup()
       const uncertain = structuredClone(raw)
-      uncertain.rows = ['short', 'long'].map((size, index) => ({
+      uncertain.rows = ['10-20cm', '20-30cm'].map((size, index) => ({
         ...raw.rows[1],
         row: index + 3,
         group: '1',

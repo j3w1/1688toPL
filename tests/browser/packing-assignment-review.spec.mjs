@@ -90,8 +90,10 @@ test('one group reviews every full source code without reserving it and one assi
   expect(new Set(codes).size).toBe(3)
   expect(codes.every((code) => /^CE2610\d{4}[A-Z0-9]*$/.test(code))).toBe(true)
   await expect(review.locator('article')).toHaveCount(3)
-  for (const code of await review.locator('article .purchase-code').all())
+  for (const code of await review.locator('article .purchase-code').all()) {
+    await code.scrollIntoViewIfNeeded()
     await expect(code).toBeInViewport()
+  }
   expectPackingUnchanged(await backup(extension), before)
   await review.screenshot({
     path: testInfo.outputPath('purchase-code-review-three-variants.png'),
@@ -186,6 +188,8 @@ test('adding an unassigned source row preserves existing codes and prices throug
       variant.entryIds.includes(record.snapshot.items[1].entryId)
     )
   expect(retained.baseCode).toBe(original.baseCode)
+  expect(added.id).toBe(original.id)
+  expect(added.baseCode).toBe(original.baseCode)
   expect(added.baseCode + variant.variantSuffix + variant.sizeSuffix).toBe(
     nextCode
   )
@@ -200,6 +204,16 @@ test('adding an unassigned source row preserves existing codes and prices throug
       .sort()
   )
   expect(after.orders).toEqual(before.orders)
+  const restored = await extension.inspector.evaluate(
+    (data) =>
+      chrome.runtime.sendMessage({ type: 'BACKUP_RESTORE', backup: data }),
+    after
+  )
+  expect(restored.ok, restored.error).toBe(true)
+  await page.reload()
+  const reopened = await backup(extension)
+  expect(reopened.preparations).toEqual(after.preparations)
+  expect(reopened.orders).toEqual(after.orders)
 })
 
 test('missing seller review cannot allocate placeholder codes and exposes explicit purchase evidence recovery', async ({

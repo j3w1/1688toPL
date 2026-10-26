@@ -2,7 +2,7 @@ import { recognitionProperties } from './spreadsheet-properties.js'
 
 // Local translation helpers only. A hint never changes imported text, label
 // names, grouping, or codes. Swatches are illustrative, not seller color samples.
-export const COLOR_VOCABULARY_VERSION = 1
+export const COLOR_VOCABULARY_VERSION = 2
 
 // Longer aliases take precedence. Bare characters need an explicit color-field
 // segment or a named shade ending; ambiguous nouns (for example 咖啡) stay exact.
@@ -684,6 +684,42 @@ const definitions = [
   ],
   ['light-tone', '浅色', '浅色', 'Light tone', 'Tono claro', null, 'color'],
   ['dark-tone', '深色', '深色', 'Dark tone', 'Tono oscuro', null, 'color'],
+  [
+    'antique',
+    '仿古色|仿古',
+    '仿古',
+    'Antique finish',
+    'Acabado antiguo',
+    null,
+    'finish',
+  ],
+  [
+    'glitter',
+    '金粉|闪粉',
+    '闪粉',
+    'Glitter finish',
+    'Acabado con purpurina',
+    null,
+    'finish',
+  ],
+  [
+    'sequined',
+    '亮片款|亮片|珠片',
+    '亮片',
+    'Sequined',
+    'Con lentejuelas',
+    null,
+    'finish',
+  ],
+  [
+    'flocked',
+    '植绒',
+    '植绒',
+    'Flocked finish',
+    'Acabado aterciopelado',
+    null,
+    'finish',
+  ],
 ]
 
 export const COLOR_VOCABULARY = Object.freeze(
@@ -697,6 +733,11 @@ export const COLOR_VOCABULARY = Object.freeze(
     })
   )
 )
+
+export const COLOR_VOCABULARY_UPDATE = Object.freeze({
+  additions: ['antique', 'glitter', 'sequined', 'flocked'],
+  previous: [],
+})
 
 const normalize = (value) =>
   String(value ?? '')

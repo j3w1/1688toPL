@@ -16,6 +16,7 @@ function snapshot(count = 2) {
     items: Array.from({ length: count }, (_, index) => ({
       entryId: String(index + 1),
       title: 'Synthetic product',
+      productNumber: 'SYNTHETIC-SUFFIX-FAMILY',
       description: 'Synthetic product',
       skuProperties: [{ label: 'Color', value: `Color ${index}` }],
     })),
@@ -232,8 +233,10 @@ test('separating two rows skips a configured size ending A when generating model
 
 test('collision-driven merging skips reserved and size-like model candidates', async () => {
   const source = snapshot(13)
-  for (const [index, item] of source.items.entries())
+  for (const [index, item] of source.items.entries()) {
     item.title = `Synthetic product ${index}`
+    item.productNumber = `SYNTHETIC-MERGE-${index}`
+  }
   const original = createPreparation(source, '2026-10', [])
   for (const [index, group] of original.groups.entries())
     group.baseCode = `CE261001${String(index + 1).padStart(2, '0')}`

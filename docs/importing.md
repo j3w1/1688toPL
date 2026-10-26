@@ -6,7 +6,9 @@
 
 On the [buyer orders page](https://work.1688.com/home/buyer.htm), tick purchases and choose **Import selected**, or use **Import all matching…** for the current filters. Confirm the exact count and keep the list page open until completion. Open the workspace with the extension icon or **Open Workspace**; **Open Workspace here** is available when no import is running.
 
-The reader tries a background tab, an unfocused window, then a visible tab as supported by your browser. It reuses its own reader and leaves unrelated tabs intact. A lost reader is recovered automatically; genuine browser failures remain actionable. Sign-in and verification pause the job. Use **Open the 1688 tab**, finish the requested step yourself, then **Resume import**. Reopening the workspace does not restart an older paused bulk queue.
+The reader tries a background tab, an unfocused window, then a visible tab as supported by your browser. It reuses its own reader and leaves unrelated tabs intact. A reader that disappears during reuse or reading is recovered automatically, with at most two replacements before pausing. Genuine browser failures remain actionable. If the browser cannot retain a tab through any creation method, Activity keeps the pending orders and explains how to retry from a regular browser window. Use the same browser profile and installed extension to retain your library. Sign-in and verification pause the job. Use **Open the 1688 tab**, finish the requested step yourself, then **Resume import**. Reopening the workspace does not restart an older paused bulk queue.
+
+Reader creation allows a short registration period before trying another method, so a newly returned tab ID is not immediately treated as a closed tab. Interrupted creation is checkpointed and reused. **Save import report** includes bounded reader lifecycle diagnostics when available, without page content. One-order and multiple-order refresh use the same queued reader and preserve already saved progress when resumed.
 
 Successful saves refresh the open workspace immediately. New matching purchases move Orders and Products to the top, preserving filters and selected product keys. A failed or incomplete read preserves the last good order. Purchase dates come from the purchase, not the time of import; unknown dates sort last.
 
@@ -37,11 +39,19 @@ The whole-order summary counts each complete matching purchase once, including i
 
 ## Refresh and recover
 
+If an order says **“The order total balances, but the discount allocation needs your review,”** its products can be complete while more than one discount treatment fits the payment. Progress separates these reviews from failures, for example **9 saved · 1 need discount review**. Choose **Review discounts** directly in the order-list import panel, on the order detail page, or beside the affected order in **Activity**. The list panel opens its next pending discount review; Activity lists every affected order. Compare how each treatment assigns the seller reduction and order-level discount, then choose **Confirm and save**. The payable stays the same; product costs can differ. Suggestions require your confirmation. **Cancel** saves nothing, and a failed save retains the open review.
+
+The extension reuses your confirmed treatment only for the same order and unchanged financial evidence. Changed prices, quantities, row discounts or footer amounts require a new review. Other orders continue importing while this one needs attention. Activity's failed-order controls reach errors beyond the first page. Unsupported fields, missing rows and inconsistent totals remain blocked rather than offering a forced import.
+
+If an Activity-linked review becomes unnecessary because the source now has one valid treatment, cancel it and choose **Resume / retry** in Activity. The normal importer then rereads and saves that order with its original completeness checks.
+
+<a href="../screenshots/order-discount-review.png"><img src="../screenshots/order-discount-review.png" alt="Synthetic order discount review showing the source amounts and two treatments with the same payable" width="800" /></a>
+
 Use contextual **Refresh** for selected orders or current filters. **Settings → Data** holds full-library refresh. Multi-order import/refresh asks you to confirm frozen scope; an empty filter never becomes the whole library. Spreadsheet and other-source orders are excluded from 1688 refresh.
 
 **Activity** contains progress, failures, Pause/Resume, retry and **Save import report**. Its badge distinguishes ongoing work from unread results. Opening it marks visible updates read; ordinary progress ticks do not create new notifications. **Dismiss / Dismiss all** hides nonrunning notices without deleting jobs or orders. **Show dismissed** reveals them again. Minimize floating page controls to keep a compact progress strip while work continues.
 
-Retries preserve successful saves. A completed import with errors retries failed details only; a paused discovery scan retains its discovered orders. A report records local diagnostic counts and bounded financial evidence; it is not a library backup and does not restart work.
+Retries preserve successful saves. A completed import with errors retries failed details only; a paused discovery scan retains its discovered orders. A report records local diagnostic counts and bounded financial evidence, with an explicit discount-review flag per order and separate review/failure counts; it is not a library backup and does not restart work.
 
 <a href="../screenshots/import-progress.png"><img src="../screenshots/import-progress.png" alt="Synthetic import progress with saved products and the latest result" width="320" /></a>
 

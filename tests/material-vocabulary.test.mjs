@@ -8,7 +8,7 @@ import {
 } from '../src/material-vocabulary.js'
 
 test('every material has unique, complete translations and immutable aliases', () => {
-  assert.equal(MATERIAL_VOCABULARY_VERSION, 1)
+  assert.equal(MATERIAL_VOCABULARY_VERSION, 2)
   assert.ok(MATERIAL_VOCABULARY.length >= 60)
   assert.equal(
     new Set(MATERIAL_VOCABULARY.map((entry) => entry.id)).size,

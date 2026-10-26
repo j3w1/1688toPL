@@ -9,6 +9,11 @@ export function importProgress(job) {
   const failed = orders
     ? orders.filter((order) => order.state === 'failed').length
     : job.failed || 0
+  const reviewRequired = orders
+    ? orders.filter(
+        (order) => order.state === 'failed' && order.reviewRequired === true
+      ).length
+    : Math.min(failed, Math.max(0, job.reviewRequired || 0))
   const discovered = orders?.length ?? job.discovered ?? 0
   const total = Math.max(job.total || 0, discovered)
   const counted = orders?.filter(
@@ -26,6 +31,8 @@ export function importProgress(job) {
     discovered,
     completed,
     failed,
+    reviewRequired,
+    failures: failed - reviewRequired,
     remaining: Math.max(0, total - completed),
     collectedRows: counted
       ? counted.reduce((sum, order) => sum + order.savedRows, 0)
@@ -68,7 +75,9 @@ export function progressPresentation(input, now = Date.now()) {
         ? 'Finding orders'
         : 'Collecting product details'
       : job.state === 'completed-with-errors'
-        ? 'Finished · some orders need attention'
+        ? job.reviewRequired && !job.failures
+          ? 'Finished · discount review required'
+          : 'Finished · some orders need attention'
         : job.state === 'completed'
           ? 'Collection completed'
           : 'Collection paused'
@@ -84,14 +93,28 @@ export function progressPresentation(input, now = Date.now()) {
     : scan
       ? t('Waiting for the list count')
       : t('Waiting for the order count')
-  const counts = t(
-    '{saved} saved · {failed} need attention · {pending} pending',
-    {
-      saved: number(job.completed),
-      failed: number(job.failed),
-      pending: number(Math.max(0, job.total - job.completed - job.failed)),
-    }
-  )
+  const counts = job.reviewRequired
+    ? [
+        t('{count} saved', { count: number(job.completed) }),
+        t('{count} need discount review', {
+          count: number(job.reviewRequired),
+        }),
+        ...(job.failures
+          ? [t('{count} failed', { count: number(job.failures) })]
+          : []),
+        ...(job.total > job.completed + job.failed
+          ? [
+              t('{count} pending', {
+                count: number(job.total - job.completed - job.failed),
+              }),
+            ]
+          : []),
+      ].join(' · ')
+    : t('{saved} saved · {failed} need attention · {pending} pending', {
+        saved: number(job.completed),
+        failed: number(job.failed),
+        pending: number(Math.max(0, job.total - job.completed - job.failed)),
+      })
   const rows =
     job.countedOrders === job.completed
       ? t('{rows} product rows saved', { rows: number(job.collectedRows) })

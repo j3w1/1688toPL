@@ -1316,9 +1316,9 @@ export const SMART_CARTON_MESSAGES = Object.fromEntries(
       '恢复指定范围的来源与商品证据，并保留较新的本地编辑。货柜及历史事实仍须通过版本校验。',
     ],
     [
-      'Review codes in Orders using each original purchase month. No codes are reserved until assignment.',
-      'Revisa códigos en Pedidos con el mes original de cada compra. No se reservan hasta asignarlos.',
-      '在订单中按各自原采购月份核对编码，确认分配前不会预留。',
+      'Review product families, purchase-month codes, Spanish names, Chinese categories and materials for selected products. Nothing is saved until confirmation.',
+      'Revisa familias, códigos del mes de compra, nombres en español, categorías chinas y materiales de los productos seleccionados. No se guarda nada hasta confirmar.',
+      '核对所选商品的系列、采购月份编码、西班牙文名称、中文类别及材质。确认前不保存任何内容。',
     ],
     [
       'Reserve the current eligible remainder of whole orders. Loading decisions remain unconfirmed.',

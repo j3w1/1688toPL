@@ -15,7 +15,7 @@ async function setup(extension) {
   record.snapshot.sellerMemberLogin = 'synthetic-organizing'
   for (const [index, item] of record.snapshot.items.entries()) {
     item.title = index < 2 ? '合成装饰品' : '合成玻璃罐'
-    item.productNumber = index < 2 ? 'DECOR' : 'JAR'
+    item.productNumber = index < 2 ? 'MODEL22A' : 'MODEL22B'
     item.skuProperties = [
       { label: '颜色', value: index === 0 ? '红色' : '白色' },
     ]

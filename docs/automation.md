@@ -12,6 +12,23 @@ An unavailable saved purchase, container or account route keeps its visible noti
 
 Photo Close stays disabled while an edit saves. Its accessible description and the photo status show the existing localized Saving message until the save settles; Escape and backdrop clicks preserve the pending save. Preview zoom, fit and image-toggle controls wait for actual image dimensions. These guards preserve original photos and export bytes.
 
+## Order discount review
+
+The detail page exposes `data-action="review-order-discounts"` when its complete source amounts have multiple valid discount allocations. Activity uses the same action with `data-order-id` to open the affected purchase. Failed-order navigation reaches reviews beyond the first three errors. Merely opening a review writes nothing.
+
+| `data-action`              | Accessible name / behavior                                                                 |
+| -------------------------- | ------------------------------------------------------------------------------------------ |
+| `review-order-discounts`   | Open discount review for the complete source order; Activity opens its marked detail page. |
+| `discount-review-language` | Change only this review's English, Spanish or Chinese language.                            |
+| `discount-review-previous` | Show the preceding bounded product-cost page.                                              |
+| `discount-review-next`     | Show the next bounded product-cost page.                                                   |
+| `confirm-discount-review`  | Re-read the financial evidence and save the confirmed treatment.                           |
+| `cancel-discount-review`   | Close without saving a treatment or source snapshot.                                       |
+
+Inside the native modal, `data-discount-choice` identifies each semantic treatment. Compare source amounts, the unchanged payable and the bounded product-cost table, then use `confirm-discount-review` or `cancel-discount-review`. A suggested treatment still requires confirmation. Saving disables further submission and dismissal; a failure retains the draft. Changed source financial evidence refreshes the choices and requires another confirmation. Exact matching saved reviews can be reused for the same account/order. Report export remains bounded financial diagnostics, without full candidates or page HTML.
+
+Progress distinguishes discount reviews from genuine failures and offers **Review discounts** on the source order list as well as Activity. Reports retain legacy `counts.failed` for terminal failed attempts, and add `counts.reviewRequired`, `counts.failures` and an explicit per-order `reviewRequired` boolean. A review-required order does not enter hydration retries; confirmation uses the existing expected-row and durable checkpoint path.
+
 ## Store spreadsheet import
 
 Open **Import spreadsheet** after the Orders readiness control is enabled. Upload through the labeled Workbook field, select the sheet, confirm the purchase date and supplier, resolve review/quantity items, and check the final photos/totals confirmation. Then use `review-import-codes`; this creates no purchase or code reservation.
@@ -114,64 +131,78 @@ Reader fallback is automatic: background tab → unfocused window → visible ta
 
 Click/Enter inspects an item; native checkboxes select. Source text and IDs remain data, never translated interface strings. Logical keys include account/order/source identity; mounted DOM position does not identify inventory.
 
-| `data-action`                 | Behavior                                                                                                               |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `view-orders`                 | Open Orders / named-container Packing.                                                                                 |
-| `view-packing`                | Open Orders / named-container Packing.                                                                                 |
-| `orders-products`             | Choose the Orders subview.                                                                                             |
-| `orders-cartons`              | Choose the Orders subview.                                                                                             |
-| `orders-backlog`              | Choose the Orders subview.                                                                                             |
-| `choose-order`                | Inspect the order identified by `data-order-id`; use its checkbox to select.                                           |
-| `open-order-cartons`          | Open that order's reconciliation session.                                                                              |
-| `carton-history`              | Inspect the complete virtual physical-evidence table in All Orders or a narrowed order scope.                          |
-| `order-carton-history`        | Show the same retained evidence table for the current reconciliation order.                                            |
-| `inspect-carton-history`      | Inspect original/current/retired carton evidence without selecting inventory.                                          |
-| `review-purchase-evidence`    | Review original date/supplier facts and explicit inventory dispositions, retaining unfinished input.                   |
-| `retry-evidence-refresh`      | Retry the view refresh after committed purchase evidence; never repeat its successful mutation.                        |
-| `resolve-purchase-date`       | Save an authored original-date resolution with the observed source revision guard.                                     |
-| `resolve-purchase-supplier`   | Save an operator-confirmed supplier identity; source evidence and issued codes remain guarded.                         |
-| `save-inventory-disposition`  | Save documented non-goods/fee/payment-only/canceled evidence or an explicit guarded clear.                             |
-| `edit-order-barcode`          | Open the existing label editor from an Orders source row.                                                              |
-| `edit-order-carton-mark`      | Open the existing carton-mark editor from an Orders source row.                                                        |
-| `select-all-rows`             | Select/clear the full filtered product scope.                                                                          |
-| `clear-selection`             | Select/clear the full filtered product scope.                                                                          |
-| `edit-order-product`          | Open contextual product authoring in Orders.                                                                           |
-| `review-purchase-codes`       | Preview / commit purchase-month identities. Review reserves nothing.                                                   |
-| `assign-purchase-codes`       | Preview / commit purchase-month identities. Review reserves nothing.                                                   |
-| `group-order-products`        | Reviewed grouping in Orders.                                                                                           |
-| `undo-order-products`         | Guarded Orders product/grouping history, including reviewed physical consequences.                                     |
-| `redo-order-products`         | Reapply the next Orders history step only while captured revisions remain current.                                     |
-| `reconciliation-products`     | Product calculations / physical evidence table.                                                                        |
-| `reconciliation-cartons`      | Product calculations / physical evidence table.                                                                        |
-| `preview-carton-paste`        | Capture and review keyed alignment / stage the complete paste. Invalid cells remain recovery data.                     |
-| `apply-carton-paste`          | Capture and review keyed alignment / stage the complete paste. Invalid cells remain recovery data.                     |
-| `cancel-carton-paste`         | Cancel local parsing.                                                                                                  |
-| `select-grid-rows`            | Select visible logical rows / preview one explicit fill operation.                                                     |
-| `fill-grid-range`             | Select visible logical rows / preview one explicit fill operation.                                                     |
-| `separate-order-remainder`    | Use the planner's prefilled remainder; no quantity re-entry.                                                           |
-| `place-order-remainder`       | Use the planner's prefilled remainder; no quantity re-entry.                                                           |
-| `undo-order-cartons`          | One compound paste/fill/assignment per step.                                                                           |
-| `redo-order-cartons`          | One compound paste/fill/assignment per step.                                                                           |
-| `confirm-order-cartons`       | One order-level physical confirmation with current source/carton revisions.                                            |
-| `review-carton-physical-mark` | Review the recorded physical mark beside the current product code in Orders.                                           |
-| `review-physical-mark`        | Orders physical-mark dialog with the captured source, batch and amendment guards.                                      |
-| `choose-physical-mark-owner`  | Explicit actual eligible owner choice when the previous mark owner is gone; no inferred target.                        |
-| `physical-mark-decision`      | One fieldset identified by the actual batch ID.                                                                        |
-| `choose-physical-mark`        | Explicit `keep-recorded-mark` or `relabel-reprint` choice.                                                             |
-| `physical-mark-reason`        | Retain the operator's reason; composing text cannot confirm a decision.                                                |
-| `confirm-physical-relabel`    | Fresh attestation of actual physical relabeling.                                                                       |
-| `save-physical-mark-decision` | Guarded saved-mark resolution; no quantity, price or measurement re-entry.                                             |
-| `retry-physical-mark-refresh` | Read-only refresh after a committed mark decision.                                                                     |
-| `print-order-carton-mark`     | Existing A4 PDF pipeline; `data-mark-role` is `recorded` or `current-product`, guarded by captured source/batch/epoch. |
-| `restore-packing`             | Review a historical scoped archive; return to Orders without reopening the retired preparation screen.                 |
-| `open-copy-menu`              | Existing selected-source copy/print tools.                                                                             |
-| `open-print-menu`             | Existing selected-source copy/print tools.                                                                             |
-| `open-activity`               | Existing progress/history/report/retry drawer.                                                                         |
-| `duplicate-import-warning`    | Nonblocking supplier workbook content-match notice.                                                                    |
+| `data-action`                        | Behavior                                                                                                                                  |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `view-orders`                        | Open Orders / named-container Packing.                                                                                                    |
+| `view-packing`                       | Open Orders / named-container Packing.                                                                                                    |
+| `orders-products`                    | Choose the Orders subview.                                                                                                                |
+| `orders-cartons`                     | Choose the Orders subview.                                                                                                                |
+| `orders-backlog`                     | Choose the Orders subview.                                                                                                                |
+| `choose-order`                       | Inspect the order identified by `data-order-id`; use its checkbox to select.                                                              |
+| `open-order-cartons`                 | Open that order's reconciliation session.                                                                                                 |
+| `carton-history`                     | Inspect the complete virtual physical-evidence table in All Orders or a narrowed order scope.                                             |
+| `order-carton-history`               | Show the same retained evidence table for the current reconciliation order.                                                               |
+| `inspect-carton-history`             | Inspect original/current/retired carton evidence without selecting inventory.                                                             |
+| `review-purchase-evidence`           | Review original date/supplier facts and explicit inventory dispositions, retaining unfinished input.                                      |
+| `retry-evidence-refresh`             | Retry the view refresh after committed purchase evidence; never repeat its successful mutation.                                           |
+| `resolve-purchase-date`              | Save an authored original-date resolution with the observed source revision guard.                                                        |
+| `resolve-purchase-supplier`          | Save an operator-confirmed supplier identity; source evidence and issued codes remain guarded.                                            |
+| `save-inventory-disposition`         | Save documented non-goods/fee/payment-only/canceled evidence or an explicit guarded clear.                                                |
+| `edit-order-barcode`                 | Open the existing label editor from an Orders source row.                                                                                 |
+| `edit-order-carton-mark`             | Open the existing carton-mark editor from an Orders source row.                                                                           |
+| `select-all-rows`                    | Select/clear the full filtered product scope.                                                                                             |
+| `clear-selection`                    | Select/clear the full filtered product scope.                                                                                             |
+| `edit-order-product`                 | Open contextual product authoring in Orders.                                                                                              |
+| `review-purchase-codes`              | Prepare products...; review captured selected rows by purchase/family, with codes and suggested product details. Review reserves nothing. |
+| `assign-purchase-codes`              | Confirm preparation; atomically commit reviewed details and complete barcodes for the selected products.                                  |
+| `review-product-families`            | Open the unsaved grouping review with complete-order context and selected-only family/style/size edits.                                   |
+| `product-family-review`              | Native modal containing bounded source evidence and family choices.                                                                       |
+| `choose-product-family`              | Choose one family or separate products for an uncertain cohort; no source selection changes.                                              |
+| `apply-family-choices`               | Apply grouping choices to the review draft and regenerate proposals without reserving codes.                                              |
+| `review-family-mode`                 | Choose automatic, no endings, variants, sizes or combined coding for a proposed family.                                                   |
+| `reset-preparation-code-suggestions` | Reset custom code edits while preserving authored product details and reviewed grouping.                                                  |
+| `back-to-product-selection`          | Close the code review and return focus to Orders without changing selection or reserving codes.                                           |
+| `resolve-code-sizes`                 | Open an unsaved size-ending review for unresolved selected identities.                                                                    |
+| `resolve-purchase-code-sizes`        | Native size-resolution dialog; cancellation saves neither choices nor assignments.                                                        |
+| `review-size-ending`                 | Edit a selected unresolved identity's size ending without changing its base or variant ending.                                            |
+| `review-no-size-ending`              | Explicitly choose no size ending for that selected identity.                                                                              |
+| `apply-reviewed-size-endings`        | Validate draft size choices and refresh the full-code proposal; final assignment requires its separate confirmation.                      |
+| `group-order-products`               | Reviewed grouping in Orders.                                                                                                              |
+| `undo-order-products`                | Guarded Orders product/grouping history, including reviewed physical consequences.                                                        |
+| `redo-order-products`                | Reapply the next Orders history step only while captured revisions remain current.                                                        |
+| `reconciliation-products`            | Product calculations / physical evidence table.                                                                                           |
+| `reconciliation-cartons`             | Product calculations / physical evidence table.                                                                                           |
+| `preview-carton-paste`               | Capture and review keyed alignment / stage the complete paste. Invalid cells remain recovery data.                                        |
+| `apply-carton-paste`                 | Capture and review keyed alignment / stage the complete paste. Invalid cells remain recovery data.                                        |
+| `cancel-carton-paste`                | Cancel local parsing.                                                                                                                     |
+| `select-grid-rows`                   | Select visible logical rows / preview one explicit fill operation.                                                                        |
+| `fill-grid-range`                    | Select visible logical rows / preview one explicit fill operation.                                                                        |
+| `separate-order-remainder`           | Use the planner's prefilled remainder; no quantity re-entry.                                                                              |
+| `place-order-remainder`              | Use the planner's prefilled remainder; no quantity re-entry.                                                                              |
+| `undo-order-cartons`                 | One compound paste/fill/assignment per step.                                                                                              |
+| `redo-order-cartons`                 | One compound paste/fill/assignment per step.                                                                                              |
+| `confirm-order-cartons`              | One order-level physical confirmation with current source/carton revisions.                                                               |
+| `review-carton-physical-mark`        | Review the recorded physical mark beside the current product code in Orders.                                                              |
+| `review-physical-mark`               | Orders physical-mark dialog with the captured source, batch and amendment guards.                                                         |
+| `choose-physical-mark-owner`         | Explicit actual eligible owner choice when the previous mark owner is gone; no inferred target.                                           |
+| `physical-mark-decision`             | One fieldset identified by the actual batch ID.                                                                                           |
+| `choose-physical-mark`               | Explicit `keep-recorded-mark` or `relabel-reprint` choice.                                                                                |
+| `physical-mark-reason`               | Retain the operator's reason; composing text cannot confirm a decision.                                                                   |
+| `confirm-physical-relabel`           | Fresh attestation of actual physical relabeling.                                                                                          |
+| `save-physical-mark-decision`        | Guarded saved-mark resolution; no quantity, price or measurement re-entry.                                                                |
+| `retry-physical-mark-refresh`        | Read-only refresh after a committed mark decision.                                                                                        |
+| `print-order-carton-mark`            | Existing A4 PDF pipeline; `data-mark-role` is `recorded` or `current-product`, guarded by captured source/batch/epoch.                    |
+| `restore-packing`                    | Review a historical scoped archive; return to Orders without reopening the retired preparation screen.                                    |
+| `open-copy-menu`                     | Existing selected-source copy/print tools.                                                                                                |
+| `open-print-menu`                    | Existing selected-source copy/print tools.                                                                                                |
+| `open-activity`                      | Existing progress/history/report/retry drawer.                                                                                            |
+| `duplicate-import-warning`           | Nonblocking supplier workbook content-match notice.                                                                                       |
 
 Scroll `#order-list`, `.table-scroll` and `.smart-grid-scroll` to logical rows. About 100 ordinary rows remain mounted, with focused/dirty cells retained. Selection/totals cover the logical scope. A one-column paste captures selected **visible** keys in displayed order; rectangles prefer code matching inside one purchase. Unknown/duplicate codes, derived columns or stale generation/filter/sort/scope reject the whole operation while keeping raw cells. Never retarget a stale preview to a new DOM row.
 
 For supplier purchases, retain the [marker guide](store-spreadsheets.md) and existing import review. Check all acknowledges eligible items and never bypasses financial/photo/structural validation. Report intake into an existing 1688 purchase is separate; it does not change China markers or create another purchase.
+
+The preparation family dialog exposes `review-family-family`, `review-family-style` and `review-family-size` for selected unprepared source rows. Unselected context and existing saved families are read-only; saved grouping corrections use **Edit product** in Orders. Proposed code fields use `data-review-code="baseCode"`, `variantSuffix` or `sizeSuffix`, identified by account/order/entry attributes. Wait for `aria-busy="false"` and enabled confirmation after asynchronous validation. Resetting suggestions preserves authored details and reviewed families.
 
 ## Workspace: Packing list
 

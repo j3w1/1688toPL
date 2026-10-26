@@ -12,6 +12,7 @@ import { cartonBatchesForItems } from './carton-confirmations.js'
 import { batchInPackingScope, cartonBatchMark } from './carton-batches.js'
 import { batchOrderIds } from './inventory-model.js'
 import { repeatProductStoreIdentity } from './repeat-products.js'
+import { productFamilySourceMatches } from './product-families.js'
 import {
   collectImageReferences,
   imageCacheKey,
@@ -239,6 +240,16 @@ function selectedGroups(groups, selected) {
     .filter((group) => group.variants.length)
 }
 
+// Family evidence may describe unchecked source siblings, but an archive only
+// carries choices that explain one of its selected prepared products.
+function selectedProductFamilies(evidence, selected) {
+  if (!evidence) return undefined
+  const families = evidence.families.filter((family) =>
+    family.entryIds.some((entryId) => selected.has(entryId))
+  )
+  return families.length ? { ...evidence, families } : undefined
+}
+
 /** Checkpoints are scoped too: a selected backup must not carry other packing edits. */
 export function selectPackingPreparation(preparation, ids) {
   const selected = new Set(ids)
@@ -250,6 +261,9 @@ export function selectPackingPreparation(preparation, ids) {
     result.previousPacking?.defaults,
   ].filter(Boolean)) {
     target.groups = selectedGroups(target.groups, selected)
+    const families = selectedProductFamilies(target.productFamilies, selected)
+    if (families) target.productFamilies = families
+    else delete target.productFamilies
     if (target.restoreScopes)
       target.restoreScopes = compactRestoreScopes(
         target.restoreScopes.map((scope) =>
@@ -373,8 +387,8 @@ function packingPreferences(preferences, orders) {
   return { value: result, updatedAt: preferences.updatedAt }
 }
 
-/** Retain only historical observations required to prove included physical allocations. */
-function cartonSourceHistory(backup, batches, orders) {
+/** Retain historical source evidence required by included cartons and family reviews. */
+function scopedSourceHistory(backup, batches, orders, preparations) {
   const demands = new Map(),
     current = new Map(orders.map((order) => [key(order.snapshot), order])),
     history = [...(backup.history || [])].sort((a, b) =>
@@ -417,6 +431,22 @@ function cartonSourceHistory(backup, batches, orders) {
           record.snapshot.observedAt,
         ]),
         record
+      )
+  }
+  for (const preparation of preparations) {
+    const sourceKey = preparation.productFamilies?.sourceKey,
+      orderKey = key(preparation),
+      source = current.get(orderKey)
+    if (
+      sourceKey &&
+      (!source || !productFamilySourceMatches(source.snapshot, sourceKey))
+    )
+      keep(
+        history.find(
+          (record) =>
+            key(record.snapshot) === orderKey &&
+            productFamilySourceMatches(record.snapshot, sourceKey)
+        )
       )
   }
   for (const demand of demands.values()) {
@@ -715,7 +745,12 @@ export function createPackingBackup(backup, selection) {
           batchInPackingScope(batch, scope.orders, preparations)
       )
     ),
-    history = cartonSourceHistory(backup, cartonBatches, selectedOrders)
+    history = scopedSourceHistory(
+      backup,
+      cartonBatches,
+      selectedOrders,
+      preparations
+    )
   const state = activePackingState(
     preparations,
     [],
@@ -827,10 +862,17 @@ function normalizedAuthoring(preparation) {
 
 function currentAuthoring(checkpoint, ids) {
   const { defaultPacking, previousPacking, defaults, ...current } = checkpoint
-  return normalizedAuthoring({
+  const result = {
     ...current,
     groups: selectedGroups(current.groups, new Set(ids)),
-  })
+  }
+  const families = selectedProductFamilies(
+    current.productFamilies,
+    new Set(ids)
+  )
+  if (families) result.productFamilies = families
+  else delete result.productFamilies
+  return normalizedAuthoring(result)
 }
 
 function sameTimeConflict() {
@@ -1110,6 +1152,66 @@ export function mergePackingPreparation(previous, incoming, ids) {
       groupsWithMonths(scoped),
       selected
     ),
+  }
+  if (scoped.productFamilies) {
+    const old = previous.productFamilies,
+      next = scoped.productFamilies
+    if (old && old.sourceKey !== next.sourceKey) {
+      if (entryIds(previous).some((entryId) => !selected.has(entryId)))
+        throw new Error(
+          'Packing restore conflict: reviewed product families use different source evidence for unselected products'
+        )
+      result.productFamilies = structuredClone(next)
+    } else {
+      const families = structuredClone(old?.families || [])
+      for (const family of next.families) {
+        const overlapping = families.filter((existing) =>
+          existing.entryIds.some((entryId) => family.entryIds.includes(entryId))
+        )
+        if (
+          overlapping.some(
+            (existing) =>
+              existing.kind !== family.kind ||
+              existing.entryIds.length !== family.entryIds.length ||
+              existing.entryIds.some(
+                (entryId) => !family.entryIds.includes(entryId)
+              ) ||
+              (existing.mode ?? null) !== (family.mode ?? null) ||
+              JSON.stringify(
+                (existing.identities ?? [])
+                  .map((identity) => [
+                    identity.entryId,
+                    identity.style,
+                    identity.size,
+                    identity.variantSuffix ?? null,
+                    identity.sizeSuffix ?? null,
+                  ])
+                  .sort()
+              ) !==
+                JSON.stringify(
+                  (family.identities ?? [])
+                    .map((identity) => [
+                      identity.entryId,
+                      identity.style,
+                      identity.size,
+                      identity.variantSuffix ?? null,
+                      identity.sizeSuffix ?? null,
+                    ])
+                    .sort()
+                )
+          )
+        )
+          throw new Error(
+            'Packing restore conflict: reviewed product families disagree'
+          )
+        if (!overlapping.length) families.push(structuredClone(family))
+      }
+      result.productFamilies = {
+        ...next,
+        version: Math.max(old?.version ?? 1, next.version),
+        families,
+      }
+    }
   }
   for (const field of ['defaultPacking', 'previousPacking']) {
     const old = previous[field]

@@ -1,4 +1,16 @@
 export const ACTIVITY_MESSAGES = {
+  'Previous failed orders': {
+    zh: '上一组失败订单',
+    es: 'Pedidos fallidos anteriores',
+  },
+  'Next failed orders': {
+    zh: '下一组失败订单',
+    es: 'Siguientes pedidos fallidos',
+  },
+  '{first}–{last} of {total} orders need attention': {
+    zh: '第 {first}–{last} 个，共 {total} 个订单需处理',
+    es: '{first}–{last} de {total} pedidos requieren atención',
+  },
   Running: { zh: '进行中', es: 'En curso' },
   '{count} new': { zh: '{count} 条新动态', es: '{count} nuevas' },
   '{running} ongoing import(s) · {unread} unread update(s). Open Activity to review progress and import reports.':

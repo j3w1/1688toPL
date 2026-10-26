@@ -62,7 +62,7 @@ test('language toggle translates interface and color hints, persists, and preser
   await page.locator('#language-toggle [data-language=es]').click()
   await expect(page.locator('html')).toHaveAttribute('lang', 'es')
   await expect(page.locator('#review-purchase-codes')).toHaveText(
-    'Revisar códigos del mes de compra'
+    'Preparar productos…'
   )
   await expect(page.locator('.product-color-hint').first()).toHaveText('Gris')
   await expect(page.locator('.order-section-store .order-seller')).toHaveText(
@@ -82,13 +82,11 @@ test('language toggle translates interface and color hints, persists, and preser
     page.locator('#language-toggle [data-language=es]')
   ).toHaveAttribute('aria-pressed', 'true')
   await expect(page.locator('#review-purchase-codes')).toHaveText(
-    'Revisar códigos del mes de compra'
+    'Preparar productos…'
   )
   await page.locator('#language-toggle [data-language=zh]').click()
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN')
-  await expect(page.locator('#review-purchase-codes')).toHaveText(
-    '核对采购月份编码'
-  )
+  await expect(page.locator('#review-purchase-codes')).toHaveText('准备商品…')
   await expect(page.locator('.product-color-hint').first()).toHaveText('灰色')
   await expect(page.locator('.order-section-store .order-seller')).toHaveText(
     'Photo'
@@ -199,6 +197,8 @@ for (const language of ['en', 'es', 'zh']) {
         expect(frame.visibleRow, JSON.stringify(frame)).toBeGreaterThanOrEqual(
           48
         )
+        await row.getByRole('checkbox').check()
+        await expect(page.locator('#review-purchase-codes')).toBeEnabled()
         for (const selector of [
           '#review-purchase-codes',
           '#include-orders',

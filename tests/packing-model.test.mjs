@@ -62,6 +62,7 @@ function source(items, extra = {}) {
       entryId: String(index + 1),
       description: 'Cup',
       title: 'Cup',
+      productNumber: `SYNTHETIC-${item.title || 'Cup'}`,
       ...item,
     })),
     ...extra,
@@ -95,6 +96,133 @@ test('unavailable seller cannot allocate labels until a real identity is supplie
   const result = allocatePreparation(draft, [], [])
   assert.equal(result.preparation.sellerId, draft.sellerId)
   assert.equal(result.preparation.groups[0].baseCode, 'CE26100101')
+})
+
+test('standalone decorative horse has a bare code while its sibling elephant articles receive family letters', () => {
+  const snapshot = source([
+      {
+        title: 'Synthetic generic decoration',
+        productNumber: '7128F-02',
+        skuProperties: sku('大号—吻情深-金色', '如图所示'),
+      },
+      {
+        title: 'Synthetic generic decoration',
+        productNumber: '7128K-01',
+        skuProperties: sku('吉象-金色', '如图所示'),
+      },
+      {
+        title: 'Synthetic generic decoration',
+        productNumber: '7128K-02',
+        skuProperties: sku('吉象-银色', '如图所示'),
+      },
+    ]),
+    before = structuredClone(snapshot),
+    allocated = allocatePreparation(
+      createPreparation(snapshot, '2026-10'),
+      [],
+      []
+    )
+  assert.equal(allocated.preparation.groups.length, 2)
+  assert.deepEqual(
+    allocated.preparation.groups.map((group) =>
+      group.variants.map((variant) => barcodeValue(group, variant))
+    ),
+    [['CE26100101'], ['CE26100102A', 'CE26100102B']]
+  )
+  assert.deepEqual(snapshot, before)
+})
+
+test('reviewed family choices survive preparation validation without changing spreadsheet declarations', () => {
+  const snapshot = source([
+      { productNumber: '', skuProperties: sku('red', '') },
+      { productNumber: '', skuProperties: sku('blue', '') },
+    ]),
+    preparation = createPreparation(snapshot, '2026-10', undefined, undefined, {
+      familyChoices: [{ entryIds: ['1', '2'], kind: 'family' }],
+    }),
+    validated = validatePreparation(preparation)
+  assert.deepEqual(validated.productFamilies, preparation.productFamilies)
+  const spreadsheet = source(
+    [
+      {
+        productNumber: '7128F-02',
+        sourceGroup: '5',
+        sourceVariant: 'a',
+        skuProperties: sku('大号', '20cm'),
+      },
+      {
+        productNumber: '7128K-02',
+        sourceGroup: '5',
+        sourceVariant: 'b',
+        skuProperties: sku('小号', '10cm'),
+      },
+    ],
+    { sourceType: 'spreadsheet' }
+  )
+  const imported = createPreparation(spreadsheet, '2026-10')
+  assert.equal(imported.groups.length, 1)
+  assert.deepEqual(
+    imported.groups[0].variants.map(
+      (variant) => variant.variantSuffix + variant.sizeSuffix
+    ),
+    ['A', 'B']
+  )
+  assert.equal(imported.productFamilies, undefined)
+})
+
+test('article siblings add only the endings needed by actual family style and size differences', () => {
+  for (const [properties, expected] of [
+    [
+      [sku('red', 'S'), sku('red', 'L')],
+      ['S', 'L'],
+    ],
+    [
+      [sku('red', 'S'), sku('blue', 'L')],
+      ['AS', 'BL'],
+    ],
+    [
+      [sku('red', '如图所示'), sku('red', '如图所示')],
+      ['A', 'B'],
+    ],
+    [
+      [sku('小号—金色', '如图所示'), sku('大号—金色', '如图所示')],
+      ['S', 'L'],
+    ],
+  ]) {
+    const snapshot = source(
+        properties.map((skuProperties, index) => ({
+          productNumber: `7128K-0${index + 1}`,
+          skuProperties,
+        }))
+      ),
+      preparation = createPreparation(snapshot, '2026-10')
+    assert.equal(preparation.groups.length, 1)
+    assert.deepEqual(
+      preparation.groups[0].variants.map(
+        (variant) => variant.variantSuffix + variant.sizeSuffix
+      ),
+      expected
+    )
+  }
+})
+
+test('model identifiers that repeat source article identity do not force letters on size-only siblings', () => {
+  const snapshot = source(
+      ['S', 'L'].map((size, index) => ({
+        productNumber: '',
+        skuProperties: [
+          ...sku('red', size),
+          { label: '型号', value: `7128K-0${index + 1}` },
+        ],
+      }))
+    ),
+    preparation = createPreparation(snapshot, '2026-10')
+  assert.deepEqual(
+    preparation.groups[0].variants.map(
+      (variant) => variant.variantSuffix + variant.sizeSuffix
+    ),
+    ['S', 'L']
+  )
 })
 
 test('suggestions retain source entries, first-seen variants, named sizes and local vocabulary', () => {
@@ -198,7 +326,7 @@ test('dimension suggestions order 2 through 5 sizes and leave ambiguous sets unr
   }
   for (const dimensions of [
     ['10cm', '20cm', '30cm', '40cm', '50cm', '60cm'],
-    ['short', 'long'],
+    ['10-20cm', '20-30cm'],
     ['10x30cm', '20x20cm'],
   ]) {
     const draft = createPreparation(
@@ -502,7 +630,6 @@ test('size suggestions normalize units and rank measurements only when dimension
     )
   }
   for (const sizes of [
-    ['1cm', '10mm'],
     ['10ml', '20cm'],
     ['10x40cm', '20x30cm'],
   ]) {

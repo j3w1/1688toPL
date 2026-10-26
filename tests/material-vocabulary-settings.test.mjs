@@ -205,6 +205,7 @@ test('changing recognition rules refreshes suggestions and keeps authored materi
     items: Array.from({ length: 3 }, (_, index) => ({
       entryId: String(index + 1),
       title: '玻璃花瓶',
+      productNumber: 'SYNTHETIC-GLASS-VASE',
       skuProperties: [
         { label: '材质', value: '玻璃' },
         { label: '颜色', value: ['红色', '白色', '黑色'][index] },
@@ -239,7 +240,7 @@ test('changing recognition rules refreshes suggestions and keeps authored materi
 
 test('material settings show all small defaults in a detached draft without a pager', (t) => {
   const { value, rows, button, host } = setup(t)
-  assert.equal(rows().length, 84)
+  assert.equal(rows().length, MATERIAL_VOCABULARY.length)
   assert.notEqual(value.materialVocabulary, MATERIAL_VOCABULARY)
   assert.notEqual(
     value.materialVocabulary[0].aliases,
@@ -249,7 +250,7 @@ test('material settings show all small defaults in a detached draft without a pa
   assert.equal(button('Next material rules'), undefined)
   assert.equal(
     host.querySelector('.vocabulary-status [role=status]').textContent,
-    '84 rules'
+    `${MATERIAL_VOCABULARY.length} rules`
   )
   assert.equal(
     host.querySelector('.vocabulary-scroll').getAttribute('role'),

@@ -16,6 +16,7 @@ import {
   stableValue,
 } from './inventory-model.js'
 import { physicalMarkOwner } from './physical-mark-aliases.js'
+import { planProductFamilies } from './product-families.js'
 
 const key = (value) =>
   JSON.stringify([
@@ -23,6 +24,7 @@ const key = (value) =>
     value.orderId || value.snapshot?.orderId,
   ])
 const clone = (value) => structuredClone(value)
+
 function codeError(code, message, detail = {}) {
   return Object.assign(new Error(message), { code, detail })
 }
@@ -1286,10 +1288,104 @@ export function consumptionLocksForManifest(manifest, state = {}) {
   return [...result.values()]
 }
 
+/** Infer identities from all source rows, then add only the selected memberships. */
+function addSelectedSourceProducts(
+  draft,
+  snapshot,
+  missing,
+  month,
+  preferences,
+  familyPlan
+) {
+  if (!missing.length) return
+  const selected = new Set(missing.map((item) => item.entryId)),
+    inferred = createPreparation(
+      snapshot,
+      month,
+      preferences?.vocabulary,
+      preferences?.sizeVocabulary,
+      { familyPlan }
+    ),
+    members = (group) => group.variants.flatMap((variant) => variant.entryIds),
+    ambiguous = (group) => {
+      throw codeError(
+        'PURCHASE_GROUP_REVIEW_REQUIRED',
+        'Review this product group before assigning more source products. Existing authored groups or variants do not identify one unambiguous destination.',
+        { orderId: draft.orderId, groupId: group?.id }
+      )
+    }
+  for (const sourceGroup of inferred.groups) {
+    const sourceIds = new Set(members(sourceGroup)),
+      added = sourceGroup.variants
+        .map((variant) => ({
+          ...variant,
+          entryIds: variant.entryIds.filter((entryId) => selected.has(entryId)),
+        }))
+        .filter((variant) => variant.entryIds.length)
+    if (!added.length) continue
+    const targets = draft.groups.filter((group) =>
+      members(group).some((entryId) => sourceIds.has(entryId))
+    )
+    if (targets.length > 1) ambiguous()
+    if (!targets.length) {
+      draft.groups.push({ ...sourceGroup, month, variants: added })
+      continue
+    }
+    const target = targets[0]
+    for (const addition of added) {
+      const sourceVariant = sourceGroup.variants.find(
+          (variant) => variant.id === addition.id
+        ),
+        sourceVariantIds = new Set(sourceVariant.entryIds),
+        variants = target.variants.filter((variant) =>
+          variant.entryIds.some((entryId) => sourceVariantIds.has(entryId))
+        )
+      if (variants.length > 1) ambiguous(target)
+      if (variants.length) variants[0].entryIds.push(...addition.entryIds)
+      else {
+        // A new shared variant requires the existing explicit repeat-link review.
+        if (target.sharedProductId) ambiguous(target)
+        if (target.sizeMode === 'none') {
+          addition.sizeSuffix = ''
+          addition.needsSizeMapping = false
+        }
+        target.variants.push(addition)
+      }
+    }
+  }
+  if (draft.restoreScopes) draft.restoreScopes.push([...selected])
+  return new Map(
+    inferred.groups.flatMap((group, index) =>
+      members(group).map((entryId) => [entryId, index])
+    )
+  )
+}
+
+/** Source calendar ordering makes allocation independent of selection and table order. */
+function purchaseCodeOrder(record) {
+  const snapshot = record?.snapshot
+  return [
+    calendarDate(snapshot?.purchasedAt) ??
+      calendarDate(record?.purchaseDateResolution?.date) ??
+      '',
+    snapshot?.accountId || 'local',
+    snapshot?.orderId || '',
+  ]
+}
+function comparePurchaseCodeOrders(left, right) {
+  const a = purchaseCodeOrder(left),
+    b = purchaseCodeOrder(right)
+  for (let index = 0; index < a.length; index++) {
+    if (a[index] < b[index]) return -1
+    if (a[index] > b[index]) return 1
+  }
+  return 0
+}
+
 /** Read-only review. Returned drafts do not become reservations until one final transaction. */
 export function planPurchaseCodeReview(
   state,
-  { orderRefs = [], entryRefs = [] } = {}
+  { orderRefs = [], entryRefs = [], familyChoices = [] } = {}
 ) {
   const records = state.records ?? state.orders ?? [],
     preparations = state.preparations ?? []
@@ -1297,11 +1393,13 @@ export function planPurchaseCodeReview(
   const previous = new Map(
     preparations.map((preparation) => [key(preparation), preparation])
   )
-  const selected = new Map()
+  const selected = new Map(),
+    sourceGroupPositions = new Map()
   const issues = [],
     changes = [],
     drafts = [],
-    expectedSnapshots = []
+    expectedSnapshots = [],
+    familyReview = []
   const problem = (code, message, detail = {}, severity = 'error') =>
     issues.push({ code, message, ...detail, severity })
   for (const ref of orderRefs) selected.set(key(ref), new Set())
@@ -1315,7 +1413,10 @@ export function planPurchaseCodeReview(
       'PURCHASE_SELECTION_REQUIRED',
       'Select purchase products before reviewing codes.'
     )
-  for (const [order, ids] of selected) {
+  const ordered = [...selected].sort(([left], [right]) =>
+    comparePurchaseCodeOrders(byOrder.get(left), byOrder.get(right))
+  )
+  for (const [order, ids] of ordered) {
     const record = byOrder.get(order),
       old = previous.get(order)
     if (!record) {
@@ -1423,14 +1524,47 @@ export function planPurchaseCodeReview(
           state.preferences?.vocabulary,
           state.preferences?.sizeVocabulary
         )
-    if (missing.length) {
-      const added = createPreparation(
-        { ...codeSnapshot, items: missing },
-        month,
-        state.preferences?.vocabulary,
-        state.preferences?.sizeVocabulary
+    try {
+      const familyPlan =
+          codeSnapshot.sourceType === 'spreadsheet' ||
+          codeSnapshot.source === 'other'
+            ? null
+            : planProductFamilies(codeSnapshot, {
+                choices: familyChoices,
+                preparation: old,
+                records,
+                preparations,
+                history: state.history,
+                sizeVocabulary: state.preferences?.sizeVocabulary,
+              }),
+        missingIds = new Set(missing.map((item) => item.entryId)),
+        familyIssues = (familyPlan?.issues ?? []).filter((issue) =>
+          issue.entryIds.some((entryId) => missingIds.has(entryId))
+        )
+      if (familyPlan) {
+        familyReview.push({ ...familyPlan, issues: familyIssues })
+        for (const issue of familyIssues)
+          problem(issue.code, issue.message, issue)
+        if (familyPlan.evidence) draft.productFamilies = familyPlan.evidence
+      }
+      sourceGroupPositions.set(
+        order,
+        addSelectedSourceProducts(
+          draft,
+          codeSnapshot,
+          missing,
+          month,
+          state.preferences,
+          familyPlan
+        )
       )
-      draft.groups.push(...added.groups.map((group) => ({ ...group, month })))
+      draft = validatePreparation(draft)
+    } catch (error) {
+      problem(error.code ?? 'PURCHASE_GROUP_REVIEW_REQUIRED', error.message, {
+        orderId: draft.orderId,
+        ...error.detail,
+      })
+      continue
     }
     if (!old?.groups.some((group) => group.baseCode) && supplier.sellerId)
       draft.sellerId = supplier.sellerId
@@ -1470,9 +1604,23 @@ export function planPurchaseCodeReview(
         locks: locksOf(state),
       })
       for (const draft of drafts) {
-        const record = byOrder.get(key(draft))
+        const record = byOrder.get(key(draft)),
+          // Every sibling carries its complete source group's first position,
+          // including earlier siblings excluded from the selected projection.
+          positions = sourceGroupPositions.get(key(draft)) ?? new Map(),
+          position = (group) =>
+            Math.min(
+              ...group.variants.flatMap((variant) =>
+                variant.entryIds.map(
+                  (entryId) => positions.get(entryId) ?? Infinity
+                )
+              )
+            ),
+          assigning = [...draft.groups].sort(
+            (left, right) => position(left) - position(right)
+          )
         const allocation = allocatePreparation(
-          draft,
+          { ...draft, groups: assigning },
           packing.allocations,
           packing.issuedCodes,
           {
@@ -1482,7 +1630,17 @@ export function planPurchaseCodeReview(
           }
         )
         packing = allocation
-        proposed.push(allocation.preparation)
+        const allocated = new Map(
+          allocation.preparation.groups.map((group) => [group.id, group])
+        )
+        proposed.push(
+          validatePreparation({
+            ...draft,
+            groups: draft.groups.map(
+              (group) => allocated.get(group.id) ?? group
+            ),
+          })
+        )
       }
     } catch (error) {
       problem(
@@ -1536,15 +1694,19 @@ export function planPurchaseCodeReview(
             )
         }
   }
-  const expectedRevisions = proposed.map((draft) => draft.revision)
+  const expectedRevisions = drafts.map((draft) => draft.revision)
   const plan = {
     preparations: proposed,
     expectedSnapshots,
     expectedRevisions,
-    selection: { orderRefs: clone(orderRefs), entryRefs: clone(entryRefs) },
+    selection: {
+      orderRefs: clone(orderRefs),
+      entryRefs: clone(entryRefs),
+      ...(familyChoices.length ? { familyChoices: clone(familyChoices) } : {}),
+    },
     issues: clone(issues),
   }
-  return { plan, changes, issues, expectedRevisions }
+  return { plan, changes, issues, expectedRevisions, familyReview }
 }
 
 /** Portable reviewed equivalence, scoped to one source order and its actual code owners. */

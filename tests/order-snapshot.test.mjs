@@ -5,7 +5,9 @@ import { deepQuery } from '../src/dom.js'
 import { extractOrder } from '../src/extract.js'
 import {
   allocateOrderAdjustment,
+  confirmOrderReconciliation,
   extractOrderSnapshot,
+  reviewOrderSnapshot,
 } from '../src/order-snapshot.js'
 import {
   centsToMoney,
@@ -15,6 +17,10 @@ import {
 } from '../src/money.js'
 import { buildOrderFixture } from './fixtures/order-fixture.mjs'
 import { validateBackup } from '../src/database.js'
+import {
+  planOrderReconciliation,
+  validateReconciliationReview,
+} from '../src/order-reconciliation.js'
 
 const orderId = '9990000000000000001'
 const orderUrl = `https://air.1688.com/app/ctf-page/trade-order-detail/index.html?orderId=${orderId}`
@@ -129,6 +135,311 @@ function snapshot(source) {
     observedAt,
   })
 }
+
+function discountReviewFixture() {
+  const rows = [
+    ['5.10', '60', '15.55'],
+    ['4.60', '60', '14.02'],
+    ['9.20', '60', '28.04'],
+    ['5.30', '30', '8.08'],
+    ['5.30', '30', '8.08'],
+    ['6.60', '60', '20.12'],
+    ['22.80', '20', '23.17'],
+    ['22.80', '20', '23.17'],
+    ['4.20', '30', '6.40'],
+    ['24.00', '24', '29.26'],
+    ['24.00', '24', '29.26'],
+    ['24.00', '24', '29.27'],
+    ['10.80', '60', '32.92'],
+    ['6.80', '60', '20.73'],
+    ['9.00', '60', '27.43'],
+  ].map(([price, quantity, sourceDiscount]) => ({
+    price,
+    quantity,
+    sourceDiscount,
+  }))
+  const source = fixture({
+    rows,
+    totals: {
+      goodsGross: '6210.00',
+      shipping: '100.00',
+      sourceDiscount: '0.00',
+      orderAdjustment: '减 ¥4.50',
+      redPacketDiscount: '减 ¥30.00',
+      payable: '5960.00',
+    },
+  })
+  source.fields['商品优惠'].parentNode.remove()
+  source.field('PLUS价优惠', '减 ¥310.50')
+  source.field('店铺优惠', '减 ¥5.00')
+  source.totalDiscount.textContent = '345.50'
+  return source
+}
+
+function review(source, options = {}) {
+  return reviewOrderSnapshot(source.document, orderUrl, {
+    observedAt,
+    ...options,
+  })
+}
+
+function reviewedBackup(value) {
+  return validateBackup({
+    format: '1688-order-library',
+    version: 1,
+    exportedAt: observedAt,
+    orders: [
+      {
+        snapshot: value,
+        revision: 1,
+        changedAt: observedAt,
+        lastCheckedAt: observedAt,
+        notes: '',
+        tags: [],
+        changedEntryIds: [],
+        removedEntryIds: [],
+      },
+    ],
+    history: [],
+    images: [],
+  })
+}
+
+test('a complete fifteen-row PLUS and shop discount order requires explicit review instead of guessing its allocation', () => {
+  const source = discountReviewFixture()
+  const planned = review(source)
+  assert.equal(planned.status, 'review-required')
+  assert.equal(planned.review.candidates.length, 2)
+  assert.equal(planned.review.orderId, orderId)
+  assert.equal(planned.review.accountId, 'local')
+  assert.throws(() => snapshot(source), {
+    code: 'ORDER_DISCOUNT_REVIEW_REQUIRED',
+    retryable: false,
+    message:
+      'The order total balances, but the discount allocation needs your review.',
+  })
+  const suggested = planned.review.candidates.find(
+    (candidate) => candidate.id === planned.review.suggestedChoice
+  )
+  assert.equal(suggested.snapshot.totals.rowIncludedAdjustment, undefined)
+  assert.equal(suggested.snapshot.items.length, 15)
+  assert.equal(suggested.snapshot.totals.goodsGross, '6210.00')
+  assert.equal(suggested.snapshot.totals.goodsNet, '5890.00')
+  assert.equal(suggested.snapshot.totals.payable, '5960.00')
+})
+
+test('both reviewed discount treatments retain exact cents and survive backup validation', () => {
+  const { review: planned } = review(discountReviewFixture())
+  for (const candidate of planned.candidates) {
+    const result = confirmOrderReconciliation(planned, {
+      choice: candidate.id,
+      evidenceKey: planned.evidenceKey,
+      reviewedAt: observedAt,
+    })
+    const inRows = result.totals.rowIncludedAdjustment === '4.50'
+    assert.equal(result.totals.orderDiscount, inRows ? '4.50' : undefined)
+    assert.equal(result.totals.goodsNet, '5890.00')
+    assert.equal(result.totals.payable, '5960.00')
+    assert.equal(result.totals.sourceDiscount, '315.50')
+    assert.equal(
+      centsToMoney(
+        result.items.reduce(
+          (sum, item) => sum + moneyToCents(item.allocatedDiscount),
+          0n
+        )
+      ),
+      inRows ? '0.00' : '4.50'
+    )
+    assert.equal(result.reconciliationReview.choice, candidate.id)
+    assert.equal(result.reconciliationReview.reviewedAt, observedAt)
+    assert.deepEqual(reviewedBackup(result).orders[0].snapshot, result)
+    assert.deepEqual(
+      reviewedBackup({ ...result, source: '1688' }).orders[0].snapshot,
+      { ...result, source: '1688' }
+    )
+  }
+})
+
+test('an exact saved review is reused across status, presentation and observation changes', () => {
+  const source = discountReviewFixture()
+  const { review: planned } = review(source)
+  const chosen = confirmOrderReconciliation(planned, {
+    choice: planned.suggestedChoice,
+    evidenceKey: planned.evidenceKey,
+    reviewedAt: observedAt,
+  })
+  source.statusText.textContent = '等待卖家发货'
+  source.fields['PLUS价优惠'].textContent = '减 ¥ 310.500'
+  deepQuery(source.cells[0].goods.root).one(
+    '.goods-info a.oneline'
+  ).textContent = 'Changed nonfinancial description'
+  const result = review(source, {
+    observedAt: '2026-10-26T10:00:00.000Z',
+    reconciliationReview: chosen.reconciliationReview,
+  })
+  assert.equal(result.status, 'ready')
+  assert.deepEqual(
+    result.snapshot.reconciliationReview,
+    chosen.reconciliationReview
+  )
+  assert.equal(result.snapshot.status, '等待卖家发货')
+  assert.match(result.snapshot.items[0].description, /Changed nonfinancial/)
+  assert.equal(result.snapshot.observedAt, '2026-10-26T10:00:00.000Z')
+  source.totalDiscount.remove()
+  assert.deepEqual(
+    review(source, { reconciliationReview: chosen.reconciliationReview })
+      .snapshot.reconciliationReview,
+    chosen.reconciliationReview
+  )
+})
+
+test('financially changed evidence and foreign account/order receipts require a fresh review', () => {
+  const source = discountReviewFixture()
+  const { review: planned } = review(source)
+  const chosen = confirmOrderReconciliation(planned, {
+    choice: planned.suggestedChoice,
+    evidenceKey: planned.evidenceKey,
+    reviewedAt: observedAt,
+  })
+  source.fields['运费'].textContent = '¥101.00'
+  source.payable.innerHTML = '<span class="sum-pay-label">实付款</span>¥5961.00'
+  const changed = review(source, {
+    reconciliationReview: chosen.reconciliationReview,
+  })
+  assert.equal(changed.status, 'review-required')
+  assert.notEqual(changed.review.evidenceKey, planned.evidenceKey)
+  assert.throws(
+    () =>
+      confirmOrderReconciliation(changed.review, {
+        choice: planned.suggestedChoice,
+        evidenceKey: planned.evidenceKey,
+      }),
+    /does not match/
+  )
+  for (const [field, value] of [
+    ['accountId', 'another-account'],
+    ['orderId', '9990000000000000002'],
+  ]) {
+    const forged = structuredClone(chosen)
+    forged[field] = value
+    if (field === 'orderId')
+      forged.sourceUrl = forged.sourceUrl.replace(orderId, value)
+    assert.throws(() => reviewedBackup(forged), /does not match/)
+  }
+})
+
+test('forged receipt choices, footer amounts and interpreted allocations cannot enter a backup', () => {
+  const { review: planned } = review(discountReviewFixture())
+  const chosen = confirmOrderReconciliation(planned, {
+    choice: planned.suggestedChoice,
+    evidenceKey: planned.evidenceKey,
+    reviewedAt: observedAt,
+  })
+  for (const mutation of [
+    (value) => {
+      value.reconciliationReview.choice = 'not-a-candidate'
+    },
+    (value) => {
+      value.reconciliationReview.evidenceKey += 'stale'
+    },
+    (value) => {
+      value.reconciliationReview.reviewedAt = 'invalid'
+    },
+    (value) => {
+      value.reconciliationReview.sourceTotals.payable = '5960.01'
+    },
+    (value) => {
+      value.items[0].allocatedDiscount = '0.00'
+    },
+    (value) => {
+      value.reconciliationReview.version = 2
+    },
+    (value) => {
+      delete value.reconciliationReview.reviewedAt
+    },
+    (value) => {
+      value.foreignCurrencyFeeUnspecified = true
+    },
+  ]) {
+    const forged = structuredClone(chosen)
+    mutation(forged)
+    assert.throws(() => reviewedBackup(forged))
+  }
+})
+
+test('the financial key changes for source identities and every financial input, while row order stays immaterial', () => {
+  const { review: planned } = review(discountReviewFixture())
+  const source = planned.candidates[0].snapshot
+  for (const mutate of [
+    (snapshot) => {
+      snapshot.accountId = 'another-account'
+    },
+    (snapshot) => {
+      snapshot.orderId = '9990000000000000002'
+    },
+    (snapshot) => {
+      snapshot.items[0].entryId = '9991000000000009999'
+    },
+    (snapshot) => {
+      snapshot.items[0].price = '10.20'
+      snapshot.items[0].quantity = '30'
+    },
+    (snapshot) => {
+      snapshot.items[0].sourceDiscount = '15.56'
+      snapshot.items[1].sourceDiscount = '14.01'
+    },
+  ]) {
+    const changed = structuredClone(source)
+    mutate(changed)
+    const result = planOrderReconciliation(changed, planned.sourceTotals)
+    assert.equal(result.status, 'review-required')
+    assert.notEqual(result.review.evidenceKey, planned.evidenceKey)
+  }
+  const footer = structuredClone(planned.sourceTotals)
+  footer.fields.find((field) => field.label === 'PLUS价优惠').amount = '310.49'
+  footer.fields.find((field) => field.label === '店铺优惠').amount = '5.01'
+  assert.notEqual(
+    planOrderReconciliation(source, footer).review.evidenceKey,
+    planned.evidenceKey
+  )
+  const reordered = structuredClone(source)
+  reordered.items.reverse()
+  assert.equal(
+    planOrderReconciliation(reordered, planned.sourceTotals).review.evidenceKey,
+    planned.evidenceKey
+  )
+})
+
+test('confirmation rebuilds supplied candidate DTOs and cannot accept an impossible row-discount interpretation', () => {
+  const { review: planned } = review(discountReviewFixture())
+  const tampered = structuredClone(planned)
+  tampered.candidates[0].snapshot.totals.payable = '1.00'
+  tampered.candidates[0].snapshot.items[0].allocatedDiscount = '999.00'
+  const confirmed = confirmOrderReconciliation(tampered, {
+    choice: tampered.candidates[0].id,
+    evidenceKey: planned.evidenceKey,
+    reviewedAt: observedAt,
+  })
+  assert.equal(confirmed.totals.payable, '5960.00')
+  assert.notEqual(confirmed.items[0].allocatedDiscount, '999.00')
+  assert.ok(validateReconciliationReview(confirmed))
+  const source = fixture({
+    rows: [{ price: '10.00', quantity: '1', sourceDiscount: '0.00' }],
+    totals: {
+      goodsGross: '10.00',
+      shipping: '0.00',
+      sourceDiscount: '0.00',
+      orderAdjustment: '减 ¥2.00',
+      payable: '5.00',
+    },
+  })
+  source.field('店铺优惠', '减 ¥3.00')
+  source.totalDiscount.textContent = '3.00'
+  const result = review(source)
+  assert.equal(result.status, 'ready')
+  assert.equal(result.snapshot.totals.rowIncludedAdjustment, undefined)
+  assert.equal(result.snapshot.totals.orderDiscount, '3.00')
+})
 
 test('unsigned price changes require one exact direction from the complete totals', () => {
   for (const [payable, adjustment, discount] of [
@@ -305,7 +616,10 @@ test('unexplained gross gaps, partial or ambiguous adjustments and bad payable s
   // Both row mappings must fit the payable too, leaving a genuine ambiguity.
   ambiguous.payable.innerHTML =
     '<span class="sum-pay-label">实付款</span>¥75.00'
-  assert.throws(() => snapshot(ambiguous), /unambiguously/)
+  assert.throws(() => snapshot(ambiguous), {
+    code: 'ORDER_DISCOUNT_REVIEW_REQUIRED',
+    retryable: false,
+  })
   const payable = discounted()
   payable.payable.querySelector('.sub-ammount').textContent = '01'
   assert.throws(() => snapshot(payable), /payable amount does not reconcile/)
@@ -538,7 +852,10 @@ test('cross-store reductions require explicit signs, exact breakdowns and a uniq
   ambiguous.field('商品改价', '减 ¥1.00')
   ambiguous.payable.querySelector('.sub-ammount').textContent = '00'
   ambiguous.payable.childNodes[1].textContent = ' ¥61.'
-  assert.throws(() => snapshot(ambiguous), /unambiguously/)
+  assert.throws(() => snapshot(ambiguous), {
+    code: 'ORDER_DISCOUNT_REVIEW_REQUIRED',
+    retryable: false,
+  })
 })
 
 test('promotion adjustments require one interpretation and exact cent reconciliation', () => {
@@ -570,10 +887,10 @@ test('promotion adjustments require one interpretation and exact cent reconcilia
   assert.equal(allocated.items[0].allocatedDiscount, '3.00')
   for (const row of ['5.01', '5.24', '8.00'])
     assert.throws(() => snapshot(source(row, '3.00')), /unambiguously/)
-  assert.throws(
-    () => snapshot(source('1.00', '1.00', '2.00', '50.00')),
-    /unambiguously/
-  )
+  assert.throws(() => snapshot(source('1.00', '1.00', '2.00', '50.00')), {
+    code: 'ORDER_DISCOUNT_REVIEW_REQUIRED',
+    retryable: false,
+  })
   assert.throws(
     () => snapshot(source('3.00', '3.00', '2.00', '48.01')),
     /payable amount/

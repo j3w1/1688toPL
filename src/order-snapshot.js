@@ -1,12 +1,16 @@
 import { deepQuery } from './dom.js'
 import { extractOrder, findOrderTable } from './extract.js'
 import { purchaseTimestamp } from './order-date.js'
+import { centsToMoney, moneyToCents, normalizePrice } from './money.js'
 import {
-  centsToMoney,
-  lineGrossCents,
-  moneyToCents,
-  normalizePrice,
-} from './money.js'
+  discountReviewRequired,
+  planOrderReconciliation,
+  reuseOrderReconciliation,
+} from './order-reconciliation.js'
+export {
+  allocateOrderAdjustment,
+  confirmOrderReconciliation,
+} from './order-reconciliation.js'
 
 const detailOrigin = 'https://air.1688.com'
 const detailPath = '/app/ctf-page/trade-order-detail/index.html'
@@ -131,8 +135,6 @@ function readTotals(appQuery) {
   const query = deepQuery(host.shadowRoot)
   const fields = query.all('.detail-price dl')
   const totals = { sourceDiscount: 0n, orderAdjustment: 0n }
-  let orderEligibleDiscount = 0n
-  let wholesaleDiscount = 0n
   let unsignedAdjustment
   let foreignCurrencyFeeUnspecified = false
   const labels = new Set()
@@ -178,8 +180,6 @@ function readTotals(appQuery) {
       const discount = readAmount(value, label, { signed: true })
       if (discount < 0n) throw new Error(`${label} is not a reduction.`)
       totals.sourceDiscount += discount
-      if (orderDiscountLabels.has(label)) orderEligibleDiscount += discount
-      if (label === '批发优惠') wholesaleDiscount += discount
     } else
       throw Object.assign(new Error(`Unsupported order total: ${label}.`), {
         retryable: false,
@@ -234,65 +234,43 @@ function readTotals(appQuery) {
   if (!match) throw new Error('The CNY payable amount is missing or ambiguous.')
   totals.payable = moneyToCents(match[1].replaceAll(',', ''))
   return {
-    totals,
-    orderEligibleDiscount,
-    wholesaleDiscount,
-    unsignedAdjustment,
     foreignCurrencyFeeUnspecified,
+    sourceTotals: {
+      fields: fields.map((field) => {
+        const label = compact(text(field.querySelector('dt')))
+        const value = text(field.querySelector('dd'))
+        if (label === '外币支付手续费') return { label, unspecified: true }
+        const signed =
+          label === '红包' ||
+          label.includes('优惠') ||
+          orderDiscountLabels.has(label) ||
+          label === '元宝' ||
+          (label === '商品改价' && unsignedAdjustment === undefined)
+        return {
+          label,
+          amount: centsToMoney(readAmount(value, label, { signed })),
+          ...(label === '商品改价' && unsignedAdjustment !== undefined
+            ? { unsigned: true }
+            : {}),
+        }
+      }),
+      payable: centsToMoney(totals.payable),
+      ...(summaryAmounts.length === 1
+        ? {
+            discountSummary: centsToMoney(
+              readAmount(summaryAmounts[0], 'Discount total')
+            ),
+          }
+        : {}),
+    },
   }
 }
 
-/** Allocate a signed reduction in exact cents, preserving source item order. */
-export function allocateOrderAdjustment(items, adjustment) {
-  const amount = moneyToCents(adjustment)
-  const ids = new Set()
-  const entries = items.map((item) => {
-    if (
-      typeof item.entryId !== 'string' ||
-      !/^[1-9]\d*$/.test(item.entryId) ||
-      ids.has(item.entryId)
-    )
-      throw new Error('Product entry IDs must be unique decimal strings.')
-    ids.add(item.entryId)
-    const sourceDiscount = moneyToCents(item.sourceDiscount)
-    const weight = lineGrossCents(item.price, item.quantity) - sourceDiscount
-    if (sourceDiscount < 0n || weight < 0n)
-      throw new Error('A product discount exceeds its original row value.')
-    return { entryId: item.entryId, weight, cents: 0n, remainder: 0n }
-  })
-  const total = entries.reduce((sum, entry) => sum + entry.weight, 0n)
-  if (amount > total || (amount !== 0n && total === 0n))
-    throw new Error(
-      'The order adjustment cannot be allocated to its product values.'
-    )
-  if (amount === 0n) return entries.map(() => '0.00')
-  const absolute = amount < 0n ? -amount : amount
-  for (const entry of entries) {
-    const numerator = absolute * entry.weight
-    entry.cents = numerator / total
-    entry.remainder = numerator % total
-  }
-  let remaining =
-    absolute - entries.reduce((sum, entry) => sum + entry.cents, 0n)
-  const ranked = [...entries].sort((a, b) => {
-    if (a.remainder !== b.remainder) return a.remainder > b.remainder ? -1 : 1
-    return a.entryId < b.entryId ? -1 : a.entryId > b.entryId ? 1 : 0
-  })
-  for (const entry of ranked) {
-    if (remaining === 0n) break
-    entry.cents += 1n
-    remaining -= 1n
-  }
-  return entries.map((entry) =>
-    centsToMoney(amount < 0n ? -entry.cents : entry.cents)
-  )
-}
-
-/** Read a complete, reconciled order. Failure leaves persistence to the caller. */
-export function extractOrderSnapshot(
+/** Read current source evidence and plan all supported complete interpretations. */
+export function reviewOrderSnapshot(
   document,
   url,
-  { observedAt = new Date().toISOString() } = {}
+  { observedAt = new Date().toISOString(), reconciliationReview } = {}
 ) {
   if (
     typeof observedAt !== 'string' ||
@@ -316,123 +294,9 @@ export function extractOrderSnapshot(
     price: normalizePrice(row.price),
     sourceDiscount: discount,
   }))
-  const {
-    totals,
-    orderEligibleDiscount,
-    wholesaleDiscount,
-    unsignedAdjustment,
-    foreignCurrencyFeeUnspecified,
-  } = readTotals(appQuery)
-  const actualGross = items.reduce(
-    (sum, item) => sum + lineGrossCents(item.price, item.quantity),
-    0n
-  )
-  const actualDiscount = items.reduce(
-    (sum, item) => sum + moneyToCents(item.sourceDiscount),
-    0n
-  )
-  // The original footer can include customization, while row prices can already
-  // include wholesale reductions. Accept only whole, explicitly named amounts.
-  const grossCandidates = [
-    0n,
-    ...(totals.customizationService > 0n ? [totals.customizationService] : []),
-  ]
-    .map((grossIncludedCustomization) => ({
-      grossIncludedCustomization,
-      priceIncludedDiscount:
-        totals.goodsGross - actualGross - grossIncludedCustomization,
-    }))
-    .filter(
-      ({ priceIncludedDiscount }) =>
-        priceIncludedDiscount === 0n ||
-        priceIncludedDiscount === wholesaleDiscount
-    )
-  if (!grossCandidates.length)
-    throw new Error(
-      'Product rows do not reconcile with the order totals. The order may be incomplete.'
-    )
-  // Consider only explicitly evidenced whole amounts. The discount breakdown
-  // and payable must identify one complete interpretation, including when a
-  // customization charge happens to equal the wholesale reduction.
-  // Some pages omit the sign of 商品改价. Try both directions and require
-  // exactly one complete reconciliation; never assume an unsigned reduction.
-  const adjustments =
-    unsignedAdjustment === undefined
-      ? [totals.orderAdjustment]
-      : [...new Set([unsignedAdjustment, -unsignedAdjustment])]
-  const candidates = adjustments.flatMap((orderAdjustment) =>
-    grossCandidates.flatMap((gross) =>
-      [0n, ...(orderAdjustment > 0n ? [orderAdjustment] : [])]
-        .map((rowIncludedAdjustment) => {
-          const orderDiscount =
-            totals.sourceDiscount -
-            gross.priceIncludedDiscount +
-            rowIncludedAdjustment -
-            actualDiscount
-          return {
-            ...gross,
-            orderAdjustment,
-            rowIncludedAdjustment,
-            orderDiscount,
-            goodsNet:
-              actualGross -
-              actualDiscount -
-              (orderAdjustment - rowIncludedAdjustment) -
-              orderDiscount,
-          }
-        })
-        .filter(
-          ({ orderDiscount }) =>
-            orderDiscount >= 0n && orderDiscount <= orderEligibleDiscount
-        )
-    )
-  )
-  if (!candidates.length)
-    throw new Error(
-      'Product rows do not reconcile unambiguously with the order totals. The order may be incomplete.'
-    )
-  const reconciled = candidates.filter(
-    ({ goodsNet }) =>
-      goodsNet >= 0n &&
-      totals.payable >= 0n &&
-      goodsNet +
-        totals.shipping +
-        (totals.customizationService ?? 0n) -
-        (totals.redPacketDiscount ?? 0n) ===
-        totals.payable
-  )
-  if (!reconciled.length)
-    throw new Error(
-      'The payable amount does not reconcile with the order totals.'
-    )
-  if (reconciled.length !== 1)
-    throw new Error(
-      'Product rows do not reconcile unambiguously with the order totals. The order may be incomplete.'
-    )
-  const {
-    grossIncludedCustomization,
-    priceIncludedDiscount,
-    rowIncludedAdjustment,
-    orderDiscount,
-    goodsNet,
-    orderAdjustment,
-  } = reconciled[0]
-  totals.orderAdjustment = orderAdjustment
-  totals.sourceDiscount = actualDiscount
-  if (grossIncludedCustomization > 0n)
-    totals.grossIncludedCustomization = grossIncludedCustomization
-  if (priceIncludedDiscount > 0n)
-    totals.priceIncludedDiscount = priceIncludedDiscount
-  if (rowIncludedAdjustment > 0n)
-    totals.rowIncludedAdjustment = rowIncludedAdjustment
-  if (orderDiscount > 0n) totals.orderDiscount = orderDiscount
-  totals.goodsNet = goodsNet
-  const allocations = allocateOrderAdjustment(
-    items,
-    centsToMoney(totals.orderAdjustment - rowIncludedAdjustment)
-  )
+  const { sourceTotals, foreignCurrencyFeeUnspecified } = readTotals(appQuery)
   const purchasedAt = readPurchaseDate(appQuery)
-  return {
+  const base = {
     schemaVersion: 1,
     accountId: 'local',
     ...identity,
@@ -450,15 +314,18 @@ export function extractOrderSnapshot(
       : {}),
     observedAt: new Date(observedAt).toISOString(),
     ...(purchasedAt ? { purchasedAt } : {}),
-    items: items.map((item, index) => ({
-      ...item,
-      allocatedDiscount: allocations[index],
-      discount: centsToMoney(
-        moneyToCents(item.sourceDiscount) + moneyToCents(allocations[index])
-      ),
-    })),
-    totals: Object.fromEntries(
-      Object.entries(totals).map(([name, value]) => [name, centsToMoney(value)])
-    ),
+    items,
   }
+  return reuseOrderReconciliation(
+    planOrderReconciliation(base, sourceTotals),
+    reconciliationReview
+  )
+}
+
+/** Existing programmatic callers remain strict until an exact review is supplied. */
+export function extractOrderSnapshot(document, url, options = {}) {
+  const plan = reviewOrderSnapshot(document, url, options)
+  if (plan.status === 'review-required')
+    throw discountReviewRequired(plan.review)
+  return plan.snapshot
 }

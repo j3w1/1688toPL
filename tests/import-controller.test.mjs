@@ -2,6 +2,10 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createImportController } from '../src/import-controller.js'
 import { createImportReport } from '../src/import-report.js'
+import {
+  planOrderReconciliation,
+  confirmOrderReconciliation,
+} from '../src/order-reconciliation.js'
 
 const url = (id) =>
   `https://air.1688.com/app/ctf-page/trade-order-detail/index.html?orderId=${id}`
@@ -33,6 +37,10 @@ function setup(pages = [[row('10001'), row('10002')]], pageSize = 2) {
     },
     async listOrders() {
       return [...saved.values()].map((snapshot) => ({ snapshot }))
+    },
+    async getOrder(id) {
+      const snapshot = saved.get(id)
+      return snapshot ? { snapshot } : undefined
     },
     async saveSnapshot(value) {
       saved.set(value.orderId, value)
@@ -118,6 +126,88 @@ function setup(pages = [[row('10001'), row('10002')]], pageSize = 2) {
 }
 const source = { tabId: 5, frameId: 2 }
 
+test('an already complete reader is inspected immediately after adoption without another browser event', async () => {
+  const s = setup([[row('10001')]])
+  const job = await s.controller.start({
+    scope: 'selected',
+    source,
+    orderIds: ['10001'],
+  })
+  assert.equal(await s.controller.tick(), 'continue')
+  assert.equal(s.jobs.get(job.id).completed, 0)
+  assert.equal(await s.controller.tick(), 'continue')
+  assert.equal(s.jobs.get(job.id).completed, 1)
+  assert.equal(await s.controller.tick(), 'finished')
+  assert.equal(s.jobs.get(job.id).state, 'completed')
+})
+
+test('a completed recovered navigation advances without waiting for a new update event', async () => {
+  const s = setup()
+  const job = await s.controller.start({
+    scope: 'selected',
+    source,
+    orderIds: ['10001', '10002'],
+  })
+  await s.controller.tick()
+  await s.controller.tick()
+  assert.equal(await s.controller.tick(), 'continue')
+  const recovered = createImportController({
+    repository: s.repository,
+    browser: s.browser,
+  })
+  assert.equal(await recovered.tick(), 'continue')
+  assert.equal(s.saved.size, 2)
+  assert.equal(await recovered.tick(), 'finished')
+})
+
+test('reader registration checkpoints survive controller recreation without saving provisional data', async () => {
+  const s = setup()
+  const job = await s.controller.start({
+    scope: 'selected',
+    source,
+    orderIds: ['10001'],
+  })
+  const attempt = {
+    method: 'background',
+    stage: 'registering',
+    tabId: 8001,
+    check: 1,
+    startedAt: '2026-10-26T00:00:00.000Z',
+  }
+  s.browser.openDetailTab = async (url, id, options) => {
+    await options.checkpoint(attempt, {
+      method: 'background',
+      check: 1,
+      outcome: 'missing',
+      elapsedMs: 100,
+      privateField: 'must not persist',
+    })
+    throw new Error('Synthetic interrupted worker')
+  }
+  await s.controller.tick()
+  assert.deepEqual(s.jobs.get(job.id).readerAttempt, attempt)
+  assert.equal(s.saved.size, 0)
+  assert.doesNotMatch(
+    JSON.stringify(s.jobs.get(job.id).readerDiagnostics),
+    /privateField|must not persist/
+  )
+  // A worker termination retains the running checkpoint, unlike an ordinary pause.
+  s.jobs.get(job.id).state = 'running'
+  s.browser.openDetailTab = async (url, id, options) => {
+    assert.deepEqual(options.attempt, attempt)
+    return 8001
+  }
+  const recovered = createImportController({
+    repository: s.repository,
+    browser: s.browser,
+  })
+  await recovered.tick()
+  assert.equal(s.jobs.get(job.id).workerTabId, 8001)
+  assert.equal(s.jobs.get(job.id).readerAttempt, undefined)
+  assert.equal(s.jobs.get(job.id).orders[0].state, 'pending')
+  assert.equal(s.saved.size, 0)
+})
+
 function deferred() {
   let resolve
   const promise = new Promise((complete) => {
@@ -125,6 +215,264 @@ function deferred() {
   })
   return { promise, resolve }
 }
+
+const reviewError = () =>
+  Object.assign(
+    new Error(
+      'The order total balances, but the discount allocation needs your review.'
+    ),
+    {
+      code: 'ORDER_DISCOUNT_REVIEW_REQUIRED',
+      reviewRequired: true,
+      retryable: true,
+    }
+  )
+function reviewedSnapshot(id = '10001') {
+  const plan = planOrderReconciliation(
+    {
+      accountId: 'local',
+      orderId: id,
+      sourceUrl: url(id),
+      items: [1, 2].map((entry) => ({
+        entryId: `${id}${entry}`,
+        price: '50.00',
+        quantity: '1',
+        sourceDiscount: '12.50',
+      })),
+    },
+    {
+      fields: [
+        { label: '原价总计', amount: '100.00' },
+        { label: '运费', amount: '0.00' },
+        { label: '商品优惠', amount: '20.00' },
+        { label: '店铺优惠', amount: '5.00' },
+        { label: '商品改价', amount: '4.50' },
+      ],
+      payable: '70.50',
+      discountSummary: '25.00',
+    }
+  )
+  return confirmOrderReconciliation(plan.review, {
+    choice: plan.review.suggestedChoice,
+    evidenceKey: plan.review.evidenceKey,
+    reviewedAt: '2026-10-26T05:00:00.000Z',
+  })
+}
+async function failedReview(s, ids = ['10001']) {
+  s.browser.readDetail = async (tabId, orderId) => {
+    if (orderId === '10001') throw reviewError()
+    return snapshot(orderId)
+  }
+  const job = await s.controller.start({
+    scope: 'selected',
+    source,
+    orderIds: ids,
+  })
+  for (
+    let index = 0;
+    index < 10 && s.jobs.get(job.id).state === 'running';
+    index++
+  )
+    await s.controller.tick()
+  return job.id
+}
+
+test('ambiguous discounts are terminal for that read, retain a review flag and continue other orders', async () => {
+  const s = setup()
+  const jobId = await failedReview(s, ['10001', '10002'])
+  const job = s.jobs.get(jobId)
+  assert.equal(job.state, 'completed-with-errors')
+  assert.equal(job.completed, 1)
+  assert.equal(job.failed, 1)
+  assert.equal(job.orders[0].reviewRequired, true)
+  assert.equal(job.orders[1].reviewRequired, undefined)
+  assert.equal(job.orders[0].lastFailure.message, reviewError().message)
+  assert.equal(s.saved.has('10001'), false)
+  assert.equal(s.saved.has('10002'), true)
+  assert.equal(s.calls.filter(([type]) => type === 'navigate').length, 1)
+  assert.equal(
+    s.calls.some(([type]) => type === 'changed'),
+    true
+  )
+})
+
+test('a reviewed queued order uses completeness checks and counts one successful confirmation only once', async () => {
+  const s = setup()
+  const jobId = await failedReview(s, ['10001', '10002'])
+  let saves = 0
+  const save = s.repository.saveSnapshot
+  s.repository.saveSnapshot = async (value) => {
+    saves++
+    return save(value)
+  }
+  const reviewed = reviewedSnapshot()
+  assert.equal(
+    (await s.controller.confirmReviewedOrder(jobId, reviewed)).saved,
+    true
+  )
+  const completed = s.jobs.get(jobId)
+  assert.equal(completed.state, 'completed')
+  assert.equal(completed.completed, 2)
+  assert.equal(completed.failed, 0)
+  assert.equal(completed.orders[0].reviewRequired, undefined)
+  assert.equal(completed.orders[0].savedRows, 2)
+  assert.equal(completed.orders[0].lastFailure.message, reviewError().message)
+  assert.deepEqual(
+    s.saved.get('10001').reconciliationReview,
+    reviewed.reconciliationReview
+  )
+  assert.equal(
+    (
+      await s.controller.confirmReviewedOrder(jobId, {
+        ...reviewed,
+        observedAt: '2026-10-26T05:01:00.000Z',
+        reconciliationReview: {
+          ...reviewed.reconciliationReview,
+          reviewedAt: '2026-10-26T05:01:00.000Z',
+        },
+      })
+    ).alreadySaved,
+    true
+  )
+  assert.equal(saves, 1)
+  assert.equal(s.jobs.get(jobId).completed, 2)
+  assert.equal(
+    s.saved.get('10001').reconciliationReview.reviewedAt,
+    reviewed.reconciliationReview.reviewedAt
+  )
+  await assert.rejects(
+    s.controller.confirmReviewedOrder(jobId, {
+      ...reviewed,
+      reconciliationReview: {
+        ...reviewed.reconciliationReview,
+        evidenceKey: 'changed',
+      },
+    }),
+    /saved discount review|no longer needs/
+  )
+  const forged = structuredClone(reviewed)
+  forged.items[0].allocatedDiscount = '0.00'
+  forged.items[0].discount = forged.items[0].sourceDiscount
+  await assert.rejects(
+    s.controller.confirmReviewedOrder(jobId, forged),
+    /saved discount review/
+  )
+  assert.equal(saves, 1)
+})
+
+test('queued review rejects wrong scope, missing confirmation and incomplete rows without writing', async () => {
+  const s = setup([[row('10001')]])
+  const jobId = await failedReview(s)
+  const before = structuredClone(s.jobs.get(jobId))
+  for (const [input, error] of [
+    [
+      { ...reviewedSnapshot(), accountId: 'different-account' },
+      /confirmed discount review/,
+    ],
+    [
+      { ...reviewedSnapshot(), reconciliationReview: undefined },
+      /confirmed discount review/,
+    ],
+    [reviewedSnapshot('10002'), /does not belong/],
+    [{ ...reviewedSnapshot(), sourceUrl: url('10002') }, /different order/],
+    [{ ...reviewedSnapshot(), items: [{}] }, /Expected 2 product rows/],
+  ])
+    await assert.rejects(s.controller.confirmReviewedOrder(jobId, input), error)
+  assert.equal(s.saved.size, 0)
+  assert.deepEqual(s.jobs.get(jobId), before)
+  await assert.rejects(
+    s.controller.confirmReviewedOrder('missing', reviewedSnapshot()),
+    /no longer exists/
+  )
+})
+
+test('review saving failure retains the failed checkpoint and a later checkpoint retry reuses its committed receipt', async () => {
+  const s = setup([[row('10001')]])
+  const jobId = await failedReview(s)
+  const before = structuredClone(s.jobs.get(jobId))
+  const save = s.repository.saveSnapshot
+  s.repository.saveSnapshot = async () => {
+    throw new Error('Synthetic save failure')
+  }
+  await assert.rejects(
+    s.controller.confirmReviewedOrder(jobId, reviewedSnapshot()),
+    /Synthetic save failure/
+  )
+  assert.equal(s.saved.size, 0)
+  assert.deepEqual(s.jobs.get(jobId), before)
+  let saves = 0
+  s.repository.saveSnapshot = async (value) => {
+    saves++
+    return save(value)
+  }
+  const put = s.repository.putJob
+  s.repository.putJob = async () => {
+    throw new Error('Synthetic checkpoint failure')
+  }
+  await assert.rejects(
+    s.controller.confirmReviewedOrder(jobId, reviewedSnapshot()),
+    /Synthetic checkpoint failure/
+  )
+  assert.equal(s.saved.size, 1)
+  assert.equal(s.jobs.get(jobId).orders[0].reviewRequired, true)
+  s.repository.putJob = put
+  const retry = reviewedSnapshot()
+  retry.observedAt = '2026-10-26T05:02:00.000Z'
+  retry.reconciliationReview.reviewedAt = '2026-10-26T05:02:00.000Z'
+  assert.equal(
+    (await s.controller.confirmReviewedOrder(jobId, retry)).saved,
+    true
+  )
+  assert.equal(saves, 1)
+  assert.equal(s.jobs.get(jobId).state, 'completed')
+  assert.equal(s.jobs.get(jobId).completed, 1)
+  assert.equal(
+    s.saved.get('10001').reconciliationReview.reviewedAt,
+    '2026-10-26T05:00:00.000Z'
+  )
+})
+
+test('confirming a failed order preserves another pending reader and resume removes stale review flags', async () => {
+  const s = setup()
+  s.browser.readDetail = async (tabId, orderId) => {
+    if (orderId === '10001') throw reviewError()
+    return snapshot(orderId)
+  }
+  const job = await s.controller.start({
+    scope: 'selected',
+    source,
+    orderIds: ['10001', '10002'],
+  })
+  await s.controller.tick()
+  await s.controller.tick()
+  await s.controller.tick()
+  const before = structuredClone(s.jobs.get(job.id))
+  await s.controller.confirmReviewedOrder(job.id, reviewedSnapshot())
+  const after = s.jobs.get(job.id)
+  assert.equal(after.state, 'running')
+  for (const field of [
+    'workerTabId',
+    'currentOrderId',
+    'detailStage',
+    'detailStartedAt',
+    'detailAttempts',
+  ])
+    assert.equal(after[field], before[field], field)
+  assert.equal(after.orders[0].state, 'done')
+  assert.equal(after.orders[1].state, 'pending')
+  await s.controller.tick()
+  await s.controller.tick()
+  assert.equal(s.jobs.get(job.id).state, 'completed')
+
+  const retry = setup([[row('10001')]])
+  const retryId = await failedReview(retry)
+  await retry.controller.resume(retryId)
+  assert.equal(retry.jobs.get(retryId).orders[0].reviewRequired, undefined)
+  retry.browser.readDetail = async (tabId, orderId) => snapshot(orderId)
+  for (let index = 0; index < 4; index++) await retry.controller.tick()
+  assert.equal(retry.jobs.get(retryId).orders[0].reviewRequired, undefined)
+  assert.equal(retry.jobs.get(retryId).state, 'completed')
+})
 
 test('detail progress checkpoints distinguish blocked reads and saves from completed work', async () => {
   const s = setup()
@@ -398,7 +746,7 @@ test('all matching scans every page before reading complete sequential details',
   assert.equal(s.jobs.get(job.id).phase, 'details')
   assert.equal(s.saved.size, 0)
   for (let i = 0; i < 3; i++) {
-    assert.equal(await s.controller.tick(), 'wait')
+    assert.equal(await s.controller.tick(), 'continue')
     assert.equal(await s.controller.tick(), 'continue')
   }
   assert.equal(await s.controller.tick(), 'finished')
@@ -637,6 +985,39 @@ test('an ordinary pause or failure sets no sign-in notice', async () => {
   await s.controller.tick()
   await s.controller.pause(job.id)
   assert.equal(s.jobs.get(job.id).attention, null)
+})
+
+test('repeated reader loss during expired detail reads remains bounded across controller recreation', async () => {
+  const s = setup([[row('10001')]])
+  s.saved.set('10001', snapshot('10001'))
+  const before = structuredClone(s.saved.get('10001')),
+    job = await s.controller.refresh(['10001'])
+  s.browser.readDetail = async () => {
+    s.setTab(null)
+    throw Object.assign(new Error('The reader disappeared.'), {
+      readerMissing: true,
+    })
+  }
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let clock = attempt * 100000
+    const controller = createImportController({
+      repository: s.repository,
+      browser: s.browser,
+      now: () => clock,
+    })
+    await controller.tick()
+    clock += 91000
+    await controller.tick()
+  }
+  const stopped = s.jobs.get(job.id)
+  assert.equal(stopped.state, 'paused')
+  assert.equal(stopped.readerReopens, 2)
+  assert.equal(stopped.orders[0].state, 'pending')
+  assert.equal(stopped.completed, 0)
+  assert.equal(stopped.failed, 0)
+  assert.match(stopped.error, /repeatedly closed/)
+  assert.equal(s.calls.filter(([type]) => type === 'open').length, 3)
+  assert.deepEqual(s.saved.get('10001'), before)
 })
 
 test('a reader that the browser only allows visible is recorded for the workspace', async () => {

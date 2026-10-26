@@ -30,9 +30,11 @@ import { ORGANIZE_MESSAGES } from './ui-messages-organize.js'
 import { OTHER_ORDER_MESSAGES } from './ui-messages-other-orders.js'
 import { ORDER_REMOVAL_MESSAGES } from './ui-messages-order-removal.js'
 import { PRODUCT_DETAIL_MESSAGES } from './ui-messages-product-details.js'
+import { ORDER_DISCOUNT_REVIEW_MESSAGES } from './ui-messages-order-discount-review.js'
 
 // Explicit interface messages only; original seller, product and label values are never translated.
 export const UI_MESSAGES = {
+  ...ORDER_DISCOUNT_REVIEW_MESSAGES,
   ...PRODUCT_DETAIL_MESSAGES,
   ...ORDER_REMOVAL_MESSAGES,
   ...SMART_CARTON_MESSAGES,

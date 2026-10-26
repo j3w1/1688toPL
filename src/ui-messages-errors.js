@@ -1,4 +1,14 @@
 export const ERROR_MESSAGES = {
+  'The browser could not keep an import tab open. Pending orders are preserved. Open a regular browser window, then resume.':
+    {
+      zh: '浏览器无法保留导入标签页。待处理订单已保留。请打开普通浏览器窗口，然后继续。',
+      es: 'El navegador no pudo mantener abierta una pestaña de importación. Se conservan los pedidos pendientes. Abre una ventana normal del navegador y reanuda.',
+    },
+  'Review this product group before assigning more source products. Existing authored groups or variants do not identify one unambiguous destination.':
+    {
+      zh: '请先核对商品分组，再为更多来源商品分配编码。现有自定义商品组或规格无法确定唯一的归属。',
+      es: 'Revisa este grupo antes de asignar códigos a más productos de origen. Los grupos o variantes existentes no permiten determinar un destino único.',
+    },
   'Choose at least one Excel image column.': {
     zh: '请至少选择一列进行复制。',
     es: 'Selecciona al menos una columna para copiar.',
