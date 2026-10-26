@@ -12,7 +12,7 @@ const ids = (value, label) =>
   getItemColorHints(item(value, label)).map((hint) => hint.id)
 
 test('color vocabulary provides unique local rules with all three languages', () => {
-  assert.equal(COLOR_VOCABULARY_VERSION, 1)
+  assert.equal(COLOR_VOCABULARY_VERSION, 2)
   assert.ok(COLOR_VOCABULARY.length >= 100)
   assert.equal(
     new Set(COLOR_VOCABULARY.map((entry) => entry.id)).size,

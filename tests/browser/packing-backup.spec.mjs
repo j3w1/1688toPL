@@ -15,6 +15,7 @@ function snapshot() {
     items: ['Red cup', 'Blue cup', 'Bowl'].map((description, index) => ({
       entryId: String(index + 1),
       title: index < 2 ? 'Cup' : 'Bowl',
+      productNumber: index < 2 ? 'SYNTHETIC-CUP' : 'SYNTHETIC-BOWL',
       description,
       thumbnail: `https://cbu01.alicdn.com/synthetic-${index}.png`,
       skuProperties: [{ label: '颜色', value: index === 0 ? 'red' : 'blue' }],

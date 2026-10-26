@@ -26,6 +26,8 @@ All helpers run locally; there is no remote translation or AI service. They pres
 
 Rule tables search and scroll continuously. Draft values survive scrolling/search and Tab reaches offscreen rules; Save opens and focuses the rule needing correction. Naming-rule edits explicitly refresh automatic names; unrelated settings do not replace saved names. Manual values and intentional clears remain authored. Source color/size helpers never reinterpret model or article IDs as measurements.
 
+Bundled recognition updates include specific decoration/accessory names, finish helpers, stated PC composition and contextual short/long size aliases. Untouched bundled rules receive versioned updates in existing libraries; custom rules, removed older defaults and intentionally empty dictionaries survive. Custom aliases take precedence when a new bundled alias conflicts. Loading an update does not recode products or replace authored names/materials. Woodgrain, glitter, sequins and flocking describe appearance, not an inferred material.
+
 Colors recognize configured trailing characters in Color fields, such as `安可拉红-35L（带盖有轮）`, and complete English names such as `Red-35L`. Specific shades take priority; `红酒杯` and `Redwine` do not become color matches. [Packing size review](packing.md#edit-and-review) describes measured sizes and No size difference.
 
 ## Appearance and tags

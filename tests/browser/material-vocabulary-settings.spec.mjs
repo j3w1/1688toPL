@@ -1,5 +1,6 @@
 import { test, expect } from './extension-fixture.mjs'
 import { createDemoRecords } from '../../preview/library-fixture.js'
+import { MATERIAL_VOCABULARY } from '../../src/material-vocabulary.js'
 import {
   assignSelectedPurchaseCodes,
   editOrderProduct,
@@ -16,6 +17,7 @@ test('material Settings rules survive reload and backup, update recognition, and
   record.snapshot.sellerMemberLogin = 'synthetic-material-rules'
   for (const [index, item] of record.snapshot.items.entries()) {
     item.title = '合成杯具'
+    item.productNumber = 'SYNTHETIC-MATERIAL-CUP'
     item.skuProperties = [
       { label: '颜色', value: ['白色', '灰色', '黑色'][index] },
       { label: '材质', value: index < 2 ? '玻璃' : '晶透新材质' },
@@ -72,7 +74,9 @@ test('material Settings rules survive reload and backup, update recognition, and
     tab = dialog.getByRole('tab', { name: 'Materials', exact: true }),
     panel = dialog.getByRole('tabpanel', { name: 'Materials', exact: true })
   await tab.click()
-  await expect(panel.locator('tbody tr[data-virtual-key]')).toHaveCount(84)
+  await expect(panel.locator('tbody tr[data-virtual-key]')).toHaveCount(
+    MATERIAL_VOCABULARY.length
+  )
   const search = panel.getByRole('combobox', { name: 'Search material rules' })
   await search.fill('Glass')
   const glass = panel.locator('[data-material-rule=glass]'),

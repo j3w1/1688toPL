@@ -1532,6 +1532,10 @@ export function planPurchaseCodeReview(
             : planProductFamilies(codeSnapshot, {
                 choices: familyChoices,
                 preparation: old,
+                records,
+                preparations,
+                history: state.history,
+                sizeVocabulary: state.preferences?.sizeVocabulary,
               }),
         missingIds = new Set(missing.map((item) => item.entryId)),
         familyIssues = (familyPlan?.issues ?? []).filter((issue) =>

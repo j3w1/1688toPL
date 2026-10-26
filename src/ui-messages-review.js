@@ -1,4 +1,68 @@
 export const REVIEW_MESSAGES = {
+  'Previous product families disagree. Review the family membership and endings.':
+    {
+      zh: '以往商品分组存在冲突。请检查组内商品及后缀。',
+      es: 'Las familias anteriores no coinciden. Revisa sus productos y terminaciones.',
+    },
+  'Reviewed product family coding mode is invalid': {
+    zh: '所选商品组的编码方式无效。',
+    es: 'El modo de codificación de la familia revisada no es válido.',
+  },
+  'Reviewed product family identities are invalid': {
+    zh: '所选商品组的款式或尺码标识无效。',
+    es: 'Las identidades de variante o talla de la familia revisada no son válidas.',
+  },
+  'This product keeps its saved family. Use Edit product in Orders to review grouping or code corrections.':
+    {
+      zh: '此商品保留已保存的分组。请在订单中使用“编辑商品”检查分组或货号修正。',
+      es: 'Este producto conserva su familia guardada. Usa Editar producto en Pedidos para revisar correcciones de agrupación o códigos.',
+    },
+  'No endings': { zh: '无后缀', es: 'Sin terminaciones' },
+  Variants: { zh: '款式', es: 'Variantes' },
+  Sizes: { zh: '尺码', es: 'Tallas' },
+  'Variants and sizes': { zh: '款式和尺码', es: 'Variantes y tallas' },
+  'Coding mode': { zh: '编码方式', es: 'Modo de codificación' },
+  'Coding mode: {mode}': {
+    zh: '编码方式：{mode}',
+    es: 'Modo de codificación: {mode}',
+  },
+  'Family identifier': { zh: '商品组标识', es: 'Identificador de familia' },
+  'Style identity': { zh: '款式标识', es: 'Identidad de variante' },
+  'Not selected — context only': {
+    zh: '未选择，仅供参考',
+    es: 'Sin seleccionar; solo como referencia',
+  },
+  'Reset code suggestions': {
+    zh: '重置建议货号',
+    es: 'Restablecer códigos sugeridos',
+  },
+  'Custom code choice': { zh: '自定义货号', es: 'Código personalizado' },
+  'Select every prepared source row in this family before changing its shared code.':
+    {
+      zh: '修改共用货号前，请选择此商品组中所有已整理的原始行。',
+      es: 'Selecciona todas las filas originales preparadas de esta familia antes de cambiar su código compartido.',
+    },
+  'Select every source row sharing this barcode identity before changing its code.':
+    {
+      zh: '修改货号前，请选择共用此条码标识的所有原始行。',
+      es: 'Selecciona todas las filas originales que comparten este código antes de modificarlo.',
+    },
+  'Products in one family need the same product base code.': {
+    zh: '同一商品组必须使用相同的商品基础货号。',
+    es: 'Los productos de una familia deben usar el mismo código base.',
+  },
+  'Source rows sharing one barcode identity need the same endings.': {
+    zh: '共用一个条码标识的原始行必须使用相同后缀。',
+    es: 'Las filas que comparten un código deben tener las mismas terminaciones.',
+  },
+  'Enter a family identifier for every product.': {
+    zh: '请为每个商品填写商品组标识。',
+    es: 'Escribe un identificador de familia para cada producto.',
+  },
+  'Products in one family need the same coding mode.': {
+    zh: '同一商品组必须使用相同的编码方式。',
+    es: 'Los productos de una familia deben usar el mismo modo de codificación.',
+  },
   "Edit either product's codes. Apply saves both corrections together.": {
     zh: '可修改任一商品的货号。点击应用后将一并保存双方的修正。',
     es: 'Puedes editar los códigos de ambos productos. Aplicar guarda las dos correcciones juntas.',

@@ -3,7 +3,10 @@ import {
   assertProductPreparationSelection,
   enrichProductPreparationReview,
 } from './product-preparation-review.js'
-import { productFamilySourceKey } from './product-families.js'
+import {
+  productFamilySourceKey,
+  productFamilySourceMatches,
+} from './product-families.js'
 import { reviewStoreImportCodes } from './store-import-codes.js'
 import { planOrderRemoval } from './order-removal.js'
 import { validateReconciliationReview } from './order-reconciliation.js'
@@ -1261,10 +1264,11 @@ function validatePreparationMembership(preparation, order, history) {
     )
   if (
     preparation.productFamilies &&
-    ![order, ...history].some(
-      (record) =>
-        productFamilySourceKey(record.snapshot) ===
+    ![order, ...history].some((record) =>
+      productFamilySourceMatches(
+        record.snapshot,
         preparation.productFamilies.sourceKey
+      )
     )
   )
     throw new Error(
@@ -4144,7 +4148,17 @@ export async function openDatabase({ name = '1688-order-library' } = {}) {
       const validated = validatePackingPreferences(input)
       const value = initializeVocabulary({
         ...validated,
-        settings: { ...validated.settings, vocabularyInitialized: true },
+        settings: {
+          ...validated.settings,
+          vocabularyInitialized: true,
+          // An explicit replacement is the owner's current dictionary, not
+          // an old library waiting for bundled additions during initialization.
+          ...Object.fromEntries(
+            Object.entries(RECOGNITION_VOCABULARY_VERSIONS)
+              .filter(([field]) => Object.hasOwn(input ?? {}, field))
+              .map(([field, version]) => [`${field}Version`, version])
+          ),
+        },
       })
       return write(
         ['packingPreferences', 'orders', 'preparations'],
@@ -4287,11 +4301,14 @@ import {
 } from './packing-backup.js'
 import {
   createNameSuggester,
-  initializeVocabulary,
   orderNamingSuggestions,
   recordNamingEdits,
   refreshPreparationNames,
 } from './product-vocabulary.js'
+import {
+  initializeRecognitionVocabularies as initializeVocabulary,
+  RECOGNITION_VOCABULARY_VERSIONS,
+} from './recognition-vocabulary-updates.js'
 import {
   activePackingState,
   allocatePreparation,

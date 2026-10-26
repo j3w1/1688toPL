@@ -1,6 +1,6 @@
 // Product-type vocabulary is bundled locally. It contains generic terms only;
 // titles, seller names and imported orders never become extension assets.
-export const VOCABULARY_VERSION = 1
+export const VOCABULARY_VERSION = 2
 
 const definitions = [
   [
@@ -195,7 +195,14 @@ const definitions = [
     60,
     '擦桌布|清洁布|抹布',
   ],
-  ['curtain', '窗帘|门帘|浴帘', 'CORTINA', '窗帘', 60],
+  [
+    'curtain',
+    '窗帘|门帘|浴帘',
+    'CORTINA',
+    '窗帘',
+    60,
+    '窗帘扣|窗帘绑带|窗帘抱|窗帘扎带',
+  ],
   ['pillow', '枕头|枕芯|夹腿枕|腿枕|护颈枕|睡眠枕', 'ALMOHADA', '枕头', 70],
   ['cushion', '抱枕|靠垫|坐垫|椅垫', 'COJIN', '靠垫', 60],
   ['blanket', '毛毯|盖毯|绒毯|午睡毯', 'MANTA', '毯子', 60],
@@ -611,7 +618,7 @@ const definitions = [
     'PELUCHE',
     '毛绒玩具',
     65,
-    '地毯|地垫|拖鞋|发箍',
+    '地毯|地垫|拖鞋|发箍|帽|椅套|椅子套|凳子套|把手套|窗帘扣|束口袋',
   ],
   [
     'toy',
@@ -658,7 +665,7 @@ const definitions = [
     'ARBOL NAVIDENO',
     '圣诞树',
     40,
-    '蜡烛|圣诞袜|挂件|挂饰|耳环',
+    '蜡烛|圣诞袜|挂件|挂饰|耳环|圣诞球|精灵腿|公仔|玩偶|娃娃|蝴蝶结|铃铛',
   ],
   ['metal-wall-art', '铁皮画|铁艺壁画', 'CUADRO METALICO', '铁皮画', 85],
   ['wood-slice', '木片|木制片', 'RODAJA DE MADERA', '木片', 70],
@@ -818,6 +825,74 @@ const definitions = [
     15,
     '收纳|整理|挂钩|隔板|衣架|挂架',
   ],
+  [
+    'christmas-hat',
+    '圣诞帽|圣诞毛帽',
+    'GORRO NAVIDENO',
+    '圣诞帽',
+    110,
+    '椅套|椅子套|凳子套|窗帘扣|公仔|娃娃|玩偶',
+  ],
+  [
+    'curtain-tie',
+    '窗帘扣|窗帘绑带|窗帘抱|窗帘扎带',
+    'SUJETACORTINAS',
+    '窗帘扣',
+    110,
+  ],
+  [
+    'handle-cover',
+    '把手套|把手装饰套|门把手套|冰箱拉手套',
+    'FUNDA PARA TIRADOR',
+    '把手套',
+    110,
+  ],
+  [
+    'drawstring-gift-bag',
+    '束口袋|抽绳袋|礼品布袋|抽绳装礼品',
+    'BOLSA DE REGALO',
+    '礼品袋',
+    110,
+  ],
+  ['cloth-bag', '棉麻布袋|棉布袋|麻布袋', 'BOLSA DE TELA', '布袋', 90],
+  [
+    'decorative-doll',
+    '无脸娃娃|侏儒娃娃|姜饼人公仔|精灵娃娃|精灵公仔|挂腿精灵|公仔摆件|娃娃摆件|玩偶摆件',
+    'MUNECO DECORATIVO',
+    '公仔摆件',
+    100,
+    '窗帘扣|窗帘抱|椅子套|椅套|凳子套|把手套',
+  ],
+  [
+    'butterfly-ornament',
+    '蝴蝶挂件|蝴蝶挂饰|蝴蝶装饰',
+    'MARIPOSA DECORATIVA',
+    '蝴蝶挂件',
+    110,
+  ],
+  [
+    'decorative-bow',
+    '蝴蝶结挂饰|蝴蝶结挂件|装饰蝴蝶结',
+    'LAZO DECORATIVO',
+    '蝴蝶结',
+    110,
+  ],
+  ['christmas-ball', '圣诞球', 'BOLA NAVIDENA', '圣诞球', 110],
+  ['christmas-bell', '植绒铃铛|圣诞铃铛', 'CAMPANA NAVIDENA', '圣诞铃铛', 110],
+  [
+    'decorative-pick',
+    '精灵腿插枝|精灵腿|装饰插枝|圣诞插枝',
+    'ADORNO NAVIDENO',
+    '圣诞装饰',
+    110,
+  ],
+  [
+    'tablecloth-chair-set',
+    '桌布+|桌布＋|桌布椅套套装',
+    'JUEGO DE MANTEL Y FUNDAS',
+    '桌布椅套套装',
+    120,
+  ],
 ]
 
 export const DEFAULT_VOCABULARY = Object.freeze(
@@ -835,20 +910,65 @@ export const DEFAULT_VOCABULARY = Object.freeze(
 )
 
 const defaults = new Map(DEFAULT_VOCABULARY.map((entry) => [entry.seed, entry]))
+const versionTwoSeeds = new Set([
+  'christmas-hat',
+  'curtain-tie',
+  'handle-cover',
+  'drawstring-gift-bag',
+  'cloth-bag',
+  'decorative-doll',
+  'butterfly-ornament',
+  'decorative-bow',
+  'christmas-ball',
+  'christmas-bell',
+  'decorative-pick',
+  'tablecloth-chair-set',
+])
+// Only changed bundled fields are retained to distinguish an untouched seed
+// from an owner override. This is an upgrade delta, not another dictionary.
+const previousDefaults = new Map([
+  ['curtain', { ...defaults.get('curtain'), exclude: undefined }],
+  [
+    'plush-toy',
+    { ...defaults.get('plush-toy'), exclude: '地毯|地垫|拖鞋|发箍' },
+  ],
+  [
+    'christmas-tree',
+    {
+      ...defaults.get('christmas-tree'),
+      exclude: '蜡烛|圣诞袜|挂件|挂饰|耳环',
+    },
+  ],
+])
+const sameRule = (entry, original) =>
+  original &&
+  ['match', 'spanishName', 'category', 'exclude'].every(
+    (key) => (entry[key] ?? '') === (original[key] ?? '')
+  ) &&
+  (entry.priority ?? 0) === original.priority
 const nameFields = ['spanishName', 'category']
 const normalized = (value) =>
   value.normalize('NFKC').toLocaleLowerCase('en').trim()
 const terms = (value) => value.split('|').map(normalized).filter(Boolean)
 
-/** Seed once. Later removal of a default or an intentionally empty list persists. */
+/** Upgrade untouched seeds; removed defaults, overrides and empty lists persist. */
 export function initializeVocabulary(preferences) {
   if (preferences.settings.vocabularyVersion === VOCABULARY_VERSION)
     return preferences
-  const vocabulary = structuredClone(preferences.vocabulary)
+  const vocabulary = structuredClone(preferences.vocabulary).map((entry) =>
+    sameRule(entry, previousDefaults.get(entry.seed))
+      ? { ...defaults.get(entry.seed) }
+      : entry
+  )
   const existingSeeds = new Set(vocabulary.map((entry) => entry.seed))
-  if (!preferences.settings.vocabularyInitialized)
+  if (!preferences.settings.vocabularyInitialized || vocabulary.length)
     for (const entry of DEFAULT_VOCABULARY)
-      if (!existingSeeds.has(entry.seed)) vocabulary.push({ ...entry })
+      if (
+        !existingSeeds.has(entry.seed) &&
+        (!preferences.settings.vocabularyInitialized ||
+          versionTwoSeeds.has(entry.seed))
+      )
+        vocabulary.push({ ...entry })
   return {
     ...preferences,
     settings: {
@@ -863,14 +983,12 @@ export function initializeVocabulary(preferences) {
 /** An edited seeded rule becomes a user override, including its exclusions. */
 export function vocabularyEntryMetadata(entry) {
   const original = defaults.get(entry.seed)
-  if (
-    original &&
-    ['match', 'spanishName', 'category', 'exclude'].every(
-      (key) => (entry[key] ?? '') === (original[key] ?? '')
-    ) &&
-    (entry.priority ?? 0) === original.priority
-  )
-    return { seed: original.seed, priority: original.priority }
+  const previous = previousDefaults.get(entry.seed)
+  if (sameRule(entry, original) || sameRule(entry, previous))
+    return {
+      seed: original.seed,
+      priority: entry.priority ?? original.priority,
+    }
   return {}
 }
 

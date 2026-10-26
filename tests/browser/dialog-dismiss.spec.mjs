@@ -10,7 +10,7 @@ async function openLibrary(extension, fallback = false) {
   record.snapshot.sellerMemberLogin = 'synthetic-dialog-dismiss'
   for (const [index, item] of record.snapshot.items.entries()) {
     item.title = '合成玻璃罐'
-    item.productNumber = `SYNTHETIC-${index}`
+    item.productNumber = `MODEL10${String.fromCharCode(65 + index)}-01`
     item.skuProperties = []
     item.description = item.title
   }

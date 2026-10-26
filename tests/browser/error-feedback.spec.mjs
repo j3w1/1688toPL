@@ -16,6 +16,11 @@ async function openPacking(extension, theme = 'dark') {
   for (const [index, item] of record.snapshot.items.entries()) {
     item.title = index < 2 ? '合成玻璃罐' : '合成收纳盒'
     item.productNumber = index < 2 ? 'TEST-JAR' : 'TEST-BOX'
+    item.skuProperties = [
+      { label: '颜色', value: ['透明', '琥珀色', '原色'][index] },
+      ...(index < 2 ? [{ label: '容量', value: '120ml' }] : []),
+    ]
+    item.description = `${item.title}\n${item.skuProperties.map(({ label, value }) => `${label}：${value}`).join('\n')}`
   }
   const restored = await extension.inspector.evaluate(
     (record) =>
@@ -57,6 +62,34 @@ async function preparations(extension) {
   )
   expect(backup.ok, backup.error).toBe(true)
   return backup.data.preparations
+}
+
+async function abortNextSelectedSourceRead(page) {
+  await page.evaluate(() => {
+    window.selectedSourceReadAborted = false
+    const get = IDBObjectStore.prototype.get
+    IDBObjectStore.prototype.get = function (...args) {
+      try {
+        const request = get.apply(this, args)
+        if (this.name === 'orders' && this.transaction.mode === 'readonly') {
+          IDBObjectStore.prototype.get = get
+          const transaction = this.transaction
+          request.addEventListener(
+            'success',
+            () => {
+              window.selectedSourceReadAborted = true
+              transaction.abort()
+            },
+            { once: true }
+          )
+        }
+        return request
+      } catch (error) {
+        IDBObjectStore.prototype.get = get
+        throw error
+      }
+    }
+  })
 }
 
 async function noticeContrast(notice) {
@@ -201,24 +234,33 @@ test('operation errors remain nonmodal, allocate nothing and dismiss before leav
   const { page, view } = await openPacking(extension)
   await closeOrderProduct(view)
   await page.locator('#clear-rows').click()
+  await expect(page.locator('#review-purchase-codes')).toBeDisabled()
+  await page
+    .locator('#sheet-body tr[data-selection-key]')
+    .first()
+    .getByRole('checkbox')
+    .check()
   const before = await libraryBackup(extension)
+  await abortNextSelectedSourceRead(page)
   await page.locator('#review-purchase-codes').click()
-  await expect(page.locator('.error-notice')).toContainText(
-    'Select product rows to review codes.'
-  )
+  await expect(page.locator('.error-notice')).toContainText(/abort/i)
+  expect(await page.evaluate(() => window.selectedSourceReadAborted)).toBe(true)
   await expect(page.locator('dialog[open]')).toHaveCount(0)
   await expect(page.locator('#feedback')).toBeEmpty()
   await page.keyboard.press('Escape')
   await expect(page.locator('.error-notice')).toHaveCount(0)
   await expect(page.locator('#orders-view')).toBeVisible()
+  await abortNextSelectedSourceRead(page)
   await page.locator('#review-purchase-codes').click()
-  await expect(page.locator('.error-notice')).toContainText(
-    'Select product rows to review codes.'
-  )
+  await expect(page.locator('.error-notice')).toContainText(/abort/i)
+  expect(await page.evaluate(() => window.selectedSourceReadAborted)).toBe(true)
   expect((await libraryBackup(extension)).preparations).toEqual(
     before.preparations
   )
   expect((await libraryBackup(extension)).orders).toEqual(before.orders)
+  expect((await libraryBackup(extension)).issuedCodes).toEqual(
+    before.issuedCodes
+  )
 })
 
 test('Escape dismisses an open source-copy menu before an underlying operation error without changing source data', async ({
@@ -227,10 +269,19 @@ test('Escape dismisses an open source-copy menu before an underlying operation e
   const { page, view } = await openPacking(extension)
   await closeOrderProduct(view)
   await page.locator('#clear-rows').click()
+  await expect(page.locator('#review-purchase-codes')).toBeDisabled()
+  await page
+    .locator('#sheet-body tr[data-selection-key]')
+    .first()
+    .getByRole('checkbox')
+    .check()
   const before = await libraryBackup(extension)
+  await abortNextSelectedSourceRead(page)
   await page.locator('#review-purchase-codes').click()
   const notice = page.locator('#orders-view .error-notice')
   await expect(notice).toBeVisible()
+  await expect(notice).toContainText(/abort/i)
+  expect(await page.evaluate(() => window.selectedSourceReadAborted)).toBe(true)
   await revealCopyActions(page)
   const panel = page.locator('#orders-copy-actions .copy-actions-panel')
   await expect(panel).toBeVisible()

@@ -1,9 +1,19 @@
 import { test, expect } from './extension-fixture.mjs'
 import { validatePackingPreferences } from '../../src/packing-model.js'
+import { VOCABULARY_VERSION } from '../../src/product-vocabulary.js'
+import { SIZE_VOCABULARY_VERSION } from '../../src/size-vocabulary.js'
+import { COLOR_VOCABULARY_VERSION } from '../../src/color-vocabulary.js'
+import { MATERIAL_VOCABULARY_VERSION } from '../../src/material-vocabulary.js'
 
 async function open(extension) {
   const preferences = validatePackingPreferences({
-    settings: { vocabularyInitialized: true },
+    settings: {
+      vocabularyInitialized: true,
+      vocabularyVersion: VOCABULARY_VERSION,
+      sizeVocabularyVersion: SIZE_VOCABULARY_VERSION,
+      colorVocabularyVersion: COLOR_VOCABULARY_VERSION,
+      materialVocabularyVersion: MATERIAL_VOCABULARY_VERSION,
+    },
     vocabulary: Array.from({ length: 500 }, (_, index) => ({
       match: `Seller product ${index}`,
       spanishName: `PRODUCTO ${index}`,

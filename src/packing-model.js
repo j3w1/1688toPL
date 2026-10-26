@@ -23,6 +23,7 @@ import {
   productArticleIdentity,
   productFamilyStyleProperties,
   validateProductFamilies,
+  extractFamilyProduct,
 } from './product-families.js'
 
 /** Material authoring follows source rows even when grouping is restored. */
@@ -235,7 +236,12 @@ export function createPreparation(
     attributes = (entries) =>
       entries.map((property) => [property.label.trim(), property.value.trim()]),
     extractedRows = new Map(
-      snapshot.items.map((item) => [item.entryId, sizeClassifier.extract(item)])
+      snapshot.items.map((item) => [
+        item.entryId,
+        families
+          ? extractFamilyProduct(item, sizeClassifier)
+          : sizeClassifier.extract(item),
+      ])
     ),
     articleStyles = new Set(),
     identities = new Map()
@@ -299,21 +305,55 @@ export function createPreparation(
       : extracted.variantProperties
     // Only identical complete attribute sets suggest a shared variant. No source
     // row or amount is combined; entry IDs remain individually addressable.
-    const styleAttributes = attributes(variantProperties)
+    const family = families?.families.find((family) =>
+        family.entryIds.includes(item.entryId)
+      ),
+      reviewedIdentity = family?.identities?.find(
+        (identity) => identity.entryId === item.entryId
+      ),
+      styleAttributes = attributes(variantProperties)
     const variantIdentity = declaration
       ? [['variant', declaration.variantSuffix]]
-      : [
-          ...(families &&
-          articleStyles.has(JSON.stringify([groupKey, styleAttributes]))
-            ? [['article', productArticleIdentity(item)]]
-            : []),
-          ...styleAttributes,
-        ]
-    const key = JSON.stringify([
-      groupKey,
-      variantIdentity,
-      declaration ? declaration.sizeSuffix : size,
-    ])
+      : reviewedIdentity &&
+          !reviewedIdentity.suggested &&
+          ['reviewed', 'historical', 'existing'].includes(family.provenance)
+        ? [
+            ['style', reviewedIdentity.style],
+            ...(reviewedIdentity.variantSuffix !== undefined
+              ? [['reviewed-ending', reviewedIdentity.variantSuffix]]
+              : []),
+          ]
+        : [
+            ...(families &&
+            articleStyles.has(JSON.stringify([groupKey, styleAttributes]))
+              ? [['article', productArticleIdentity(item)]]
+              : []),
+            ...styleAttributes,
+          ]
+    const effectiveSize =
+        reviewedIdentity &&
+        !reviewedIdentity.suggested &&
+        ['reviewed', 'historical', 'existing'].includes(family.provenance)
+          ? reviewedIdentity.size
+          : size,
+      sizeInfo = sizeClassifier.extract({
+        skuProperties: [{ label: '尺寸', value: effectiveSize }],
+      }).sizeInfo,
+      sizeIdentity =
+        sizeInfo.kind === 'named'
+          ? ['named', sizeInfo.suffix]
+          : sizeInfo.kind === 'measurement'
+            ? [sizeInfo.dimension, sizeInfo.axes ?? [], sizeInfo.values]
+            : effectiveSize,
+      key = JSON.stringify([
+        groupKey,
+        variantIdentity,
+        declaration
+          ? declaration.sizeSuffix
+          : families
+            ? [sizeIdentity, reviewedIdentity?.sizeSuffix ?? null]
+            : size,
+      ])
     const existing = candidates.get(key)
     if (existing) existing.entryIds.push(item.entryId)
     else {
@@ -321,7 +361,7 @@ export function createPreparation(
         id: crypto.randomUUID(),
         entryIds: [item.entryId],
         variant,
-        size,
+        size: effectiveSize,
         variantSuffix: '',
         sizeSuffix: '',
         needsSizeMapping: false,
@@ -336,6 +376,11 @@ export function createPreparation(
     const variants = [
       ...new Set(group.variants.map((variant) => variantKeys.get(variant.id))),
     ]
+    const family = families?.families.find((family) =>
+      family.entryIds.some((entryId) =>
+        group.variants.some((variant) => variant.entryIds.includes(entryId))
+      )
+    )
     const inferred = group.variants.filter(
       (variant) => !sourceEndings.has(variant.id)
     )
@@ -360,6 +405,24 @@ export function createPreparation(
       variant.needsSizeMapping = declaration
         ? false
         : sizeSuggestions.get(variant.id).needsSizeMapping
+      if (!declaration && family?.mode) {
+        if (['none', 'sizes'].includes(family.mode)) variant.variantSuffix = ''
+        if (['none', 'variants'].includes(family.mode)) {
+          variant.sizeSuffix = ''
+          variant.needsSizeMapping = false
+        }
+      }
+      if (!declaration) {
+        const reviewed = family?.identities?.find(
+          (identity) => identity.entryId === variant.entryIds[0]
+        )
+        if (reviewed?.variantSuffix !== undefined)
+          variant.variantSuffix = reviewed.variantSuffix
+        if (reviewed?.sizeSuffix !== undefined) {
+          variant.sizeSuffix = reviewed.sizeSuffix
+          variant.needsSizeMapping = false
+        }
+      }
     }
   }
   return {

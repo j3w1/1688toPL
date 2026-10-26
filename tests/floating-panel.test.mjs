@@ -78,3 +78,19 @@ test('compact importing, scanning and paused summaries translate into each works
     setLanguage('en', { persist: false })
   }
 })
+
+test('compact reviews identify discount confirmation without calling it a failed import', () => {
+  const display = compactImportProgress({
+    state: 'completed-with-errors',
+    total: 10,
+    completed: 9,
+    failed: 1,
+    reviewRequired: 1,
+  })
+  assert.equal(
+    display.text,
+    'Discount review required · 9/10 saved · 1 need discount review'
+  )
+  assert.equal(display.state, 'attention')
+  assert.doesNotMatch(display.text, /failed|need attention/)
+})

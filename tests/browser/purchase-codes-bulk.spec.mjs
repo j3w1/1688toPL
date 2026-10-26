@@ -160,6 +160,25 @@ test('selected products across orders are grouped and already assigned codes rem
   await expect(review.getByText('New assignment', { exact: true })).toHaveCount(
     1
   )
+  await review.locator('[data-action="review-product-families"]').click()
+  const families = page.locator('[data-action="product-family-review"]'),
+    savedRows = families.locator(
+      `[data-family-entry][data-order-id="${first}"]`
+    )
+  await expect(savedRows).toHaveCount(3)
+  for (const row of await savedRows.all()) {
+    await expect(
+      row.locator('[data-action="review-family-family"]')
+    ).toBeDisabled()
+    await expect(
+      row.locator('[data-action="review-family-style"]')
+    ).toBeDisabled()
+    await expect(
+      row.locator('[data-action="review-family-size"]')
+    ).toBeDisabled()
+  }
+  await expect(savedRows.first()).toContainText('Use Edit product in Orders')
+  await families.getByRole('button', { name: 'Cancel', exact: true }).click()
   await commit(review).click()
   await expect(review).toBeHidden()
   const after = await libraryBackup(extension)
@@ -512,6 +531,99 @@ async function editPreparedDetails(
   return editor
 }
 
+test('family membership and code edits remain unsaved, match complete-order identities and reset without losing details', async ({
+  extension,
+}) => {
+  await seedSmartOrder(extension, {
+    count: 3,
+    orderId: first,
+    assignCodes: false,
+  })
+  await extension.inspector.evaluate(async (orderId) => {
+    const repository = await window.testRepository,
+      record = await repository.getOrder(orderId),
+      snapshot = structuredClone(record.snapshot)
+    const articles = ['HAT01401', 'HAT01403', 'HAT01402'],
+      values = ['红色（短）', '红色（长）', '粉色（短）']
+    for (const [index, item] of snapshot.items.entries()) {
+      item.title = 'Synthetic festive hat family'
+      item.description = `${item.title}\n颜色：${values[index]}`
+      item.productNumber = articles[index]
+      item.skuProperties = [{ label: '颜色', value: values[index] }]
+    }
+    snapshot.observedAt = '2026-10-26T13:00:00.000Z'
+    await repository.saveSnapshot(snapshot)
+  }, first)
+  const page = await openSmartLibrary(extension)
+  await page.locator('#select-rows').click()
+  const before = await libraryBackup(extension),
+    review = await openSelection(page)
+  await expect(review.locator('.purchase-code')).toHaveText([
+    'CE26090101AS',
+    'CE26090101AL',
+    'CE26090101BS',
+  ])
+  await expect(review).toContainText('Coding mode: Variants and sizes')
+  await review.locator('[data-action="review-product-families"]').click()
+  const family = page.locator('[data-action="product-family-review"]'),
+    source = family.locator('[data-family-entry]')
+  await expect(source).toHaveCount(3)
+  await source.nth(2).locator('[data-action="review-family-family"]').fill('G2')
+  await source
+    .nth(2)
+    .locator('[data-action="review-family-mode"]')
+    .selectOption('none')
+  await family.locator('[data-action="apply-family-choices"]').click()
+  await expect(family).toBeHidden()
+  await expect(commit(review)).toBeEnabled()
+  await expect(review.locator('[data-product-family]')).toHaveCount(2)
+  await expect(review.locator('.purchase-code')).toHaveText([
+    'CE26090101S',
+    'CE26090101L',
+    'CE26090102',
+  ])
+  await editPreparedDetails(review, page, {
+    spanishName: 'NOMBRE CONFIRMADO',
+    material: 'Metal',
+  })
+  const base = review.locator('[data-review-code="baseCode"]').first()
+  await base.fill('CE')
+  await expect(base).not.toHaveAttribute('aria-invalid', 'true')
+  await expect(commit(review)).toBeDisabled()
+  await base.fill('CE26090109')
+  await base.blur()
+  await expect(commit(review)).toBeEnabled()
+  await expect(review.locator('.purchase-code')).toHaveText([
+    'CE26090109S',
+    'CE26090109L',
+    'CE26090102',
+  ])
+  await review
+    .locator('[data-action="reset-preparation-code-suggestions"]')
+    .click()
+  await expect(commit(review)).toBeEnabled()
+  await expect(review.locator('.purchase-code')).toHaveText([
+    'CE26090101S',
+    'CE26090101L',
+    'CE26090102',
+  ])
+  await expect(
+    review.locator('[data-detail-comparison="spanishName"] strong')
+  ).toHaveText(['NOMBRE CONFIRMADO', 'NOMBRE CONFIRMADO', 'NOMBRE CONFIRMADO'])
+  unchanged(await libraryBackup(extension), before)
+  await commit(review).click()
+  await expect(review).toBeHidden()
+  const after = await libraryBackup(extension)
+  expect(after.preparations[0].groups).toHaveLength(2)
+  expect(after.preparations[0].productFamilies.version).toBe(2)
+  expect(after.orders).toEqual(before.orders)
+  expect(after.cartonBatches).toEqual(before.cartonBatches)
+  await page.reload()
+  expect((await libraryBackup(extension)).preparations).toEqual(
+    after.preparations
+  )
+})
+
 test('Prepare products resolves title-only families without saving and commits selected details with its codes', async ({
   extension,
 }) => {
@@ -860,6 +972,28 @@ for (const [language, labels] of [
       review = await openSelection(page)
     await expect(review.getByRole('checkbox')).toHaveCount(0)
     await expect(commit(review)).toBeDisabled()
+    await review.locator('[data-action="review-product-families"]').click()
+    const families = page.locator('[data-action="product-family-review"]')
+    await expect(families.locator('[data-family-entry]')).toHaveCount(3)
+    const familyInput = families
+      .locator('[data-action="review-family-family"]')
+      .first()
+    await familyInput.focus()
+    await expect(familyInput).toBeFocused()
+    const familyBounds = await familyInput.boundingBox()
+    expect(familyBounds.x).toBeGreaterThanOrEqual(0)
+    expect(familyBounds.x + familyBounds.width).toBeLessThanOrEqual(390)
+    await expect(families).toContainText(
+      language === 'zh'
+        ? '商品组标识'
+        : language === 'es'
+          ? 'Identificador de familia'
+          : 'Family identifier'
+    )
+    await families
+      .getByRole('button', { name: labels.cancel, exact: true })
+      .click()
+    await expect(families).toBeHidden()
     await review
       .getByRole('button', { name: labels.sizes, exact: true })
       .click()

@@ -1,5 +1,24 @@
 export const ORDER_DISCOUNT_REVIEW_MESSAGES = {
   'Review discounts': { zh: '核对优惠', es: 'Revisar descuentos' },
+  'Review discounts for order {order}': {
+    zh: '核对订单 {order} 的优惠',
+    es: 'Revisar descuentos del pedido {order}',
+  },
+  'Finished · discount review required': {
+    zh: '已完成 · 需核对优惠',
+    es: 'Finalizado · requiere revisar descuentos',
+  },
+  'Discount review required': {
+    zh: '需核对优惠',
+    es: 'Requiere revisar descuentos',
+  },
+  '{count} need discount review': {
+    zh: '{count} 个需核对优惠',
+    es: '{count} requieren revisar descuentos',
+  },
+  '{count} saved': { zh: '已保存 {count}', es: '{count} guardados' },
+  '{count} failed': { zh: '{count} 个失败', es: '{count} fallidos' },
+  '{count} pending': { zh: '{count} 个等待中', es: '{count} pendientes' },
   'The order total balances, but the discount allocation needs your review.': {
     zh: '订单总额一致，但优惠的分配方式需要您核对。',
     es: 'El total del pedido cuadra, pero debes revisar cómo se asignan los descuentos.',

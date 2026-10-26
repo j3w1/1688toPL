@@ -58,7 +58,8 @@ test('arbitrary numeric IDs and unproven suffix stripping do not establish famil
       plan.families.map((family) => family.entryIds),
       [['1'], ['2']]
     )
-    assert.deepEqual(plan.issues, [])
+    if (articles[0] === '7128F-02') assert.deepEqual(plan.issues, [])
+    else assert.equal(plan.issues[0].code, 'PRODUCT_FAMILY_REVIEW_REQUIRED')
   }
 })
 
@@ -169,7 +170,7 @@ test('review choices are account/order scoped and reject unknown or overlapping 
 test('portable reviewed evidence rejects malformed versions, kinds and source identities', () => {
   const sourceKey = productFamilySourceKey(snapshot())
   for (const input of [
-    { version: 2, sourceKey, families: [choice(['1', '2'])] },
+    { version: 3, sourceKey, families: [choice(['1', '2'])] },
     { version: 1, sourceKey: '', families: [choice(['1', '2'])] },
     { version: 1, sourceKey, families: [{ entryIds: ['1'], kind: 'family' }] },
     {

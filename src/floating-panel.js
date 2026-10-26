@@ -30,16 +30,28 @@ export function compactImportProgress(input) {
               : job.state === 'completed'
                 ? 'Completed'
                 : job.state === 'completed-with-errors'
-                  ? 'Needs attention'
+                  ? job.reviewRequired && !job.failures
+                    ? 'Discount review required'
+                    : 'Needs attention'
                   : 'Paused'
           ),
           saved: number(job.completed),
           total: number(job.total),
         })
   return {
-    text: job.failed
-      ? `${text} · ${t('{count} need attention', { count: number(job.failed) })}`
-      : text,
+    text: [
+      text,
+      ...(job.reviewRequired
+        ? [
+            t('{count} need discount review', {
+              count: number(job.reviewRequired),
+            }),
+          ]
+        : []),
+      ...(job.failures
+        ? [t('{count} need attention', { count: number(job.failures) })]
+        : []),
+    ].join(' · '),
     state:
       job.state === 'running'
         ? 'running'

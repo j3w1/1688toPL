@@ -503,12 +503,18 @@ function sameSource(job, sender) {
   )
 }
 function jobStatus(job) {
+  const reviewOrder = job.orders.find(
+    (order) => order.state === 'failed' && order.reviewRequired === true
+  )
   return {
     ...importProgress(job),
+    ...(reviewOrder ? { reviewOrderId: reviewOrder.orderId } : {}),
     error:
       job.error ||
       (job.state !== 'running' &&
-        job.orders.find((order) => order.state === 'failed')?.error) ||
+        job.orders.find(
+          (order) => order.state === 'failed' && order.reviewRequired !== true
+        )?.error) ||
       '',
   }
 }
@@ -648,6 +654,28 @@ async function dispatch(message, sender, repository, controller) {
         throw new Error('This import belongs to another order-list tab.')
       return createImportReport(job, chrome.runtime.getManifest().version)
     }
+    case 'IMPORT_REVIEW_OPEN': {
+      const job = await repository.getJob(message.jobId)
+      if (!isExtensionPage(sender)) {
+        requireContent(sender, 'list')
+        if (!job || !sameSource(job, sender))
+          throw new Error('This import belongs to another order-list tab.')
+      }
+      const order = job?.orders.find((item) => item.orderId === message.orderId)
+      const sourceUrl = detailUrl(order?.sourceUrl, message.orderId)
+      if (
+        job?.accountId !== 'local' ||
+        order?.state !== 'failed' ||
+        order.reviewRequired !== true ||
+        !sourceUrl
+      )
+        throw new Error('This order no longer needs a discount review.')
+      const tab = await chrome.tabs.create({
+        url: `${sourceUrl}#1688topl-review=${encodeURIComponent(job.id)}`,
+        active: true,
+      })
+      return { tabId: tab.id }
+    }
     case 'IMPORT_PAUSE':
     case 'IMPORT_RESUME': {
       if (!isExtensionPage(sender)) {
@@ -699,23 +727,6 @@ async function dispatch(message, sender, repository, controller) {
       }
     case 'IMPORT_ATTENTION_OPEN':
       return openAttentionTab(await repository.getJob(message.jobId))
-    case 'IMPORT_REVIEW_OPEN': {
-      const job = await repository.getJob(message.jobId)
-      const order = job?.orders.find((item) => item.orderId === message.orderId)
-      const sourceUrl = detailUrl(order?.sourceUrl, message.orderId)
-      if (
-        job?.accountId !== 'local' ||
-        order?.state !== 'failed' ||
-        order.reviewRequired !== true ||
-        !sourceUrl
-      )
-        throw new Error('This order no longer needs a discount review.')
-      const tab = await chrome.tabs.create({
-        url: `${sourceUrl}#1688topl-review=${encodeURIComponent(job.id)}`,
-        active: true,
-      })
-      return { tabId: tab.id }
-    }
     case 'JOBS_QUERY':
       return { jobs: (await repository.listJobs()).map(importJobView) }
     case 'LIBRARY_HISTORY':

@@ -405,6 +405,8 @@ test('Activity exports every bulk-import failure without resuming work or changi
     discovered: 667,
     saved: 663,
     failed: 4,
+    reviewRequired: 0,
+    failures: 4,
     pending: 0,
     undiscovered: 0,
     remaining: 4,

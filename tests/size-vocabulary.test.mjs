@@ -231,7 +231,8 @@ test('model numbers, counts and unrelated words do not manufacture sizes', () =>
     skuProperties: [property('尺寸', 'short')],
   })
   assert.equal(unknown.size, 'short')
-  assert.equal(unknown.variant, '尺寸: short')
+  assert.equal(unknown.variant, '')
+  assert.equal(unknown.sizeInfo.suffix, 'S')
 })
 
 test('editable measurement aliases can resolve a deliberately custom assortment', () => {

@@ -116,6 +116,82 @@ test('minimized list import panel retains live progress and restores without cha
   expect(await mutations(page)).toEqual([])
 })
 
+test('discount review is a translated direct list action at narrow widths and reports actual failures separately', async ({
+  extension,
+}) => {
+  const page = await setup(extension, [
+    {
+      id: 'synthetic-discount-review',
+      state: 'completed-with-errors',
+      phase: 'details',
+      total: 10,
+      discovered: 10,
+      completed: 9,
+      failed: 1,
+      reviewRequired: 1,
+      reviewOrderId: '10001',
+    },
+  ])
+  await page.setViewportSize({ width: 320, height: 700 })
+  const panel = page.getByRole('complementary', { name: '1688 order library' })
+  for (const [language, label, counts] of [
+    ['en', 'Review discounts', '9 saved · 1 need discount review'],
+    [
+      'es',
+      'Revisar descuentos',
+      '9 guardados · 1 requieren revisar descuentos',
+    ],
+    ['zh', '核对优惠', '已保存 9 · 1 个需核对优惠'],
+  ]) {
+    await page.evaluate(async (language) => {
+      const { setLanguage } = await import('/src/i18n.js')
+      setLanguage(language, { persist: false })
+      await toolbar.refresh()
+    }, language)
+    await expect(panel.locator('.progress > p')).toContainText(counts)
+    await expect(panel.locator('.progress > p')).not.toHaveClass('error')
+    const button = panel.getByRole('button', { name: label, exact: true })
+    await expect(button).toHaveAttribute('data-order-id', '10001')
+    await button.click()
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth
+      )
+    ).toBe(true)
+  }
+  expect(await mutations(page)).toEqual(
+    Array.from({ length: 3 }, () => ({
+      type: 'IMPORT_REVIEW_OPEN',
+      data: { jobId: 'synthetic-discount-review', orderId: '10001' },
+    }))
+  )
+  await page.evaluate(async () => {
+    const { setLanguage } = await import('/src/i18n.js')
+    setLanguage('en', { persist: false })
+    toolbarTest.jobs[0].failed = 2
+    toolbarTest.jobs[0].completed = 8
+    await toolbar.refresh()
+  })
+  await expect(panel.locator('.progress > p')).toContainText(
+    '8 saved · 1 need discount review · 1 failed'
+  )
+  await expect(panel.locator('.progress > p')).toHaveClass('error')
+  await page.evaluate(async () => {
+    toolbarTest.jobs[0] = {
+      ...toolbarTest.jobs[0],
+      state: 'completed',
+      completed: 10,
+      failed: 0,
+      reviewRequired: 0,
+      reviewOrderId: undefined,
+    }
+    await toolbar.refresh()
+  })
+  await expect(
+    panel.locator('[data-action="review-order-discounts"]')
+  ).toBeHidden()
+})
+
 test('the list toolbar downloads complete import reports in every job state without starting work and releases files', async ({
   extension,
 }) => {

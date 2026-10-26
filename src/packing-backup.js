@@ -12,7 +12,7 @@ import { cartonBatchesForItems } from './carton-confirmations.js'
 import { batchInPackingScope, cartonBatchMark } from './carton-batches.js'
 import { batchOrderIds } from './inventory-model.js'
 import { repeatProductStoreIdentity } from './repeat-products.js'
-import { productFamilySourceKey } from './product-families.js'
+import { productFamilySourceMatches } from './product-families.js'
 import {
   collectImageReferences,
   imageCacheKey,
@@ -439,13 +439,13 @@ function scopedSourceHistory(backup, batches, orders, preparations) {
       source = current.get(orderKey)
     if (
       sourceKey &&
-      (!source || productFamilySourceKey(source.snapshot) !== sourceKey)
+      (!source || !productFamilySourceMatches(source.snapshot, sourceKey))
     )
       keep(
         history.find(
           (record) =>
             key(record.snapshot) === orderKey &&
-            productFamilySourceKey(record.snapshot) === sourceKey
+            productFamilySourceMatches(record.snapshot, sourceKey)
         )
       )
   }
@@ -1175,7 +1175,30 @@ export function mergePackingPreparation(previous, incoming, ids) {
               existing.entryIds.length !== family.entryIds.length ||
               existing.entryIds.some(
                 (entryId) => !family.entryIds.includes(entryId)
-              )
+              ) ||
+              (existing.mode ?? null) !== (family.mode ?? null) ||
+              JSON.stringify(
+                (existing.identities ?? [])
+                  .map((identity) => [
+                    identity.entryId,
+                    identity.style,
+                    identity.size,
+                    identity.variantSuffix ?? null,
+                    identity.sizeSuffix ?? null,
+                  ])
+                  .sort()
+              ) !==
+                JSON.stringify(
+                  (family.identities ?? [])
+                    .map((identity) => [
+                      identity.entryId,
+                      identity.style,
+                      identity.size,
+                      identity.variantSuffix ?? null,
+                      identity.sizeSuffix ?? null,
+                    ])
+                    .sort()
+                )
           )
         )
           throw new Error(
@@ -1183,7 +1206,11 @@ export function mergePackingPreparation(previous, incoming, ids) {
           )
         if (!overlapping.length) families.push(structuredClone(family))
       }
-      result.productFamilies = { ...next, families }
+      result.productFamilies = {
+        ...next,
+        version: Math.max(old?.version ?? 1, next.version),
+        families,
+      }
     }
   }
   for (const field of ['defaultPacking', 'previousPacking']) {

@@ -486,6 +486,43 @@ test('review confirmation preserves the queued expected-row guard and rejects fo
   )
 })
 
+test('the original list receives a bounded discount action and can open only its own review', async () => {
+  const s = setup()
+  const job = reviewJob({
+    source: { tabId: sender.tab.id, frameId: sender.frameId },
+    updatedAt: '2026-10-26T10:00:00.000Z',
+  })
+  job.orders[0].error =
+    'The order total balances, but the discount allocation needs your review.'
+  s.jobs.set(job.id, structuredClone(job))
+  const status = (await s.send({ type: 'IMPORT_STATUS' }, sender)).data.jobs[0]
+  assert.equal(status.reviewOrderId, '10001')
+  assert.equal(status.reviewRequired, 1)
+  assert.equal(status.failures, 0)
+  assert.equal(status.failed, 1)
+  assert.equal(status.error, '')
+  assert.equal(status.orders, undefined)
+  const message = {
+    type: 'IMPORT_REVIEW_OPEN',
+    jobId: job.id,
+    orderId: '10001',
+  }
+  for (const other of [
+    { ...sender, frameId: 0 },
+    { ...sender, tab: { id: 8 } },
+    { ...sender, url: 'https://example.test/' },
+  ])
+    assert.equal((await s.send(message, other)).ok, false)
+  const opened = await s.send(message, sender)
+  assert.equal(opened.ok, true, opened.error)
+  assert.equal(
+    s.tabs.get(opened.data.tabId).url,
+    `${url('10001')}#1688topl-review=job-review`
+  )
+  assert.equal(s.saved.size, 0)
+  assert.deepEqual(s.jobs.get(job.id), job)
+})
+
 test('import appearance reads the authoritative palette, persists only mode, and broadcasts to supported pages', async () => {
   const env = setup()
   env.display.appearance = { lightTheme: '1688', darkTheme: 'terracotta' }

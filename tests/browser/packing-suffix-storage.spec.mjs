@@ -16,6 +16,7 @@ function snapshot(orderId) {
       thumbnail: `https://cbu01.alicdn.com/synthetic-suffix-${index}.png`,
       description,
       title: index < 2 ? 'Cup' : 'Bowl',
+      productNumber: index < 2 ? 'SYNTHETIC-CUP' : 'SYNTHETIC-BOWL',
       skuProperties: [{ label: 'Color', value: index === 0 ? 'red' : 'blue' }],
       price: '10.00',
       quantity: '1',

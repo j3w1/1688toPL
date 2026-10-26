@@ -15,6 +15,7 @@ function snapshot() {
     items: [3, 30, 30].map((quantity, index) => ({
       entryId: String(index + 1),
       title: 'Plush figure',
+      productNumber: 'SYNTHETIC-PLUSH',
       description: `Plush ${['S', 'M', 'L'][index]}`,
       thumbnail: '',
       price: '1.00',

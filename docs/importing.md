@@ -39,7 +39,7 @@ The whole-order summary counts each complete matching purchase once, including i
 
 ## Refresh and recover
 
-If an order says **“The order total balances, but the discount allocation needs your review,”** its products can be complete while more than one discount treatment fits the payment. Choose **Review discounts** on the order detail page, or beside the failed order in **Activity**. Compare how each treatment assigns the seller reduction and order-level discount, then choose **Confirm and save**. The payable stays the same; product costs can differ. Suggestions require your confirmation. **Cancel** saves nothing, and a failed save retains the open review.
+If an order says **“The order total balances, but the discount allocation needs your review,”** its products can be complete while more than one discount treatment fits the payment. Progress separates these reviews from failures, for example **9 saved · 1 need discount review**. Choose **Review discounts** directly in the order-list import panel, on the order detail page, or beside the affected order in **Activity**. The list panel opens its next pending discount review; Activity lists every affected order. Compare how each treatment assigns the seller reduction and order-level discount, then choose **Confirm and save**. The payable stays the same; product costs can differ. Suggestions require your confirmation. **Cancel** saves nothing, and a failed save retains the open review.
 
 The extension reuses your confirmed treatment only for the same order and unchanged financial evidence. Changed prices, quantities, row discounts or footer amounts require a new review. Other orders continue importing while this one needs attention. Activity's failed-order controls reach errors beyond the first page. Unsupported fields, missing rows and inconsistent totals remain blocked rather than offering a forced import.
 
@@ -51,7 +51,7 @@ Use contextual **Refresh** for selected orders or current filters. **Settings �
 
 **Activity** contains progress, failures, Pause/Resume, retry and **Save import report**. Its badge distinguishes ongoing work from unread results. Opening it marks visible updates read; ordinary progress ticks do not create new notifications. **Dismiss / Dismiss all** hides nonrunning notices without deleting jobs or orders. **Show dismissed** reveals them again. Minimize floating page controls to keep a compact progress strip while work continues.
 
-Retries preserve successful saves. A completed import with errors retries failed details only; a paused discovery scan retains its discovered orders. A report records local diagnostic counts and bounded financial evidence; it is not a library backup and does not restart work.
+Retries preserve successful saves. A completed import with errors retries failed details only; a paused discovery scan retains its discovered orders. A report records local diagnostic counts and bounded financial evidence, with an explicit discount-review flag per order and separate review/failure counts; it is not a library backup and does not restart work.
 
 <a href="../screenshots/import-progress.png"><img src="../screenshots/import-progress.png" alt="Synthetic import progress with saved products and the latest result" width="320" /></a>
 

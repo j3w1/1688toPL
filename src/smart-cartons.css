@@ -268,11 +268,62 @@
 .purchase-code-review .purchase-code {
   --ce-code-size: 16px;
 }
+.preparation-code-field,
+.preparation-family-source label {
+  display: grid;
+  gap: 0.2rem;
+  min-inline-size: 0;
+  margin-block: 0.4rem;
+}
+.preparation-code-field input,
+.preparation-family-source :is(input, select) {
+  box-sizing: border-box;
+  inline-size: min(100%, 24rem);
+  max-inline-size: 100%;
+}
+.preparation-family-source {
+  padding: 0.65rem;
+  border-block-end: 1px solid var(--line, #c4b9a6);
+  overflow-wrap: anywhere;
+}
+.preparation-family-source [data-family-mode-control][hidden] {
+  display: none;
+}
 .purchase-code-review .dialog-actions {
   position: sticky;
   inset-block-end: 0;
   background: var(--surface);
   padding-block: 0.65rem;
+}
+@media (min-width: 1000px) {
+  /* A small, single-purchase review is an overview: keep its full codes and
+     original photos alongside each other before the secondary editors. */
+  .purchase-code-overview [data-order-review] {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 225px), 1fr));
+    gap: 0 0.75rem;
+    align-items: start;
+  }
+  .purchase-code-overview [data-order-review] > :is(h3, p),
+  .purchase-code-overview [data-product-family] > :is(h4, p) {
+    margin-block: 0.4rem;
+  }
+  .purchase-code-overview [data-order-review] > button {
+    justify-self: start;
+  }
+  .purchase-code-overview [data-order-review] > :not([data-product-family]),
+  .purchase-code-overview [data-product-family]:only-of-type {
+    grid-column: 1 / -1;
+  }
+  .purchase-code-overview [data-product-family]:only-of-type > div:last-child {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 225px), 1fr));
+    gap: 0.75rem;
+    align-items: start;
+  }
+  .purchase-code-overview [data-product-family] {
+    min-inline-size: 0;
+  }
 }
 @media (max-width: 760px) {
   .action-bar .selection-totals-grid dd {

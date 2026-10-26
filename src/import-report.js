@@ -73,6 +73,7 @@ export function createImportReport(
     state: order.state,
     expectedRows: order.expectedRows ?? null,
     error: order.error || '',
+    reviewRequired: order.state === 'failed' && order.reviewRequired === true,
     ...(order.lastFailure
       ? {
           lastFailure: {
@@ -85,6 +86,7 @@ export function createImportReport(
   }))
   const saved = orders.filter((order) => order.state === 'done').length
   const failed = orders.filter((order) => order.state === 'failed').length
+  const reviewRequired = orders.filter((order) => order.reviewRequired).length
   const expected = Math.max(job.total || 0, orders.length)
   const errors = new Map()
   for (const order of orders.filter((order) => order.state === 'failed')) {
@@ -119,6 +121,8 @@ export function createImportReport(
       discovered: orders.length,
       saved,
       failed,
+      reviewRequired,
+      failures: failed - reviewRequired,
       pending: orders.filter((order) => order.state === 'pending').length,
       undiscovered: expected - orders.length,
       remaining: expected - saved,

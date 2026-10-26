@@ -992,11 +992,66 @@ export async function createProductAuthoring({
     activeCodeReview?.close()
     await flushSaves()
     if (request !== codeReviewGeneration) return
-    const records = getRecords(),
+    const orderRefs = [
+        ...new Map(
+          selectedRefs.map((ref) => [
+            orderKey(ref),
+            {
+              accountId: ref.accountId,
+              orderId: ref.orderId,
+            },
+          ])
+        ).values(),
+      ],
+      sourceRecords = await Promise.all(
+        orderRefs.map(async (ref) => {
+          const record = repository.getOrder
+            ? await repository.getOrder(ref.orderId, {
+                accountId: ref.accountId,
+              })
+            : recordFor(ref)
+          if (
+            !record ||
+            orderKey({
+              accountId:
+                record.accountId || record.snapshot?.accountId || 'local',
+              orderId: record.snapshot?.orderId,
+            }) !== orderKey(ref)
+          )
+            throw new Error(
+              'The selected products changed. Refresh before assigning codes.'
+            )
+          return structuredClone(record)
+        })
+      )
+    if (request !== codeReviewGeneration) return
+    const sources = new Map(
+        sourceRecords.map((record) => [
+          orderKey({
+            accountId: record.accountId || record.snapshot.accountId || 'local',
+            orderId: record.snapshot.orderId,
+          }),
+          record,
+        ])
+      ),
+      reviewRecord = (ref) => sources.get(orderKey(ref)),
+      records = [
+        ...getRecords().filter(
+          (record) =>
+            !sources.has(
+              orderKey({
+                accountId:
+                  record.accountId || record.snapshot.accountId || 'local',
+                orderId: record.snapshot.orderId,
+              })
+            )
+        ),
+        ...sourceRecords,
+      ],
       eligibility = new Map(),
       refs = selectedRefs.filter((ref) => {
         if (!eligibility.has(orderKey(ref))) {
-          const record = recordFor(ref)
+          const record = reviewRecord(ref)
           eligibility.set(
             orderKey(ref),
             new Map(
@@ -1031,7 +1086,7 @@ export async function createProductAuthoring({
       ],
       capturedSources = new Map(
         scope.map((ref) => {
-          const record = recordFor(ref)
+          const record = reviewRecord(ref)
           if (!record)
             throw new Error(
               'The selected products changed. Refresh before assigning codes.'
@@ -1043,7 +1098,7 @@ export async function createProductAuthoring({
         preparedRows(refs).map((row) => [entryKey(row), row])
       ),
       candidateRows = refs.map((ref) => {
-        const record = recordFor(ref),
+        const record = reviewRecord(ref),
           item = record?.snapshot.items.find(
             (item) => item.entryId === ref.entryId
           )
@@ -1075,14 +1130,18 @@ export async function createProductAuthoring({
       items = el('div', undefined, 'purchase-code-review-items'),
       status = el('p'),
       issues = el('div'),
+      codeNotice = el('p'),
       resolveSizes = el('button', uiMessage('Resolve size endings')),
       resolveFamilies = el('button', uiMessage('Review product families')),
+      resetCodes = el('button', uiMessage('Reset code suggestions')),
       actions = el('div', undefined, 'dialog-actions'),
       back = el('button', uiMessage('Back')),
       cancel = el('button', uiMessage('Cancel')),
       commit = el('button', uiMessage('Confirm preparation'), 'primary')
     modal.dataset.action = 'purchase-code-review'
     modal.dataset.scope = 'selected-products'
+    if (refs.length <= 3 && scope.length === 1)
+      modal.classList.add('purchase-code-overview')
     bindAttribute(modal, 'aria-label', uiMessage('Prepare products'))
     modal.append(
       el('h2', uiMessage('Prepare products')),
@@ -1128,14 +1187,33 @@ export async function createProductAuthoring({
       detailOpen = false,
       reviewError = false,
       sourceEvidence,
-      staleReview = false
+      staleReview = false,
+      codePending = false,
+      codeInvalid = false,
+      codeGeneration = 0,
+      codeTimer
     const sizeChoices = new Map(),
       detailChoices = new Map(),
+      codeChoices = new Map(),
       familyChoices = [],
       familyCohorts = new Map(),
       selectedKeys = new Set(refs.map(entryKey))
+    codeNotice.id = `preparation-code-error-${crypto.randomUUID()}`
+    codeNotice.setAttribute('aria-live', 'polite')
     const alive = () =>
       !closed && modal.open && request === codeReviewGeneration
+    function restoreReviewFocus(opener) {
+      const active = document.activeElement
+      if (
+        alive() &&
+        opener?.isConnected &&
+        (!active ||
+          !active.isConnected ||
+          active === document.body ||
+          active === modal)
+      )
+        opener.focus()
+    }
     function matchPrepared(result, ref) {
       const preparation = result?.plan?.preparations?.find(
           (value) => orderKey(value) === orderKey(ref)
@@ -1175,6 +1253,224 @@ export async function createProductAuthoring({
       )
       return control
     }
+    const modeLabels = {
+      none: 'No endings',
+      variants: 'Variants',
+      sizes: 'Sizes',
+      'variants-and-sizes': 'Variants and sizes',
+    }
+    function groupCodeMode(group) {
+      const variant = group?.variants.some((value) => value.variantSuffix),
+        size = group?.variants.some(
+          (value) => value.sizeSuffix || value.needsSizeMapping
+        )
+      return variant
+        ? size
+          ? 'variants-and-sizes'
+          : 'variants'
+        : size
+          ? 'sizes'
+          : 'none'
+    }
+    function updateReviewCodes(result) {
+      for (const change of result.changes || []) {
+        const { group, variant } = matchPrepared(result, change)
+        try {
+          change.after = variant ? barcodeValue(group, variant) : ''
+        } catch {
+          change.after = ''
+        }
+      }
+      result.issues = (result.issues || []).filter(
+        (issue) =>
+          issue.code !== 'PURCHASE_SIZE_REQUIRED' ||
+          result.changes.some(
+            (change) =>
+              !change.after &&
+              change.orderId === issue.orderId &&
+              (!issue.entryId || change.entryId === issue.entryId)
+          )
+      )
+      result.plan.issues = structuredClone(result.issues)
+      return result
+    }
+    function codedReview(result) {
+      const next = structuredClone(result)
+      for (const preparation of next.plan.preparations)
+        for (const group of preparation.groups) {
+          const groupIds = group.variants.flatMap(
+              (variant) => variant.entryIds
+            ),
+            bases = groupIds
+              .map(
+                (entryId) =>
+                  codeChoices.get(entryKey({ ...preparation, entryId }))
+                    ?.baseCode
+              )
+              .filter((value) => value !== undefined)
+          if (bases.length) {
+            if (
+              groupIds.some(
+                (entryId) =>
+                  !selectedKeys.has(entryKey({ ...preparation, entryId }))
+              )
+            )
+              throw new Error(
+                'Select every prepared source row in this family before changing its shared code.'
+              )
+            if (new Set(bases).size > 1)
+              throw new Error(
+                'Products in one family need the same product base code.'
+              )
+            group.baseCode = bases[0]
+          }
+          for (const variant of group.variants) {
+            const choices = variant.entryIds
+              .map((entryId) =>
+                codeChoices.get(entryKey({ ...preparation, entryId }))
+              )
+              .filter(Boolean)
+            for (const field of ['variantSuffix', 'sizeSuffix']) {
+              const values = choices
+                .map((choice) => choice[field])
+                .filter((value) => value !== undefined)
+              if (!values.length) continue
+              if (
+                variant.entryIds.some(
+                  (entryId) =>
+                    !selectedKeys.has(entryKey({ ...preparation, entryId }))
+                )
+              )
+                throw new Error(
+                  'Select every source row sharing this barcode identity before changing its code.'
+                )
+              if (new Set(values).size > 1)
+                throw new Error(
+                  'Source rows sharing one barcode identity need the same endings.'
+                )
+              variant[field] = values[0]
+              if (field === 'sizeSuffix') variant.needsSizeMapping = false
+            }
+          }
+        }
+      return updateReviewCodes(next)
+    }
+    function codeField(title, ref, name, groupField = false) {
+      const label = el('label', uiMessage(title)),
+        input = el('input'),
+        match = matchPrepared(review, ref),
+        member = groupField ? match.group : match.variant
+      label.classList.add('preparation-code-field')
+      input.id = `review-code-${crypto.randomUUID()}`
+      label.htmlFor = input.id
+      input.type = 'text'
+      input.autocomplete = 'off'
+      input.spellcheck = false
+      input.value = member?.[name] || ''
+      input.dataset.reviewCode = name
+      input.dataset.entryId = ref.entryId
+      input.dataset.orderId = ref.orderId
+      input.dataset.accountId = ref.accountId
+      input.setAttribute('aria-describedby', codeNotice.id)
+      const members = groupField
+        ? match.group?.variants.flatMap((variant) => variant.entryIds)
+        : match.variant?.entryIds
+      input.dataset.foreign = String(
+        members?.some(
+          (entryId) => !selectedKeys.has(entryKey({ ...ref, entryId }))
+        ) || false
+      )
+      input.disabled =
+        input.dataset.foreign === 'true' ||
+        !member ||
+        pending ||
+        assigning ||
+        staleReview
+      input.oninput = () => {
+        if (!review || input.disabled) return
+        codeGeneration++
+        input.removeAttribute('aria-invalid')
+        const current = matchPrepared(review, ref),
+          ids = groupField
+            ? current.group.variants.flatMap((variant) => variant.entryIds)
+            : current.variant.entryIds
+        for (const entryId of ids) {
+          const key = entryKey({ ...ref, entryId })
+          codeChoices.set(key, {
+            ...codeChoices.get(key),
+            [name]: input.value.trim().toUpperCase(),
+          })
+        }
+        codePending = true
+        codeInvalid = false
+        bindText(codeNotice, '')
+        try {
+          review = codedReview(review)
+          proposed = new Map(
+            review.changes.map((change) => [entryKey(change), change])
+          )
+        } catch (error) {
+          codeInvalid = true
+          bindText(codeNotice, uiMessage(error.message))
+        }
+        clearTimeout(codeTimer)
+        codeTimer = setTimeout(() => void validateCodeChoices(false), 180)
+        paintCards()
+      }
+      input.onblur = () => {
+        if (codePending || codeInvalid) void validateCodeChoices(true, input)
+      }
+      label.append(input)
+      return label
+    }
+    async function validateCodeChoices(report = false, input) {
+      if (!alive() || !review || !codeChoices.size) return
+      clearTimeout(codeTimer)
+      const version = ++codeGeneration
+      codePending = true
+      paintCards()
+      try {
+        const next = codedReview(review)
+        for (const preparation of next.plan.preparations)
+          validatePreparationSuffixEdits(
+            preparation,
+            preparations.get(orderKey(preparation)),
+            {
+              snapshot: reviewRecord(preparation)?.snapshot,
+              sizeVocabulary: preferences.sizeVocabulary,
+            }
+          )
+        for (const change of next.changes) {
+          const { group, variant } = matchPrepared(next, change)
+          if (!variant.needsSizeMapping) barcodeValue(group, variant)
+        }
+        if (
+          repository.previewPreparations &&
+          next.changes.every((change) => change.after)
+        )
+          await previewSizes(next)
+        if (!alive() || version !== codeGeneration) return
+        review = next
+        proposed = new Map(
+          next.changes.map((change) => [entryKey(change), change])
+        )
+        codeInvalid = false
+        input?.removeAttribute('aria-invalid')
+        bindText(codeNotice, '')
+      } catch (error) {
+        if (!alive() || version !== codeGeneration) return
+        codeInvalid = true
+        if (report) {
+          input?.setAttribute('aria-invalid', 'true')
+          bindText(codeNotice, uiMessage(error.message))
+        }
+      } finally {
+        if (alive() && version === codeGeneration) {
+          codePending = false
+          paintCards()
+        }
+      }
+    }
     function reviewCard(row) {
       const card = el('article'),
         code = el('code', undefined, 'ce-code purchase-code'),
@@ -1207,6 +1503,8 @@ export async function createProductAuthoring({
         el('p', uiMessage('Quantity: {quantity}', { quantity: row.quantity })),
         beforeLine,
         proposedLine,
+        codeField('Variant ending', row, 'variantSuffix'),
+        codeField('Size ending', row, 'sizeSuffix'),
         evidence,
         authored,
         detailButton('Edit variant details', row, ({ group, variant }) => ({
@@ -1289,6 +1587,23 @@ export async function createProductAuthoring({
           evidence.append(
             el('p', uiMessage('Map this variant size before generating labels'))
           )
+        if (codeChoices.has(key))
+          evidence.append(el('small', uiMessage('Custom code choice')))
+      }
+      for (const input of items.querySelectorAll('[data-review-code]')) {
+        const match = matchPrepared(review, input.dataset),
+          member =
+            input.dataset.reviewCode === 'baseCode'
+              ? match.group
+              : match.variant
+        if (document.activeElement !== input && member)
+          input.value = member[input.dataset.reviewCode] || ''
+        input.disabled =
+          assigning ||
+          pending ||
+          staleReview ||
+          !member ||
+          input.dataset.foreign === 'true'
       }
       commit.disabled =
         assigning ||
@@ -1296,6 +1611,8 @@ export async function createProductAuthoring({
         !review ||
         staleReview ||
         reviewError ||
+        codePending ||
+        codeInvalid ||
         detailOpen ||
         familyDialog?.open ||
         sizeDialog?.open ||
@@ -1306,8 +1623,9 @@ export async function createProductAuthoring({
         !review?.plan?.preparations ||
         ![...proposed.values()].some((change) => !change.after)
       resolveSizes.disabled = assigning || pending || staleReview
-      resolveFamilies.hidden = !familyCohorts.size
+      resolveFamilies.hidden = !(review?.familyReview || []).length
       resolveFamilies.disabled = assigning || pending || staleReview
+      resetCodes.disabled = assigning || pending || staleReview || !review
       for (const control of modal.querySelectorAll('[data-review-details]'))
         control.disabled =
           assigning ||
@@ -1388,6 +1706,22 @@ export async function createProductAuthoring({
               )
             )
           host.append(
+            el(
+              'p',
+              uiMessage('Coding mode: {mode}', {
+                mode: uiMessage(
+                  modeLabels[
+                    family.evidence?.mode || groupCodeMode(family.match.group)
+                  ]
+                ),
+              })
+            )
+          )
+          if (family.match.group)
+            host.append(
+              codeField('Product base code', family.rows[0], 'baseCode', true)
+            )
+          host.append(
             detailButton('Edit group details', family.rows[0], ({ group }) => ({
               kind: 'group',
               groupId: group?.id,
@@ -1422,7 +1756,25 @@ export async function createProductAuthoring({
     resolveFamilies.dataset.action = 'review-product-families'
     resolveFamilies.hidden = true
     resolveFamilies.onclick = () => void openFamilyReview()
-    content.append(items, issues, resolveFamilies, resolveSizes)
+    resetCodes.type = 'button'
+    resetCodes.dataset.action = 'reset-preparation-code-suggestions'
+    resetCodes.onclick = () => {
+      codeChoices.clear()
+      sizeChoices.clear()
+      codePending = codeInvalid = false
+      codeGeneration++
+      clearTimeout(codeTimer)
+      bindText(codeNotice, '')
+      void replan()
+    }
+    content.append(
+      items,
+      issues,
+      codeNotice,
+      resolveFamilies,
+      resolveSizes,
+      resetCodes
+    )
     function detailProjection(preparation) {
       const projected = structuredClone(preparation)
       projected.groups = projected.groups
@@ -1599,7 +1951,7 @@ export async function createProductAuthoring({
         detailOpen = false
         detailDialog = null
         if (alive()) paintCards()
-        if (alive() && opener?.isConnected) opener.focus()
+        restoreReviewFocus(opener)
       }
     }
     async function openFamilyReview() {
@@ -1625,7 +1977,49 @@ export async function createProductAuthoring({
             choice.kind,
           ])
         ),
-        cohorts = [...familyCohorts.entries()]
+        cohorts = [...familyCohorts.entries()],
+        sourceRows = [],
+        rowChoices = new Map(),
+        classifier = createSizeClassifier(preferences.sizeVocabulary)
+      for (const ref of scope) {
+        const record = reviewRecord(ref),
+          plan = review.familyReview?.find(
+            (value) => orderKey(value) === orderKey(ref)
+          ),
+          previous = preparations.get(orderKey(ref))
+        for (const item of record.snapshot.items) {
+          const family = plan?.families.find((value) =>
+              value.entryIds.includes(item.entryId)
+            ),
+            index = plan?.families.indexOf(family) ?? -1,
+            identity = family?.identities?.find(
+              (value) => value.entryId === item.entryId
+            ),
+            extracted = classifier.extract(item),
+            existing = previous?.groups.find((group) =>
+              group.variants.some((variant) =>
+                variant.entryIds.includes(item.entryId)
+              )
+            ),
+            editable =
+              selectedKeys.has(entryKey({ ...ref, entryId: item.entryId })) &&
+              !existing,
+            row = {
+              ...ref,
+              entryId: item.entryId,
+              item,
+              editable,
+              saved: !!existing,
+              family: `G${index >= 0 ? index + 1 : sourceRows.length + 1}`,
+              mode: existing ? groupCodeMode(existing) : family?.mode || '',
+              style: identity?.style ?? extracted.variant,
+              size: identity?.size ?? extracted.size,
+              identityEdited: false,
+            }
+          sourceRows.push(row)
+          rowChoices.set(entryKey(row), row)
+        }
+      }
       let disposed = false,
         validating = false,
         list
@@ -1643,6 +2037,132 @@ export async function createProductAuthoring({
       )
       notice.setAttribute('role', 'status')
       notice.id = `family-error-${crypto.randomUUID()}`
+      function paintFamilyRows() {
+        for (const section of body.querySelectorAll('[data-family-entry]')) {
+          const row = rowChoices.get(section.dataset.familyEntry)
+          for (const control of section.querySelectorAll(
+            '[data-family-field]'
+          )) {
+            const field = control.dataset.familyField
+            if (document.activeElement !== control) control.value = row[field]
+          }
+          const siblings = sourceRows.filter(
+              (value) =>
+                orderKey(value) === orderKey(row) && value.family === row.family
+            ),
+            first = siblings.find((value) => value.editable) || siblings[0]
+          section.querySelector('[data-family-mode-control]').hidden =
+            first !== row
+          section.querySelector('[data-family-field="mode"]').disabled =
+            validating || !row.editable || siblings.some((value) => value.saved)
+        }
+      }
+      function reviewedRow(row) {
+        const section = el('section'),
+          key = entryKey(row)
+        section.classList.add('preparation-family-source')
+        section.dataset.familyEntry = key
+        section.dataset.orderId = row.orderId
+        section.dataset.accountId = row.accountId
+        section.dataset.entryId = row.entryId
+        section.append(
+          media.photo(row.item),
+          el(
+            'p',
+            [
+              productArticleIdentity(row.item),
+              row.item.title,
+              row.item.description,
+            ]
+              .filter(Boolean)
+              .join(' · ')
+          ),
+          el(
+            'p',
+            (row.item.skuProperties || [])
+              .map((property) => `${property.label}: ${property.value}`)
+              .join(' · ')
+          ),
+          el(
+            'p',
+            uiMessage('Quantity: {quantity}', { quantity: row.item.quantity })
+          )
+        )
+        if (!selectedKeys.has(key))
+          section.append(el('small', uiMessage('Not selected — context only')))
+        if (row.saved)
+          section.append(
+            el(
+              'small',
+              uiMessage(
+                'This product keeps its saved family. Use Edit product in Orders to review grouping or code corrections.'
+              )
+            )
+          )
+        for (const [name, title] of [
+          ['family', 'Family identifier'],
+          ['style', 'Style identity'],
+          ['size', 'Source size'],
+        ]) {
+          const label = el('label', uiMessage(title)),
+            input = el('input')
+          input.type = 'text'
+          input.id = `family-${name}-${crypto.randomUUID()}`
+          input.value = row[name]
+          input.dataset.familyField = name
+          input.dataset.action = `review-family-${name}`
+          input.setAttribute('aria-describedby', notice.id)
+          input.disabled = !row.editable
+          input.maxLength = name === 'family' ? 80 : 500
+          label.htmlFor = input.id
+          input.oninput = () => {
+            row[name] = input.value.trim()
+            if (name !== 'family') row.identityEdited = true
+            for (const [cohortKey, cohort] of cohorts)
+              if (
+                orderKey(cohort) === orderKey(row) &&
+                cohort.entryIds.includes(row.entryId)
+              )
+                choices.set(cohortKey, 'custom')
+            input.removeAttribute('aria-invalid')
+            bindText(notice, '')
+            paintFamilyRows()
+          }
+          label.append(input)
+          section.append(label)
+        }
+        const modeLabel = el('label', uiMessage('Coding mode')),
+          select = el('select')
+        modeLabel.dataset.familyModeControl = 'true'
+        select.id = `family-mode-${crypto.randomUUID()}`
+        select.dataset.action = 'review-family-mode'
+        select.dataset.familyField = 'mode'
+        select.disabled = !row.editable
+        select.setAttribute('aria-describedby', notice.id)
+        modeLabel.htmlFor = select.id
+        for (const [value, label] of [
+          ['', 'Automatic'],
+          ...Object.entries(modeLabels),
+        ]) {
+          const option = el('option', uiMessage(label))
+          option.value = value
+          select.append(option)
+        }
+        select.value = row.mode
+        select.onchange = () => {
+          for (const sibling of sourceRows)
+            if (
+              orderKey(sibling) === orderKey(row) &&
+              sibling.family === row.family
+            )
+              sibling.mode = select.value
+          bindText(notice, '')
+          paintFamilyRows()
+        }
+        modeLabel.append(select)
+        section.append(modeLabel)
+        return section
+      }
       function card([key, cohort]) {
         const section = el('section'),
           fieldset = el('fieldset'),
@@ -1650,7 +2170,7 @@ export async function createProductAuthoring({
             'legend',
             uiMessage('Order {orderId}', { orderId: cohort.orderId })
           ),
-          record = recordFor(cohort)
+          record = reviewRecord(cohort)
         fieldset.append(legend)
         for (const [kind, title] of [
           ['family', 'Use one product family'],
@@ -1662,12 +2182,30 @@ export async function createProductAuthoring({
           input.name = `family-${key}`
           input.value = kind
           input.checked = choices.get(key) === kind
-          input.disabled = validating
+          const savedRows = cohort.entryIds
+              .map((entryId) =>
+                rowChoices.get(entryKey({ ...cohort, entryId }))
+              )
+              .filter((row) => row?.saved),
+            locked =
+              kind === 'family' &&
+              new Set(savedRows.map((row) => row.family)).size > 1
+          input.dataset.locked = String(locked)
+          input.disabled = validating || locked
           input.setAttribute('aria-describedby', notice.id)
           input.dataset.action = 'choose-product-family'
           input.onchange = () => {
             choices.set(key, kind)
+            for (const entryId of cohort.entryIds) {
+              const row = rowChoices.get(entryKey({ ...cohort, entryId }))
+              if (row && !row.saved)
+                row.family =
+                  kind === 'family'
+                    ? savedRows[0]?.family || `review-${cohort.entryIds[0]}`
+                    : `source-${entryId}`
+            }
             bindText(notice, '')
+            paintFamilyRows()
           }
           label.prepend(input)
           fieldset.append(label)
@@ -1689,31 +2227,75 @@ export async function createProductAuthoring({
               notice,
               uiMessage('Choose a family treatment for every listed group.')
             )
-            list.ensureVisible(missing[0])?.querySelector('input')?.focus()
+            list
+              .ensureVisible(`decision:${missing[0]}`)
+              ?.querySelector('input')
+              ?.focus()
+            return
+          }
+          const blank = sourceRows.find((row) => !row.family)
+          if (blank) {
+            bindText(
+              notice,
+              uiMessage('Enter a family identifier for every product.')
+            )
+            const input = list
+              .ensureVisible(entryKey(blank))
+              ?.querySelector('[data-family-field="family"]')
+            input?.setAttribute('aria-invalid', 'true')
+            input?.focus()
             return
           }
           validating = true
           apply.disabled = cancel.disabled = true
           dialog.setAttribute('aria-busy', 'true')
           try {
-            familyChoices.splice(
-              0,
-              familyChoices.length,
-              ...cohorts.map(([key, cohort]) => ({
-                accountId: cohort.accountId,
-                orderId: cohort.orderId,
-                entryIds: cohort.entryIds,
-                kind: choices.get(key),
-              }))
-            )
+            const grouped = new Map()
+            for (const row of sourceRows) {
+              const key = JSON.stringify([orderKey(row), row.family])
+              if (!grouped.has(key)) grouped.set(key, [])
+              grouped.get(key).push(row)
+            }
+            const nextChoices = [...grouped.values()].map((rows) => {
+              const first = rows[0],
+                modes = new Set(rows.map((row) => row.mode).filter(Boolean))
+              if (modes.size > 1)
+                throw new Error(
+                  'Products in one family need the same coding mode.'
+                )
+              return {
+                accountId: first.accountId,
+                orderId: first.orderId,
+                entryIds: rows.map((row) => row.entryId),
+                kind: rows.length > 1 ? 'family' : 'standalone',
+                ...(modes.size ? { mode: [...modes][0] } : {}),
+                ...(rows.some((row) => row.identityEdited)
+                  ? {
+                      identities: rows.map(({ entryId, style, size }) => ({
+                        entryId,
+                        style,
+                        size,
+                      })),
+                    }
+                  : {}),
+              }
+            })
+            familyChoices.splice(0, familyChoices.length, ...nextChoices)
             await replan()
             if (current()) dialog.close('applied')
+          } catch (error) {
+            if (current()) bindText(notice, uiMessage(error.message))
           } finally {
             validating = false
             if (current()) {
               apply.disabled = cancel.disabled = false
-              for (const input of body.querySelectorAll('input'))
-                input.disabled = false
+              for (const input of body.querySelectorAll('input,select'))
+                input.disabled = input.closest('[data-family-entry]')
+                  ? !rowChoices.get(
+                      input.closest('[data-family-entry]').dataset.familyEntry
+                    ).editable
+                  : input.dataset.locked === 'true'
+              paintFamilyRows()
               dialog.setAttribute('aria-busy', 'false')
             }
           }
@@ -1731,25 +2313,31 @@ export async function createProductAuthoring({
         if (familyDialog === dialog) familyDialog = null
         if (alive()) {
           paintCards()
-          resolveFamilies.focus()
+          restoreReviewFocus(resolveFamilies)
         }
       }
       document.body.append(dialog)
       familyDialog = dialog
       dialog.showModal()
       paintCards()
-      const sections = cohorts.map(([key, cohort]) => {
+      const sections = scope.map((ref) => {
         const host = el('section')
         body.append(host)
         return {
           element: host,
           entries: [
-            { key: `decision:${key}`, heading: true, cohortKey: key, cohort },
-            ...cohort.entryIds.map((entryId) => ({
-              key: entryKey({ ...cohort, entryId }),
-              cohort,
-              entryId,
-            })),
+            { key: `order:${orderKey(ref)}`, orderHeading: ref, heading: true },
+            ...cohorts
+              .filter(([, cohort]) => orderKey(cohort) === orderKey(ref))
+              .map(([key, cohort]) => ({
+                key: `decision:${key}`,
+                heading: true,
+                cohortKey: key,
+                cohort,
+              })),
+            ...sourceRows
+              .filter((row) => orderKey(row) === orderKey(ref))
+              .map((row) => ({ key: entryKey(row), row })),
           ],
         }
       })
@@ -1758,30 +2346,18 @@ export async function createProductAuthoring({
         sections,
         limit: 30,
         render: (entry) => {
-          if (entry.heading) return card([entry.cohortKey, entry.cohort])
-          const item = recordFor(entry.cohort)?.snapshot.items.find(
-              (item) => item.entryId === entry.entryId
-            ),
-            row = el('div')
-          if (item)
-            row.append(
-              media.photo(item),
-              el(
-                'p',
-                [productArticleIdentity(item), item.title, item.description]
-                  .filter(Boolean)
-                  .join(' · ')
-              ),
-              el(
-                'p',
-                (item.skuProperties || [])
-                  .map((property) => `${property.label}: ${property.value}`)
-                  .join(' · ')
-              )
+          if (entry.orderHeading)
+            return el(
+              'h3',
+              uiMessage('Order {orderId}', {
+                orderId: entry.orderHeading.orderId,
+              })
             )
-          return row
+          if (entry.heading) return card([entry.cohortKey, entry.cohort])
+          return reviewedRow(entry.row)
         },
         remove: (node) => media.forget(node),
+        paint: paintFamilyRows,
       })
       list.update()
     }
@@ -1835,7 +2411,7 @@ export async function createProductAuthoring({
           preparation,
           preparations.get(orderKey(preparation)),
           {
-            snapshot: recordFor(preparation)?.snapshot,
+            snapshot: reviewRecord(preparation)?.snapshot,
             sizeVocabulary: preferences.sizeVocabulary,
           }
         )
@@ -2109,7 +2685,7 @@ export async function createProductAuthoring({
         if (sizeDialog === dialog) sizeDialog = null
         if (alive()) {
           paintCards()
-          resolveSizes.focus()
+          restoreReviewFocus(resolveSizes)
         }
       }
       document.body.append(dialog)
@@ -2139,6 +2715,9 @@ export async function createProductAuthoring({
       proposed = new Map()
       issues.replaceChildren()
       pending = true
+      codeGeneration++
+      clearTimeout(codeTimer)
+      codePending = false
       bindText(status, uiMessage('Reviewing selected products…'))
       paintCards()
       try {
@@ -2177,6 +2756,7 @@ export async function createProductAuthoring({
           )
         }
         sourceEvidence = evidence
+        familyCohorts.clear()
         for (const family of result.familyReview || [])
           for (const issue of family.issues || []) {
             if (issue.code === 'PRODUCT_FAMILY_REVIEW_REQUIRED')
@@ -2196,13 +2776,16 @@ export async function createProductAuthoring({
           }
         if (sizeChoices.size) result = sizedReview(result, sizeChoices)
         if (detailChoices.size) result = detailedReview(result, detailChoices)
+        if (codeChoices.size) result = codedReview(result)
         if (
-          (sizeChoices.size || detailChoices.size) &&
+          (sizeChoices.size || detailChoices.size || codeChoices.size) &&
           result.plan?.preparations?.length
         )
           result = await previewSizes(result)
         if (!alive() || version !== generation) return
         review = structuredClone(result)
+        codeInvalid = false
+        bindText(codeNotice, '')
         refreshReviewList()
         intentId = crypto.randomUUID()
         proposed = new Map(
@@ -2316,6 +2899,8 @@ export async function createProductAuthoring({
       familyDialog?.close()
       detailDialog?.close()
       generation++
+      codeGeneration++
+      clearTimeout(codeTimer)
       reviewList?.destroy()
       media.forget(modal)
       modal.remove()

@@ -49,7 +49,7 @@ test('Activity resumes normal import when changed source no longer needs a disco
     .click()
   await library.getByRole('button', { name: /^Activity/ }).click()
   await expect(library.locator('#jobs')).toContainText(
-    'Finished · some orders need attention',
+    'Finished · discount review required',
     { timeout: 15_000 }
   )
   const opened = extension.context.waitForEvent('page')
@@ -105,7 +105,7 @@ test('bulk import continues past discount review, Activity recovers it, and the 
     .click()
   await library.getByRole('button', { name: /^Activity/ }).click()
   await expect(library.locator('#jobs')).toContainText(
-    'Finished · some orders need attention',
+    'Finished · discount review required',
     { timeout: 15_000 }
   )
   await expect(library.locator('#order-count')).toHaveText('1')
@@ -119,8 +119,11 @@ test('bulk import continues past discount review, Activity recovers it, and the 
     reviewRequired: true,
   })
   expect(initialJobs.data.jobs[0].orders[0].lastFailure).toBeUndefined()
+  const panel = list.getByRole('complementary', { name: '1688 order library' })
+  await expect(panel).toContainText('1 saved · 1 need discount review')
+  await expect(panel.locator('.progress > p')).not.toHaveClass('error')
   const reviewOpened = extension.context.waitForEvent('page')
-  await library.locator('[data-action="review-order-discounts"]').click()
+  await panel.locator('[data-action="review-order-discounts"]').click()
   const reviewPage = await reviewOpened
   const reviewButton = reviewPage.locator(
     '[data-action="review-order-discounts"]'

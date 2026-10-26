@@ -1,5 +1,7 @@
 import { mountFloatingPanel, floatingPanelStyles } from './floating-panel.js'
 import { mountPanelAppearance } from './panel-appearance.js'
+import { progressPresentation, importProgress } from './import-progress.js'
+import { t, bindText, bindAttribute } from './i18n.js'
 
 // Page UI only. Reads and job operations stay in the content/worker adapters.
 export function mountListToolbar(document, { readList, send }) {
@@ -297,6 +299,16 @@ export function mountListToolbar(document, { readList, send }) {
       )
     } else await resume()
   })
+  const reviewDiscounts = button(progressActions, '', async () => {
+    if (!latestJob?.reviewOrderId) return
+    await send('IMPORT_REVIEW_OPEN', {
+      jobId: latestJob.id,
+      orderId: latestJob.reviewOrderId,
+    })
+  })
+  bindText(reviewDiscounts, 'Review discounts')
+  reviewDiscounts.dataset.action = 'review-order-discounts'
+  reviewDiscounts.hidden = true
   openWorkspace.dataset.action = 'open-workspace'
   openHere.dataset.action = 'open-workspace-here'
   all.dataset.action = 'import-all'
@@ -358,8 +370,10 @@ export function mountListToolbar(document, { readList, send }) {
       latestJob = jobs.find((job) => job.state === 'running') || jobs[0]
       disclosure.update(latestJob)
       progress.hidden = !latestJob
+      reviewDiscounts.hidden = !latestJob?.reviewOrderId
       if (latestJob) {
         const job = latestJob,
+          status = importProgress(job),
           count = job.discovered ?? job.orders?.length ?? 0
         const remaining =
           job.remaining ??
@@ -370,13 +384,21 @@ export function mountListToolbar(document, { readList, send }) {
               ? `Finding orders · list page ${job.page || 1}`
               : 'Reading full order details'
             : job.state.replaceAll('-', ' ')
-        progressText.textContent = `${phase} · ${job.completed || 0} saved / ${count} discovered · ${remaining} remaining${job.failed ? ` · ${job.failed} failed${job.state === 'running' && !job.error ? '; continuing' : ''}` : ''}${job.error ? ` — ${job.error}` : ''}`
+        progressText.textContent = status.reviewRequired
+          ? `${progressPresentation(job).title} · ${progressPresentation(job).counts}${job.error ? ` — ${t(job.error)}` : ''}`
+          : `${phase} · ${job.completed || 0} saved / ${count} discovered · ${remaining} remaining${job.failed ? ` · ${job.failed} failed${job.state === 'running' && !job.error ? '; continuing' : ''}` : ''}${job.error ? ` — ${job.error}` : ''}`
         progressText.className =
           job.state === 'paused' ||
           job.error ||
-          (job.failed && job.state !== 'running')
+          (status.failures && job.state !== 'running')
             ? 'error'
             : ''
+        reviewDiscounts.dataset.orderId = job.reviewOrderId || ''
+        bindAttribute(reviewDiscounts, 'title', () =>
+          t('Review discounts for order {order}', {
+            order: latestJob?.reviewOrderId || '',
+          })
+        )
         pause.hidden = job.state === 'completed'
         pause.textContent =
           job.state === 'running' ? 'Pause import' : 'Resume / retry'

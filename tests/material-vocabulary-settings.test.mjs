@@ -240,7 +240,7 @@ test('changing recognition rules refreshes suggestions and keeps authored materi
 
 test('material settings show all small defaults in a detached draft without a pager', (t) => {
   const { value, rows, button, host } = setup(t)
-  assert.equal(rows().length, 84)
+  assert.equal(rows().length, MATERIAL_VOCABULARY.length)
   assert.notEqual(value.materialVocabulary, MATERIAL_VOCABULARY)
   assert.notEqual(
     value.materialVocabulary[0].aliases,
@@ -250,7 +250,7 @@ test('material settings show all small defaults in a detached draft without a pa
   assert.equal(button('Next material rules'), undefined)
   assert.equal(
     host.querySelector('.vocabulary-status [role=status]').textContent,
-    '84 rules'
+    `${MATERIAL_VOCABULARY.length} rules`
   )
   assert.equal(
     host.querySelector('.vocabulary-scroll').getAttribute('role'),

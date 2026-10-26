@@ -86,6 +86,8 @@ test('import reports retain every failure and separate discovery from successful
     discovered: 20,
     saved: 6,
     failed: 4,
+    reviewRequired: 0,
+    failures: 4,
     pending: 10,
     undiscovered: 647,
     remaining: 661,
@@ -122,4 +124,45 @@ test('an undiscovered legacy queue is not reported as complete and invalid links
     'test'
   )
   assert.equal(invalid.orders[0].sourceUrl, null)
+})
+
+test('reports explicitly distinguish discount review from actual failures while preserving legacy counts', () => {
+  const source = {
+    total: 4,
+    orders: [
+      { orderId: '10001', state: 'done', reviewRequired: true },
+      {
+        orderId: '10002',
+        state: 'failed',
+        reviewRequired: true,
+        error:
+          'The order total balances, but the discount allocation needs your review.',
+      },
+      {
+        orderId: '10003',
+        state: 'failed',
+        error: 'Product rows are incomplete.',
+      },
+      { orderId: '10004', state: 'pending' },
+    ],
+  }
+  const before = structuredClone(source)
+  const report = createImportReport(source, 'test')
+  assert.deepEqual(report.counts, {
+    expected: 4,
+    discovered: 4,
+    saved: 1,
+    failed: 2,
+    reviewRequired: 1,
+    failures: 1,
+    pending: 1,
+    undiscovered: 0,
+    remaining: 3,
+  })
+  assert.deepEqual(
+    report.orders.map((order) => order.reviewRequired),
+    [false, true, false, false]
+  )
+  assert.equal(report.errors.length, 2)
+  assert.deepEqual(source, before)
 })

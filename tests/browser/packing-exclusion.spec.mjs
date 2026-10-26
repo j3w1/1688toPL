@@ -174,6 +174,10 @@ async function expectCodeReview(page, count) {
     'data-row-count',
     String(count)
   )
+  await expect(review).toHaveAttribute('aria-busy', 'false')
+  await expect(
+    review.locator('[data-action="assign-purchase-codes"]')
+  ).toBeEnabled()
   return review
 }
 

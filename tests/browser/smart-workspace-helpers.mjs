@@ -227,7 +227,10 @@ export async function assignSelectedPurchaseCodes(page) {
   await page.locator('#review-purchase-codes').click()
   const review = page.locator('dialog[data-action="purchase-code-review"]')
   await expect(review).toBeVisible()
-  await review.locator('[data-action="assign-purchase-codes"]').click()
+  await expect(review).toHaveAttribute('aria-busy', 'false')
+  const confirm = review.locator('[data-action="assign-purchase-codes"]')
+  await expect(confirm, await review.innerText()).toBeEnabled()
+  await confirm.click()
   await expect(review).toBeHidden()
   await expect(page.locator('#orders-view')).toBeVisible()
 }

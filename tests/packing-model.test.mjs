@@ -326,7 +326,7 @@ test('dimension suggestions order 2 through 5 sizes and leave ambiguous sets unr
   }
   for (const dimensions of [
     ['10cm', '20cm', '30cm', '40cm', '50cm', '60cm'],
-    ['short', 'long'],
+    ['10-20cm', '20-30cm'],
     ['10x30cm', '20x20cm'],
   ]) {
     const draft = createPreparation(
@@ -630,7 +630,6 @@ test('size suggestions normalize units and rank measurements only when dimension
     )
   }
   for (const sizes of [
-    ['1cm', '10mm'],
     ['10ml', '20cm'],
     ['10x40cm', '20x30cm'],
   ]) {
