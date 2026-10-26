@@ -32,7 +32,7 @@ Click the **1688toPL** extension icon to open the workspace, then choose a sourc
 
 Click a product to inspect its original source. Use its checkbox for selection. **Products**, **Cartons** and **Backlog** share the same order context; All Orders retains purchase history.
 
-- Select products and choose **Review purchase-month codes**. New codes use each purchase's original calendar month. Review reserves nothing; **Assign purchase codes** commits the reviewed assignments.
+- Select product rows, then choose **Prepare products...**. Review their proposed barcodes, Spanish names, Chinese categories and materials together, grouped by purchase and product family, then use **Confirm preparation** once. Articles and source attributes establish families before variants/sizes; a shared marketing title alone requires review. The complete order provides context, while only selected products change. Existing codes and custom details remain intact, new codes use the original purchase month, and opening or cancelling reserves nothing. **Back** returns to your selection.
 - **Edit product** opens naming, material, code and label controls in Orders. Photos/tags, supplier operations, WeChat and source financial details remain here.
 - For a 1688 purchase, **Paste or import carton list** adds a supplier report to that existing order, with one scoped review and retained original source.
 - **Reconcile cartons** opens one order table. Enter or paste Pcs/box, preview keyed/visible-row alignment, fill a range and use Tab/Enter. Derived quantities stay read-only. Capacity edits propose cartons; **Confirm order cartons** records the arrangement once for the order.

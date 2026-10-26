@@ -12,6 +12,7 @@ export async function seedSmartOrder(
     uneven = false,
     orderId = '100000000000000001',
     supplierId = 'synthetic-smart-cartons',
+    purchasedAt = '2026-09-12T12:00:00+08:00',
     assignCodes = true,
   } = {}
 ) {
@@ -23,7 +24,7 @@ export async function seedSmartOrder(
   snapshot.accountId = 'local'
   snapshot.sellerName = 'Synthetic smart cartons'
   snapshot.sellerMemberLogin = supplierId
-  snapshot.purchasedAt = '2026-09-12T12:00:00+08:00'
+  snapshot.purchasedAt = purchasedAt
   snapshot.observedAt = '2026-10-22T12:00:00.000Z'
   snapshot.sourceUrl = `https://air.1688.com/app/ctf-page/trade-order-detail/index.html?orderId=${snapshot.orderId}`
   snapshot.items = Array.from({ length: count }, (_, index) => ({

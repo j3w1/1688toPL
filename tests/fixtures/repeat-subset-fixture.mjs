@@ -19,6 +19,7 @@ export function repeatSubsetFixture() {
     const items = sizes.map(([size, quantity], row) => ({
       entryId: String(row + 1),
       title: 'Synthetic planter',
+      productNumber: 'SYNTHETIC-PLANTER',
       description: `Synthetic planter · ${size}`,
       skuProperties: [{ label: '尺寸', value: size }],
       thumbnail: photo,

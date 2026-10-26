@@ -18,6 +18,12 @@ import { validateColorVocabulary } from './color-vocabulary.js'
 import { normalizeAppearance } from './appearance.js'
 import { normalizeOrderTags, normalizeTags } from './order-tags.js'
 import { spreadsheetDeclaration } from './spreadsheet-properties.js'
+import {
+  planProductFamilies,
+  productArticleIdentity,
+  productFamilyStyleProperties,
+  validateProductFamilies,
+} from './product-families.js'
 
 /** Material authoring follows source rows even when grouping is restored. */
 export function variantMaterial(variant, entryId = variant.entryIds[0]) {
@@ -198,7 +204,8 @@ export function createPreparation(
   snapshot,
   month,
   vocabulary = DEFAULT_VOCABULARY,
-  sizeVocabulary = DEFAULT_SIZE_VOCABULARY
+  sizeVocabulary = DEFAULT_SIZE_VOCABULARY,
+  { familyPlan, familyChoices = [], preparation } = {}
 ) {
   packingMonth(month)
   const suggest = createNameSuggester(vocabulary)
@@ -207,12 +214,65 @@ export function createPreparation(
   const candidates = new Map()
   const variantKeys = new Map()
   const sourceEndings = new Map()
+  const families =
+      snapshot.sourceType === 'spreadsheet' || snapshot.source === 'other'
+        ? null
+        : (familyPlan ??
+          planProductFamilies(snapshot, {
+            choices: familyChoices,
+            preparation,
+          })),
+    familyByEntry = new Map(
+      (families?.families ?? []).flatMap((family) =>
+        family.entryIds.map((entryId) => [entryId, family.id])
+      )
+    ),
+    sourceGroupKey = (item) =>
+      snapshot.sourceType === 'spreadsheet'
+        ? item.sourceGroup
+        : (familyByEntry.get(item.entryId) ??
+          (item.title || item.description).trim()),
+    attributes = (entries) =>
+      entries.map((property) => [property.label.trim(), property.value.trim()]),
+    extractedRows = new Map(
+      snapshot.items.map((item) => [item.entryId, sizeClassifier.extract(item)])
+    ),
+    articleStyles = new Set(),
+    identities = new Map()
+  if (families)
+    for (const item of snapshot.items) {
+      const identity = productArticleIdentity(item)
+      if (!identity) continue
+      const extracted = extractedRows.get(item.entryId),
+        style = JSON.stringify([
+          sourceGroupKey(item),
+          attributes(
+            productFamilyStyleProperties(item, extracted.variantProperties)
+          ),
+        ]),
+        size = item.sourceSize || extracted.size,
+        info = item.sourceSize
+          ? sizeClassifier.extract({
+              skuProperties: [{ label: '尺寸', value: size }],
+            }).sizeInfo
+          : extracted.sizeInfo,
+        sizeIdentity =
+          info.kind === 'named'
+            ? ['name', info.suffix]
+            : info.kind === 'measurement'
+              ? ['measurement', info.dimension, info.axes ?? [], info.values]
+              : ['source', size.normalize('NFKC').trim()],
+        key = JSON.stringify([style, sizeIdentity]),
+        articles = identities.get(key) ?? new Set()
+      articles.add(identity)
+      identities.set(key, articles)
+      if (articles.size > 1) articleStyles.add(style)
+    }
   for (const item of snapshot.items) {
     const title = (item.title || item.description).trim()
     // Spreadsheet group markers are authoritative even when names repeat or
     // descriptions differ. A marker is source identity, never an assigned code.
-    const groupKey =
-      snapshot.sourceType === 'spreadsheet' ? item.sourceGroup : title
+    const groupKey = sourceGroupKey(item)
     let group = groups.get(groupKey)
     if (!group) {
       const suggestion = suggest(title)
@@ -231,17 +291,24 @@ export function createPreparation(
       snapshot.sourceType === 'spreadsheet'
         ? spreadsheetDeclaration(item)
         : null
-    const extracted = sizeClassifier.extract(item)
+    const extracted = extractedRows.get(item.entryId)
     const size = item.sourceSize || extracted.size
     const variant = declaration ? declaration.variantSuffix : extracted.variant
-    const variantProperties = extracted.variantProperties
+    const variantProperties = families
+      ? productFamilyStyleProperties(item, extracted.variantProperties)
+      : extracted.variantProperties
     // Only identical complete attribute sets suggest a shared variant. No source
     // row or amount is combined; entry IDs remain individually addressable.
-    const attributes = (entries) =>
-      entries.map((property) => [property.label.trim(), property.value.trim()])
+    const styleAttributes = attributes(variantProperties)
     const variantIdentity = declaration
       ? [['variant', declaration.variantSuffix]]
-      : attributes(variantProperties)
+      : [
+          ...(families &&
+          articleStyles.has(JSON.stringify([groupKey, styleAttributes]))
+            ? [['article', productArticleIdentity(item)]]
+            : []),
+          ...styleAttributes,
+        ]
     const key = JSON.stringify([
       groupKey,
       variantIdentity,
@@ -305,6 +372,7 @@ export function createPreparation(
     revision: 0,
     updatedAt: new Date().toISOString(),
     groups: [...groups.values()],
+    ...(families?.evidence ? { productFamilies: families.evidence } : {}),
   }
 }
 
@@ -920,6 +988,8 @@ export function validatePreparation(input) {
     updatedAt: new Date(input.updatedAt).toISOString(),
     groups,
   }
+  if (input.productFamilies !== undefined)
+    result.productFamilies = validateProductFamilies(input.productFamilies)
   if (input.packingPosition !== undefined)
     result.packingPosition = input.packingPosition
   if (input.restoreScopes !== undefined) {

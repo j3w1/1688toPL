@@ -26,7 +26,7 @@ const stableDescriptions = new Map([
   ],
   [
     'review-purchase-codes',
-    'Review codes in Orders using each original purchase month. No codes are reserved until assignment.',
+    'Review product families, purchase-month codes, Spanish names, Chinese categories and materials for selected products. Nothing is saved until confirmation.',
   ],
   [
     'include-container-orders',

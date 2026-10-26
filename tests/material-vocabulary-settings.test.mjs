@@ -205,6 +205,7 @@ test('changing recognition rules refreshes suggestions and keeps authored materi
     items: Array.from({ length: 3 }, (_, index) => ({
       entryId: String(index + 1),
       title: '玻璃花瓶',
+      productNumber: 'SYNTHETIC-GLASS-VASE',
       skuProperties: [
         { label: '材质', value: '玻璃' },
         { label: '颜色', value: ['红色', '白色', '黑色'][index] },

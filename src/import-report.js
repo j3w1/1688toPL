@@ -1,10 +1,62 @@
 import { detailUrl } from './order-list.js'
 import { financialDiagnostics } from './import-diagnostics.js'
 
+/** Reader diagnostics contain lifecycle categories only, never page/API text. */
+export function readerDiagnostics(input) {
+  if (!Array.isArray(input)) return []
+  return input.slice(-24).flatMap((entry) =>
+    ['background', 'window', 'visible', 'recovered'].includes(entry?.method) &&
+    [
+      'creating',
+      'missing',
+      'blank',
+      'owned',
+      'navigated',
+      'api-error',
+      'duplicate-closed',
+    ].includes(entry?.outcome)
+      ? [
+          {
+            method: entry.method,
+            outcome: entry.outcome,
+            ...(['creating', 'registering', 'retargeting', 'cleanup'].includes(
+              entry.stage
+            )
+              ? { stage: entry.stage }
+              : {}),
+            ...([
+              'MISSING_TAB',
+              'CREATION_FAILED',
+              'BROWSER_API_FAILED',
+              'NAVIGATED',
+              'REGISTRATION_TIMEOUT',
+            ].includes(entry.code)
+              ? { code: entry.code }
+              : {}),
+            ...(Number.isInteger(entry.check) &&
+            entry.check >= 0 &&
+            entry.check <= 5
+              ? { check: entry.check }
+              : {}),
+            ...(Number.isFinite(entry.elapsedMs)
+              ? {
+                  elapsedMs: Math.max(
+                    0,
+                    Math.min(60000, Math.round(entry.elapsedMs))
+                  ),
+                }
+              : {}),
+          },
+        ]
+      : []
+  )
+}
+
 /** Progress views omit saved evidence; report export reads the full job locally. */
 export function importJobView(job) {
+  const { readerAttempt, readerDiagnostics: diagnostics, ...view } = job
   return {
-    ...job,
+    ...view,
     orders: (job.orders || []).map(({ lastFailure, ...order }) => order),
   }
 }
@@ -58,6 +110,9 @@ export function createImportReport(
           ? Math.ceil(expected / job.pageSize)
           : null,
       error: job.error || '',
+      ...(readerDiagnostics(job.readerDiagnostics).length
+        ? { readerDiagnostics: readerDiagnostics(job.readerDiagnostics) }
+        : {}),
     },
     counts: {
       expected,

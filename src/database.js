@@ -1,6 +1,12 @@
 import * as purchaseCodes from './purchase-codes.js'
+import {
+  assertProductPreparationSelection,
+  enrichProductPreparationReview,
+} from './product-preparation-review.js'
+import { productFamilySourceKey } from './product-families.js'
 import { reviewStoreImportCodes } from './store-import-codes.js'
 import { planOrderRemoval } from './order-removal.js'
+import { validateReconciliationReview } from './order-reconciliation.js'
 import { createLibraryChanges } from './library-changes.js'
 import { createMaterialSuggester } from './material-vocabulary.js'
 import {
@@ -345,6 +351,11 @@ function validateSnapshot(input) {
     'Order totals'
   )
   validateAmounts(items, totals)
+  const reconciliationReview = validateReconciliationReview({
+    ...input,
+    items,
+    totals,
+  })
   const storeSource = spreadsheet
     ? validateStoreSource(input.spreadsheet)
     : null
@@ -449,6 +460,7 @@ function validateSnapshot(input) {
     ...(purchasedAt ? { purchasedAt } : {}),
     items,
     totals,
+    ...(reconciliationReview ? { reconciliationReview } : {}),
   }
 }
 
@@ -1240,6 +1252,25 @@ function validatePreparationMembership(preparation, order, history) {
     )
   )
   if (
+    preparation.productFamilies?.families.some((family) =>
+      family.entryIds.some((entryId) => !knownIds.has(entryId))
+    )
+  )
+    throw new Error(
+      'Reviewed product families contain an unknown source entry.'
+    )
+  if (
+    preparation.productFamilies &&
+    ![order, ...history].some(
+      (record) =>
+        productFamilySourceKey(record.snapshot) ===
+        preparation.productFamilies.sourceKey
+    )
+  )
+    throw new Error(
+      'Reviewed product families do not match retained source evidence.'
+    )
+  if (
     [
       preparation,
       preparation.defaultPacking,
@@ -1864,6 +1895,7 @@ export async function openDatabase({ name = '1688-order-library' } = {}) {
       expectedRevisions = inputs.map((entry) => entry.revision),
       preview = false,
       preserveNaming = false,
+      preserveMaterials = false,
       cartonBatchChanges = [],
       allowCartonReview = false,
       suffixBaselines = [],
@@ -2051,21 +2083,42 @@ export async function openDatabase({ name = '1688-order-library' } = {}) {
           const order = ordersByKey.get(keys[index])
           if (!order)
             throw new Error('Save the source order before preparing labels')
+          if (
+            draft.productFamilies &&
+            stableValue(draft.productFamilies) !==
+              stableValue(previous?.productFamilies)
+          ) {
+            const currentIds = new Set(
+              order.snapshot.items.map((item) => item.entryId)
+            )
+            if (
+              draft.productFamilies.sourceKey !==
+                productFamilySourceKey(order.snapshot) ||
+              draft.productFamilies.families.some((family) =>
+                family.entryIds.some((entryId) => !currentIds.has(entryId))
+              )
+            )
+              throw new Error(
+                'The product family source changed. Review the product groups again.'
+              )
+          }
           validatePreparationSuffixEdits(draft, previous, {
             snapshot: order.snapshot,
             restored: restoredByKey.get(keys[index]),
             sizeVocabulary: preferences?.value.sizeVocabulary,
           })
-          drafts[index] = refreshPreparationMaterials(
-            draft,
-            order.snapshot,
-            new Map(
-              order.snapshot.items.map((item) => [
-                item.entryId,
-                materialSuggester(item),
-              ])
-            )
-          )
+          drafts[index] = preserveMaterials
+            ? draft
+            : refreshPreparationMaterials(
+                draft,
+                order.snapshot,
+                new Map(
+                  order.snapshot.items.map((item) => [
+                    item.entryId,
+                    materialSuggester(item),
+                  ])
+                )
+              )
         }
         validateSharedProducts(
           [
@@ -2535,12 +2588,13 @@ export async function openDatabase({ name = '1688-order-library' } = {}) {
       )
     },
     reviewPurchaseCodes(selection) {
-      return read(OPERATIONAL_STORES, async (tx) =>
-        purchaseCodes.planPurchaseCodeReview(
-          await containerRepository.state(tx),
-          selection
+      return read(OPERATIONAL_STORES, async (tx) => {
+        const state = await containerRepository.state(tx)
+        return enrichProductPreparationReview(
+          purchaseCodes.planPurchaseCodeReview(state, selection),
+          state
         )
-      )
+      })
     },
     assignPurchaseCodes(input) {
       return containerRepository.mutate(
@@ -2556,12 +2610,15 @@ export async function openDatabase({ name = '1688-order-library' } = {}) {
             throw new Error(
               'Review valid purchase code assignments before committing.'
             )
+          assertProductPreparationSelection(plan, loaded)
           return savePreparations(
             plan.preparations,
             {
               expectedRevisions:
                 input.expectedRevisions || plan.expectedRevisions,
               expectedSnapshots: plan.expectedSnapshots,
+              preserveNaming: true,
+              preserveMaterials: true,
             },
             tx
           )

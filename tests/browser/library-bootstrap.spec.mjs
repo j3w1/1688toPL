@@ -221,7 +221,11 @@ for (const stale of ['purchase', 'container', 'account'])
     )
     expect(await page.evaluate(() => history.length)).toBe(historyLength)
     for (const selector of bootstrapControls) {
-      if (['#clear-rows', '#remove-orders'].includes(selector))
+      if (
+        ['#clear-rows', '#remove-orders', '#review-purchase-codes'].includes(
+          selector
+        )
+      )
         await expect(page.locator(selector)).toBeDisabled()
       else await expect(page.locator(selector)).toBeEnabled()
     }

@@ -22,8 +22,27 @@ const syntheticOrderId = '1234567890123456789'
 
 async function startFixtureServer() {
   const moduleBundles = new Map()
+  let readerAttachment
   const server = createServer(async (request, response) => {
-    const pathname = new URL(request.url, 'http://127.0.0.1').pathname
+    const requestUrl = new URL(request.url, 'http://127.0.0.1')
+    const pathname = requestUrl.pathname
+    if (pathname === '/reader-attached') {
+      const token = requestUrl.searchParams.get('token')
+      if (!readerAttachment || !/^[a-z0-9-]{36}$/.test(token || '')) {
+        response.writeHead(400)
+        response.end()
+        return
+      }
+      try {
+        await readerAttachment(token)
+        response.writeHead(200)
+        response.end('attached')
+      } catch {
+        response.writeHead(500)
+        response.end('Synthetic reader was not attached')
+      }
+      return
+    }
     // Native repository tests import source modules directly. Report decoding
     // brings SheetJS into that graph; serve its browser ESM bundle locally.
     if (pathname === '/src/store-workbook-reader.js') {
@@ -120,7 +139,13 @@ async function startFixtureServer() {
     }
   }
   const origin = `http://127.0.0.1:${server.address().port}`
-  return { server, origin }
+  return {
+    server,
+    origin,
+    onReaderAttachment: (handler) => {
+      readerAttachment = handler
+    },
+  }
 }
 
 async function prepareExtension(directory, importFlow) {
@@ -216,6 +241,7 @@ export const test = base.extend({
     const profilePath = path.join(temporaryRoot, 'profile')
     let context
     let server
+    let readerWorker
     try {
       const extensionId = await prepareExtension(extensionPath, importFlow)
       await mkdir(downloadPath, { recursive: true })
@@ -266,6 +292,59 @@ export const test = base.extend({
       await setOrder()
       const inspector = await context.newPage()
       await inspector.goto(`chrome-extension://${extensionId}/inspector.html`)
+      if (importFlow) {
+        // Chrome can issue an extension-created tab's first remote request
+        // before Playwright attaches its request routing. Keep this barrier in
+        // the synthetic host adapter, never in the production reader lifecycle.
+        local.onReaderAttachment(async (token) => {
+          const url = `about:blank#1688topl-fixture=${token}`
+          const page =
+            context.pages().find((candidate) => candidate.url() === url) ||
+            (await context.waitForEvent('page', {
+              predicate: (candidate) => candidate.url() === url,
+              timeout: 5000,
+            }))
+          await page.evaluate(() => document.readyState)
+        })
+        readerWorker =
+          context
+            .serviceWorkers()
+            .find((worker) =>
+              worker.url().startsWith(`chrome-extension://${extensionId}/`)
+            ) || (await context.waitForEvent('serviceworker'))
+        await readerWorker.evaluate((fixtureOrigin) => {
+          const create = chrome.tabs.create.bind(chrome.tabs)
+          const update = chrome.tabs.update.bind(chrome.tabs)
+          globalThis.restoreSyntheticReaderCreation = () => {
+            chrome.tabs.create = create
+          }
+          chrome.tabs.create = async (options) => {
+            const url = new URL(options.url || 'about:blank')
+            if (
+              url.origin !== 'https://air.1688.test' ||
+              url.pathname !== '/app/ctf-page/trade-order-detail/index.html'
+            )
+              return create(options)
+            if (!/^#1688to(?:pl|csv)-import=.+$/.test(url.hash))
+              return create(options)
+            if (options.url !== url.href)
+              throw new Error(
+                'Synthetic reader did not request its final marked URL'
+              )
+            const token = crypto.randomUUID()
+            const tab = await create({
+              ...options,
+              url: `about:blank#1688topl-fixture=${token}`,
+            })
+            const ready = await fetch(
+              `${fixtureOrigin}/reader-attached?token=${token}`
+            )
+            if (!ready.ok)
+              throw new Error('Synthetic reader routing did not attach')
+            return update(tab.id, { url: options.url })
+          }
+        }, local.origin)
+      }
       const tabId = await inspector.evaluate(async (url) => {
         const tabs = await chrome.tabs.query({})
         return tabs.find((tab) => tab.url === url)?.id
@@ -291,6 +370,10 @@ export const test = base.extend({
         setOrder,
       })
     } finally {
+      if (readerWorker)
+        await readerWorker
+          .evaluate(() => globalThis.restoreSyntheticReaderCreation?.())
+          .catch(() => {})
       if (context) await context.close()
       if (server)
         await new Promise((resolve, reject) =>

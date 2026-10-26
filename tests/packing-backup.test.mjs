@@ -1,4 +1,5 @@
 import { legacyPackingCheckpoint } from './fixtures/legacy-packing-checkpoint.mjs'
+import { productFamilySourceKey } from '../src/product-families.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mergeProductAnnotations, validateBackup } from '../src/database.js'
@@ -35,6 +36,7 @@ function fixture() {
     items: ['Red cup', 'Blue cup', 'Bowl'].map((description, index) => ({
       entryId: String(index + 1),
       title: index < 2 ? 'Cup' : 'Bowl',
+      productNumber: index < 2 ? 'SYNTHETIC-CUP' : 'SYNTHETIC-BOWL',
       description,
       thumbnail: `https://cbu01.alicdn.com/synthetic-${index}.png`,
       skuProperties: [{ label: '颜色', value: index === 0 ? 'red' : 'blue' }],
@@ -100,6 +102,59 @@ function fixture() {
 const selection = (entryIds = ['2']) => ({
   months: ['2026-10'],
   orders: [{ orderId: '1001', entryIds }],
+})
+
+test('scoped archives retain reviewed family context without assigning unchecked source rows', () => {
+  const { snapshot, preparation, backup } = fixture()
+  preparation.productFamilies = {
+    version: 1,
+    sourceKey: productFamilySourceKey(snapshot),
+    families: [
+      { entryIds: ['1', '2'], kind: 'family' },
+      { entryIds: ['3'], kind: 'standalone' },
+    ],
+  }
+  const scoped = createPackingBackup(backup, selection(['1'])),
+    reviewed = scoped.preparations[0].productFamilies
+  assert.deepEqual(reviewed.families, [
+    { entryIds: ['1', '2'], kind: 'family' },
+  ])
+  assert.deepEqual(
+    scoped.preparations[0].groups[0].variants.flatMap(
+      (variant) => variant.entryIds
+    ),
+    ['1']
+  )
+  assert.equal(scoped.orders[0].snapshot.items.length, 3)
+  assert.doesNotThrow(() => validateBackup(scoped))
+  const local = selectPackingPreparation(preparation, ['3'])
+  delete local.productFamilies
+  const merged = mergePackingPreparation(local, scoped.preparations[0], ['1'])
+  assert.deepEqual(merged.productFamilies, reviewed)
+  assert.deepEqual(
+    merged.groups
+      .flatMap((group) => group.variants.flatMap((variant) => variant.entryIds))
+      .sort(),
+    ['1', '3']
+  )
+  assert.deepEqual(
+    mergePackingPreparation(merged, scoped.preparations[0], ['1'])
+      .productFamilies,
+    reviewed
+  )
+})
+
+test('family evidence cannot import foreign identities or a mismatched source key through backup', () => {
+  const { snapshot, preparation, backup } = fixture()
+  preparation.productFamilies = {
+    version: 1,
+    sourceKey: productFamilySourceKey(snapshot),
+    families: [{ entryIds: ['1', '999'], kind: 'family' }],
+  }
+  assert.throws(() => validateBackup(backup), /unknown source entry/)
+  preparation.productFamilies.families[0].entryIds = ['1', '2']
+  preparation.productFamilies.sourceKey = 'unrelated'
+  assert.throws(() => validateBackup(backup), /retained source evidence/)
 })
 
 test('month-less physical facts require complete v5 order scope and retain exact facts and tombstones', () => {

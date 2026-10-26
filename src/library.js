@@ -1281,6 +1281,7 @@ export async function startLibrary(
     packing?.updateActions()
     const rows = filteredRows(),
       selected = rows.filter((row) => selectedRows.has(keyFor(row)))
+    $('review-purchase-codes').disabled = !packing || !selected.length
     paintProductSelection()
     renderSelectionTotals(rows, selected)
     bindText(
@@ -2481,12 +2482,19 @@ export async function startLibrary(
     const entry = jobViews.get(job.id)
     if (!entry) return
     entry.view.update(job)
-    const errors = (job.orders || [])
-      .filter((item) => item.state === 'failed')
-      .slice(0, 3)
-    const errorSignature = JSON.stringify(
-      errors.map((item) => [item.orderId, item.error])
+    const failures = (job.orders || []).filter(
+      (item) => item.state === 'failed'
     )
+    entry.errorPage = Math.min(
+      entry.errorPage || 0,
+      Math.max(0, Math.ceil(failures.length / 3) - 1)
+    )
+    const start = entry.errorPage * 3
+    const errors = failures.slice(start, start + 3)
+    const errorSignature = JSON.stringify([
+      entry.errorPage,
+      failures.map((item) => [item.orderId, item.error, item.reviewRequired]),
+    ])
     if (entry.errorSignature !== errorSignature) {
       entry.errorSignature = errorSignature
       entry.errors.replaceChildren(
@@ -2496,9 +2504,60 @@ export async function startLibrary(
             orderReference(item.orderId),
             node('span', uiMessage(item.error || 'Could not read order'))
           )
+          if (item.reviewRequired) {
+            const review = node('button', uiMessage('Review discounts'))
+            review.type = 'button'
+            review.dataset.action = 'review-order-discounts'
+            review.dataset.orderId = item.orderId
+            review.addEventListener('click', async () => {
+              review.disabled = true
+              try {
+                await send('IMPORT_REVIEW_OPEN', {
+                  jobId: job.id,
+                  orderId: item.orderId,
+                })
+              } catch (error) {
+                feedback(error.message, true)
+              } finally {
+                review.disabled = false
+              }
+            })
+            row.append(review)
+          }
           return row
         })
       )
+      if (failures.length > 3) {
+        const pages = node('div', undefined, 'job-actions job-error-pagination')
+        pages.append(
+          node(
+            'span',
+            uiMessage('{first}–{last} of {total} orders need attention', {
+              first: start + 1,
+              last: Math.min(start + 3, failures.length),
+              total: failures.length,
+            })
+          )
+        )
+        for (const [direction, label] of [
+          [-1, 'Previous failed orders'],
+          [1, 'Next failed orders'],
+        ]) {
+          const button = node('button', uiMessage(label))
+          button.type = 'button'
+          button.disabled =
+            direction < 0 ? !start : start + 3 >= failures.length
+          button.addEventListener('click', () => {
+            entry.errorPage += direction
+            updateJobView(jobs.find((current) => current.id === job.id) || job)
+            entry.errors
+              .querySelector('.job-error-pagination button:not(:disabled)')
+              ?.focus()
+          })
+          pages.append(button)
+        }
+        entry.errors.append(pages)
+      }
     }
   }
   function render() {

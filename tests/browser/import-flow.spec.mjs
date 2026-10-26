@@ -96,6 +96,7 @@ function completeOrder(
 async function setup(
   extension,
   {
+    orderIds = ids,
     delay = 0,
     summary = '2.40',
     customization = false,
@@ -119,7 +120,7 @@ async function setup(
     const url = new URL(route.request().url())
     let body
     if (url.pathname.includes('trade-order-list')) {
-      body = `<order-app><q-pagination data-tracker="pagination-order-list" current="1" pagesize="10" total="2"></q-pagination>${ids
+      body = `<order-app><q-pagination data-tracker="pagination-order-list" current="1" pagesize="${orderIds.length > 10 ? 20 : 10}" total="${orderIds.length}"></q-pagination>${orderIds
         .map(
           (id) => `
         <order-item data-tracker-args="orderId=${id}">
@@ -906,6 +907,265 @@ test('selected import reaches persistent spreadsheet and clipboard through real 
     4
   )
   expect(extension.unexpectedRequests).toEqual([])
+})
+
+test('the same Orders refresh action completes one, two and eleven selected orders without duplicate readers', async ({
+  extension,
+}) => {
+  test.setTimeout(120_000)
+  const orderIds = Array.from({ length: 11 }, (_, index) =>
+      String(9990000000000000100n + BigInt(index))
+    ),
+    { list, library, visited } = await setup(extension, { orderIds })
+  await list
+    .getByRole('button', { name: 'Import selected', exact: true })
+    .click()
+  await list
+    .getByRole('button', { name: 'Import 11 selected orders', exact: true })
+    .click()
+  await expect(library.locator('#order-count')).toHaveText('11', {
+    timeout: 65_000,
+  })
+  await expect
+    .poll(() =>
+      extension.inspector.evaluate(async () =>
+        (await (await window.testRepository).listJobs()).some(
+          (job) => job.state === 'running'
+        )
+      )
+    )
+    .toBe(false)
+  const before = await libraryBackup(extension)
+  for (const [iteration, count] of [1, 2, 11].entries()) {
+    await library.locator('#all-orders').click()
+    await expandOrderMonths(library)
+    for (const orderId of orderIds.slice(0, count))
+      await library
+        .locator(
+          `.order-card[data-order-id="${orderId}"] > input[type="checkbox"]`
+        )
+        .check()
+    const start = visited.length
+    await library.locator('#refresh-orders').click()
+    if (count > 1)
+      await library
+        .getByRole('dialog', { name: 'Confirm operation', exact: true })
+        .getByRole('button', { name: `Refresh ${count} orders`, exact: true })
+        .click()
+    await expect
+      .poll(
+        () =>
+          extension.inspector.evaluate(
+            async () =>
+              (await (await window.testRepository).listJobs()).filter(
+                (job) => job.kind === 'refresh'
+              ).length
+          ),
+        { timeout: 15_000 }
+      )
+      .toBe(iteration + 1)
+    await expect
+      .poll(
+        () =>
+          extension.inspector.evaluate(async () =>
+            (await (await window.testRepository).listJobs()).some(
+              (job) => job.state === 'running'
+            )
+          ),
+        { timeout: 50_000 }
+      )
+      .toBe(false)
+    const job = await extension.inspector.evaluate(
+      async (count) =>
+        (await (await window.testRepository).listJobs()).find(
+          (job) => job.kind === 'refresh' && job.total === count
+        ),
+      count
+    )
+    expect(job.state, JSON.stringify(job)).toBe('completed')
+    expect(job.completed).toBe(count)
+    expect(job.failed).toBe(0)
+    expect(visited.slice(start).sort()).toEqual(orderIds.slice(0, count).sort())
+    expect(
+      await extension.inspector.evaluate(
+        async (jobId) =>
+          (await chrome.tabs.query({})).filter((tab) =>
+            tab.url?.endsWith(`#1688topl-import=${jobId}`)
+          ).length,
+        job.id
+      )
+    ).toBe(0)
+    const after = await libraryBackup(extension)
+    expect(
+      after.orders.map((record) => ({
+        id: record.snapshot.orderId,
+        totals: record.snapshot.totals,
+        items: record.snapshot.items,
+      }))
+    ).toEqual(
+      before.orders.map((record) => ({
+        id: record.snapshot.orderId,
+        totals: record.snapshot.totals,
+        items: record.snapshot.items,
+      }))
+    )
+    expect(after.preparations).toEqual(before.preparations)
+    expect(after.cartonBatches).toEqual(before.cartonBatches)
+  }
+  expect(extension.unexpectedRequests).toEqual([])
+})
+
+test('multi-order refresh replaces a recovered reader lost during retargeting and preserves saved products', async ({
+  extension,
+}) => {
+  test.setTimeout(80_000)
+  const { list, library } = await setup(extension)
+  await list
+    .getByRole('button', { name: 'Import selected', exact: true })
+    .click()
+  await list
+    .getByRole('button', { name: 'Import 2 selected orders', exact: true })
+    .click()
+  await expect(library.locator('#order-count')).toHaveText('2', {
+    timeout: 65_000,
+  })
+  await expect
+    .poll(() =>
+      extension.inspector.evaluate(async () =>
+        (await (await window.testRepository).listJobs()).every(
+          (job) => job.state !== 'running'
+        )
+      )
+    )
+    .toBe(true)
+  const before = await libraryBackup(extension),
+    jobId = 'synthetic-refresh-recovered-reader',
+    orphan = await extension.inspector.evaluate(
+      async ({ jobId, urls }) => {
+        const repository = await window.testRepository,
+          timestamp = new Date().toISOString()
+        await repository.putJob({
+          id: jobId,
+          accountId: 'local',
+          kind: 'refresh',
+          state: 'paused',
+          phase: 'details',
+          total: urls.length,
+          orders: urls.map(({ orderId, sourceUrl }) => ({
+            orderId,
+            sourceUrl,
+            state: 'pending',
+            error: '',
+          })),
+          workerTabId: null,
+          page: 0,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          error: '',
+        })
+        return chrome.tabs.create({
+          url: `${urls[1].sourceUrl}#1688topl-import=${jobId}`,
+          active: false,
+        })
+      },
+      {
+        jobId,
+        urls: ids.map((orderId) => ({
+          orderId,
+          sourceUrl: detailUrl(orderId),
+        })),
+      }
+    ),
+    worker = extension.context
+      .serviceWorkers()
+      .find((value) => value.url().startsWith(extension.extensionBaseUrl))
+  expect(worker).toBeTruthy()
+  await expect
+    .poll(() =>
+      extension.inspector.evaluate(async (id) => {
+        const tab = await chrome.tabs.get(id)
+        return { status: tab.status, url: tab.url }
+      }, orphan.id)
+    )
+    .toEqual({
+      status: 'complete',
+      url: `${detailUrl(ids[1])}#1688topl-import=${jobId}`,
+    })
+  await worker.evaluate((id) => {
+    const update = chrome.tabs.update.bind(chrome.tabs)
+    globalThis.refreshRetargetRace = false
+    globalThis.restoreRefreshUpdate = () => {
+      chrome.tabs.update = update
+    }
+    chrome.tabs.update = async (tabId, options) => {
+      if (tabId === id && options.url && !globalThis.refreshRetargetRace) {
+        globalThis.refreshRetargetRace = true
+        await chrome.tabs.remove(tabId)
+      }
+      return update(tabId, options)
+    }
+  }, orphan.id)
+  try {
+    const resumed = await extension.inspector.evaluate(
+      (jobId) => chrome.runtime.sendMessage({ type: 'IMPORT_RESUME', jobId }),
+      jobId
+    )
+    expect(resumed.ok, resumed.error).toBe(true)
+    await expect
+      .poll(
+        () =>
+          extension.inspector.evaluate(
+            async (jobId) =>
+              (await (await window.testRepository).getJob(jobId)).state,
+            jobId
+          ),
+        { timeout: 40_000 }
+      )
+      .not.toBe('running')
+    const job = await extension.inspector.evaluate(
+      async (jobId) => (await window.testRepository).getJob(jobId),
+      jobId
+    )
+    expect(job.state, JSON.stringify(job)).toBe('completed')
+    expect(await worker.evaluate(() => globalThis.refreshRetargetRace)).toBe(
+      true
+    )
+    expect(job.completed).toBe(2)
+    expect(job.failed).toBe(0)
+    expect(job.orders.every((order) => order.state === 'done')).toBe(true)
+    const after = await libraryBackup(extension)
+    expect(after.orders).toHaveLength(2)
+    const financialRows = (backup) =>
+      backup.orders
+        .map(({ snapshot }) => ({
+          orderId: snapshot.orderId,
+          totals: snapshot.totals,
+          items: snapshot.items.map(
+            ({ entryId, quantity, price, discount }) => ({
+              entryId,
+              quantity,
+              price,
+              discount,
+            })
+          ),
+        }))
+        .sort((a, b) => a.orderId.localeCompare(b.orderId))
+    expect(financialRows(after)).toEqual(financialRows(before))
+    expect(after.preparations).toEqual(before.preparations)
+    expect(after.cartonBatches).toEqual(before.cartonBatches)
+    expect(
+      await extension.inspector.evaluate(
+        async (jobId) =>
+          (await chrome.tabs.query({})).some((tab) =>
+            tab.url?.endsWith(`#1688topl-import=${jobId}`)
+          ),
+        jobId
+      )
+    ).toBe(false)
+    expect(extension.unexpectedRequests).toEqual([])
+  } finally {
+    await worker.evaluate(() => globalThis.restoreRefreshUpdate())
+  }
 })
 
 test('delayed rendering and labelled discount summaries import complete products', async ({

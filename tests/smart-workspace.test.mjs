@@ -2814,6 +2814,64 @@ test('purchase-code review excludes documented fee quantities but retains unknow
   document.querySelector('.purchase-code-review').close()
 })
 
+test('an unprepared product shortcut retains selected rows across orders and empty product scope never expands an order', async (context) => {
+  const { document } = authoringEnvironment(context),
+    first = syntheticOrder('1001'),
+    second = syntheticOrder('1002'),
+    other = syntheticOrder('1003'),
+    calls = []
+  first.snapshot.items = Array.from({ length: 17 }, (_, index) => ({
+    ...first.snapshot.items[0],
+    entryId: String(2001 + index),
+  }))
+  Object.assign(first.snapshot.totals, {
+    goodsGross: '17000.00',
+    goodsNet: '17000.00',
+    payable: '17000.00',
+  })
+  Object.assign(other.snapshot, { source: 'other', sourceUrl: '' })
+  const records = [first, second, other],
+    before = structuredClone(records),
+    authoring = await createProductAuthoring({
+      repository: {
+        listPreparations: async () => [],
+        getPackingPreferences: async () => validatePackingPreferences({}),
+        reviewPurchaseCodes: async (selection) => {
+          calls.push(structuredClone(selection))
+          return { changes: [], issues: [] }
+        },
+      },
+      getRecords: () => records,
+      getSelectedRows: () => [
+        { accountId: 'local', orderId: '1001', entryId: '2001' },
+        { accountId: 'local', orderId: '1002', entryId: '2001' },
+      ],
+    })
+  context.after(() => authoring.dispose())
+  await authoring.openEditor({
+    accountId: 'local',
+    orderId: '1001',
+    entryId: '2001',
+  })
+  assert.deepEqual(calls[0].entryRefs, [
+    { accountId: 'local', orderId: '1001', entryId: '2001' },
+    { accountId: 'local', orderId: '1002', entryId: '2001' },
+  ])
+  assert.deepEqual(calls[0].orderRefs, [
+    { accountId: 'local', orderId: '1001' },
+    { accountId: 'local', orderId: '1002' },
+  ])
+  document.querySelector('.purchase-code-review').close()
+  await assert.rejects(
+    authoring.reviewCodes([], {
+      orderRefs: [{ accountId: 'local', orderId: '1001' }],
+    }),
+    /Select at least one product/
+  )
+  assert.equal(calls.length, 1)
+  assert.deepEqual(records, before)
+})
+
 test('grouping separates complete source scope from chosen variants and protects unselected shared source rows', async (testContext) => {
   const { document } = authoringEnvironment(testContext),
     { record, preparation } = syntheticManifest().orders[0],

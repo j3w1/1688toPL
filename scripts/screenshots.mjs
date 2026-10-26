@@ -1,5 +1,6 @@
 import { chromium, expect } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
+import { build } from 'esbuild'
 import { startPreview } from './preview.mjs'
 import { workbookFile } from '../tests/fixtures/store-workbook-fixture.mjs'
 
@@ -268,6 +269,91 @@ try {
   await page
     .locator('aside[aria-label="1688toPL"]')
     .screenshot({ path: 'screenshots/import-progress.png' })
+  const codesPage = await browser.newPage({
+    viewport: { width: 1280, height: 960 },
+    deviceScaleFactor: 1,
+    colorScheme: 'light',
+  })
+  await codesPage.addInitScript(() =>
+    localStorage.setItem('1688-workspace-language', 'en')
+  )
+  await codesPage.goto(`${preview.url}/library.html`)
+  await expect(codesPage.locator('#order-count')).toHaveText('3')
+  for (const month of await codesPage
+    .locator('.month-toggle[aria-expanded="false"]')
+    .all())
+    await month.click()
+  await codesPage
+    .locator('#order-list .order-card')
+    .first()
+    .getByRole('checkbox')
+    .check()
+  await codesPage
+    .locator('#sheet-body tr[data-selection-key]')
+    .nth(0)
+    .getByRole('checkbox')
+    .check()
+  await codesPage
+    .locator('#sheet-body tr[data-selection-key]')
+    .nth(1)
+    .getByRole('checkbox')
+    .check()
+  await expect(codesPage.locator('#review-purchase-codes')).toBeEnabled()
+  await codesPage.locator('#review-purchase-codes').click()
+  const codesReview = codesPage.locator('[data-action="purchase-code-review"]')
+  await expect(codesReview).toBeVisible()
+  await expect(
+    codesReview.locator('[data-action="assign-purchase-codes"]')
+  ).toBeEnabled()
+  await codesReview.screenshot({
+    path: 'screenshots/purchase-code-review-all.png',
+  })
+  await codesPage.setViewportSize({ width: 390, height: 844 })
+  await codesReview.screenshot({
+    path: 'work/product-code-selection-narrow.png',
+  })
+  await codesPage.close()
+  const discountPage = await browser.newPage({
+    viewport: { width: 1280, height: 960 },
+    deviceScaleFactor: 1,
+    colorScheme: 'light',
+  })
+  await discountPage.goto(preview.url)
+  const discountReview = await build({
+    absWorkingDir: process.cwd(),
+    stdin: {
+      resolveDir: process.cwd(),
+      contents: `
+        import { buildDiscountReviewFixture } from './tests/fixtures/discount-review-fixture.mjs';
+        import { reviewOrderSnapshot } from './src/order-snapshot.js';
+        import { openOrderDiscountReview } from './src/order-discount-review.js';
+        buildDiscountReviewFixture(document, '9990000000000000042');
+        const readReview = () => reviewOrderSnapshot(document, 'https://air.1688.com/app/ctf-page/trade-order-detail/index.html?orderId=9990000000000000042');
+        void openOrderDiscountReview({ document, review: readReview().review, language: 'en', readReview, onConfirm: async () => {} });
+      `,
+    },
+    bundle: true,
+    write: false,
+    format: 'iife',
+    target: 'chrome120',
+  })
+  await discountPage.addScriptTag({
+    content: discountReview.outputFiles[0].text,
+  })
+  const discountDialog = discountPage.getByRole('dialog', {
+    name: 'Review discounts',
+    exact: true,
+  })
+  await expect(discountDialog.locator('input[type="radio"]')).toHaveCount(2)
+  await expect(discountDialog).toContainText('¥5960.00')
+  await discountDialog.screenshot({
+    path: 'screenshots/order-discount-review.png',
+  })
+  await discountPage.setViewportSize({ width: 390, height: 740 })
+  await discountDialog.screenshot({
+    path: 'work/order-discount-review-narrow.png',
+  })
+  await discountPage.close()
 } finally {
   await browser.close()
   await preview.close()

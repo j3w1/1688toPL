@@ -1,5 +1,7 @@
 import { detailUrl } from './order-list.js'
 import { financialDiagnostics } from './import-diagnostics.js'
+import { validateReconciliationReview } from './order-reconciliation.js'
+import { readerDiagnostics } from './import-report.js'
 
 const active = (job) => job.state === 'running'
 const errorText = (error) =>
@@ -91,10 +93,10 @@ export function createImportController({
     // A sign-in or verification step is shown once in the workspace with a
     // button to open the tab when the seller requires user interaction.
     job.attention =
-      attention && Number.isInteger(job.workerTabId)
+      attention && Number.isInteger(job.workerTabId ?? job.readerAttempt?.tabId)
         ? {
             kind: attention,
-            tabId: Number.isInteger(job.workerTabId) ? job.workerTabId : null,
+            tabId: job.workerTabId ?? job.readerAttempt.tabId,
             orderId: job.currentOrderId ?? null,
             at: new Date(now()).toISOString(),
           }
@@ -219,10 +221,13 @@ export function createImportController({
           order.savedRows = savedRows.get(order.orderId)
     }
     for (const order of job.orders)
-      if (order.state === 'failed')
+      if (order.state === 'failed') {
         Object.assign(order, { state: 'pending', error: '' })
+        delete order.reviewRequired
+      }
     job.state = 'running'
     job.readerReopens = 0
+    delete job.readerAttempt
     delete job.dismissedAt
     job.error = ''
     job.attention = null
@@ -325,6 +330,94 @@ export function createImportController({
     return 'continue'
   }
 
+  function assertCompleteSnapshot(order, snapshot) {
+    if (
+      snapshot.orderId !== order.orderId ||
+      !detailUrl(snapshot.sourceUrl, order.orderId)
+    )
+      throw new Error('The detail page returned a different order.')
+    if (order.expectedRows && snapshot.items.length !== order.expectedRows)
+      throw new Error(
+        `Expected ${order.expectedRows} product rows but read ${snapshot.items.length}. No saved data was replaced.`
+      )
+  }
+
+  function recordSavedOrder(job, order, snapshot) {
+    order.state = 'done'
+    order.error = ''
+    order.savedRows = snapshot.items.length
+    delete order.reviewRequired
+    job.latestResult = {
+      orderId: order.orderId,
+      outcome: 'saved',
+      rows: order.savedRows,
+      sellerName: String(snapshot.sellerName || '').slice(0, 160),
+      payable: String(snapshot.totals?.payable || ''),
+      at: new Date(now()).toISOString(),
+    }
+  }
+
+  async function saveOrder(job, order, snapshot) {
+    assertCompleteSnapshot(order, snapshot)
+    const result = await repository.saveSnapshot({
+      ...snapshot,
+      ...(order.purchasedAt ? { purchasedAt: order.purchasedAt } : {}),
+    })
+    recordSavedOrder(job, order, snapshot)
+    return result
+  }
+
+  /** Finish an explicitly reviewed failed order through the same completeness checks. */
+  async function confirmReviewedOrder(jobId, snapshot) {
+    const job = await repository.getJob(jobId)
+    if (!job) throw new Error('That import no longer exists.')
+    if (
+      snapshot?.accountId !== job.accountId ||
+      !snapshot?.reconciliationReview ||
+      !Array.isArray(snapshot.items)
+    )
+      throw new Error('This order needs a confirmed discount review.')
+    const order = job.orders.find((item) => item.orderId === snapshot.orderId)
+    if (!order) throw new Error('This order does not belong to that import.')
+    assertCompleteSnapshot(order, snapshot)
+    const review = validateReconciliationReview(snapshot)
+    const previous = await repository.getOrder(snapshot.orderId, {
+      accountId: job.accountId,
+    })
+    const previousReview = previous?.snapshot.reconciliationReview
+      ? validateReconciliationReview(previous.snapshot)
+      : undefined
+    const alreadySaved =
+      previousReview?.version === review.version &&
+      previousReview?.choice === review.choice &&
+      previousReview?.evidenceKey === review.evidenceKey &&
+      JSON.stringify(previousReview.sourceTotals) ===
+        JSON.stringify(review.sourceTotals)
+    if (order.state === 'done' && alreadySaved)
+      return { saved: true, alreadySaved: true, order: previous }
+    if (order.state !== 'failed' || order.reviewRequired !== true)
+      throw new Error('This order no longer needs a discount review.')
+    // A snapshot may have committed before the job checkpoint failed. Reuse
+    // that reviewed interpretation and its original confirmation time rather
+    // than create another source revision when the UI confirms a retry later.
+    let result
+    if (alreadySaved) {
+      recordSavedOrder(job, order, snapshot)
+      result = { order: previous }
+    } else result = await saveOrder(job, order, snapshot)
+    delete job.dismissedAt
+    if (!job.orders.some((item) => item.state === 'pending')) {
+      job.state = job.orders.some((item) => item.state === 'failed')
+        ? 'completed-with-errors'
+        : 'completed'
+      job.error = ''
+      job.attention = null
+      await releaseWorker(job)
+    } else await write(job)
+    await browser.changed()
+    return { ...result, saved: true }
+  }
+
   async function details(job) {
     const order = job.orders.find((item) => item.state === 'pending')
     if (!order) {
@@ -342,11 +435,24 @@ export function createImportController({
       job.currentRows = null
       job.detailError = ''
       await write(job)
-      const reader = await browser.openDetailTab(order.sourceUrl, job.id)
+      const reader = await browser.openDetailTab(order.sourceUrl, job.id, {
+        attempt: job.readerAttempt,
+        async checkpoint(attempt, diagnostic) {
+          job.readerAttempt = attempt
+          job.readerDiagnostics = readerDiagnostics([
+            ...(job.readerDiagnostics || []),
+            diagnostic,
+          ])
+          await write(job)
+        },
+      })
       job.workerTabId = typeof reader === 'object' ? reader.id : reader
       job.visibleReader = typeof reader === 'object' && reader.visible === true
+      delete job.readerAttempt
       await write(job)
-      return 'wait'
+      // Registration or recovery can finish after the tab's complete/ready
+      // events have already fired. Inspect the adopted reader once immediately.
+      return 'continue'
     }
     const tab = await browser.getDetailTab(job.workerTabId, job.id)
     if (!tab) return reopenReader(job)
@@ -391,7 +497,9 @@ export function createImportController({
       }
       job.detailNavigationPending = false
       await write(job)
-      return 'wait'
+      // A resumed navigation can already be at its destination without a new
+      // browser event. Recheck readiness instead of waiting for the alarm.
+      return 'continue'
     }
     if (tab.status !== 'complete') {
       if (now() - job.detailStartedAt > 90000)
@@ -414,44 +522,27 @@ export function createImportController({
       saved = false
     try {
       snapshot = await browser.readDetail(job.workerTabId, order.orderId)
-      if (
-        snapshot.orderId !== order.orderId ||
-        !detailUrl(snapshot.sourceUrl, order.orderId)
-      )
-        throw new Error('The detail page returned a different order.')
-      if (order.expectedRows && snapshot.items.length !== order.expectedRows)
-        throw new Error(
-          `Expected ${order.expectedRows} product rows but read ${snapshot.items.length}. No saved data was replaced.`
-        )
+      assertCompleteSnapshot(order, snapshot)
       job.currentRows = snapshot.items.length
       job.detailStage = 'saving'
       await write(job)
-      await repository.saveSnapshot({
-        ...snapshot,
-        ...(order.purchasedAt ? { purchasedAt: order.purchasedAt } : {}),
-      })
+      await saveOrder(job, order, snapshot)
       saved = true
-      order.state = 'done'
       job.readerReopens = 0
-      order.error = ''
-      order.savedRows = snapshot.items.length
       job.detailError = ''
-      job.latestResult = {
-        orderId: order.orderId,
-        outcome: 'saved',
-        rows: order.savedRows,
-        sellerName: String(snapshot.sellerName || '').slice(0, 160),
-        payable: String(snapshot.totals?.payable || ''),
-        at: new Date(now()).toISOString(),
-      }
     } catch (error) {
       // A sign-in or verification redirect during the read is not an order
       // failure: pause with the notice instead (issue 10 R7).
       if (!saved) {
         const left = await leftOrderPage(job, order)
         if (left) throw left
+        if (error?.readerMissing) return reopenReader(job)
       }
+      const reviewRequired =
+        error?.reviewRequired === true ||
+        error?.code === 'ORDER_DISCOUNT_REVIEW_REQUIRED'
       if (
+        !reviewRequired &&
         error?.retryable &&
         job.detailAttempts < 3 &&
         now() - job.detailStartedAt < 90000
@@ -463,6 +554,8 @@ export function createImportController({
       }
       order.state = 'failed'
       order.error = errorText(error)
+      if (reviewRequired) order.reviewRequired = true
+      else delete order.reviewRequired
       order.lastFailure = {
         at: new Date(now()).toISOString(),
         message: order.error,
@@ -528,5 +621,6 @@ export function createImportController({
     tick,
     startup,
     removedTab,
+    confirmReviewedOrder,
   }
 }

@@ -1,6 +1,58 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createImportReport } from '../src/import-report.js'
+import { createImportReport, importJobView } from '../src/import-report.js'
+
+test('reader reports bound and sanitize lifecycle evidence without exposing provisional IDs or API text', () => {
+  const job = {
+    orders: [],
+    readerAttempt: {
+      tabId: 8001,
+      sourceUrl: 'https://private.invalid/',
+      check: 4,
+    },
+    readerDiagnostics: Array.from({ length: 40 }, () => ({
+      method: 'background',
+      outcome: 'missing',
+      stage: 'registering',
+      code: 'MISSING_TAB',
+      check: 2,
+      elapsedMs: 250,
+      tabId: 8001,
+      error: 'private API text',
+    })),
+  }
+  job.readerDiagnostics.push({ method: 'private', outcome: 'missing' })
+  const report = createImportReport(job, 'test')
+  assert.equal(report.job.readerDiagnostics.length, 23)
+  assert.deepEqual(report.job.readerDiagnostics[0], {
+    method: 'background',
+    outcome: 'missing',
+    stage: 'registering',
+    code: 'MISSING_TAB',
+    check: 2,
+    elapsedMs: 250,
+  })
+  assert.doesNotMatch(JSON.stringify(report), /tabId|private|8001|sourceUrl/)
+  assert.equal(importJobView(job).readerAttempt, undefined)
+  assert.equal(importJobView(job).readerDiagnostics, undefined)
+  const invalid = createImportReport(
+    {
+      orders: [],
+      readerDiagnostics: [
+        {
+          method: 'background',
+          outcome: 'api-error',
+          stage: 'private URL',
+          code: 'private error text',
+        },
+      ],
+    },
+    'test'
+  )
+  assert.deepEqual(invalid.job.readerDiagnostics, [
+    { method: 'background', outcome: 'api-error' },
+  ])
+})
 
 test('import reports retain every failure and separate discovery from successful saves', () => {
   const job = {

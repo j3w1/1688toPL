@@ -8,6 +8,10 @@ import { createImportReport, importJobView } from '../src/import-report.js'
 import { financialDiagnostics } from '../src/import-diagnostics.js'
 import { importProgress } from '../src/import-progress.js'
 import { appearanceTokens } from '../src/appearance.js'
+import {
+  planOrderReconciliation,
+  confirmOrderReconciliation,
+} from '../src/order-reconciliation.js'
 
 const sourceCode = (
   await readFile(new URL('../src/background.js', import.meta.url), 'utf8')
@@ -29,7 +33,11 @@ function event() {
     },
   }
 }
-function setup({ orderIds = ['10001'], rejectInactive = false } = {}) {
+function setup({
+  orderIds = ['10001'],
+  rejectInactive = false,
+  registrationWait,
+} = {}) {
   const jobs = new Map(),
     tabs = new Map([[7, { id: 7, url: listUrl, status: 'complete' }]]),
     saved = new Map(),
@@ -183,6 +191,12 @@ function setup({ orderIds = ['10001'], rejectInactive = false } = {}) {
     loadThumbnail: async () => '',
     URL,
     console,
+    setTimeout(callback, milliseconds) {
+      return setImmediate(async () => {
+        await registrationWait?.(milliseconds)
+        callback()
+      })
+    },
   })
   const send = (message, who = own) =>
     new Promise((resolve) =>
@@ -203,6 +217,274 @@ const settle = async () => {
   for (let i = 0; i < 20; i++)
     await new Promise((resolve) => setImmediate(resolve))
 }
+
+function reviewed(orderId = '10001') {
+  const plan = planOrderReconciliation(
+    {
+      accountId: 'local',
+      orderId,
+      sourceUrl: url(orderId),
+      items: [
+        {
+          entryId: `${orderId}1`,
+          price: '100.00',
+          quantity: '1',
+          sourceDiscount: '25.00',
+        },
+      ],
+    },
+    {
+      fields: [
+        { label: '原价总计', amount: '100.00' },
+        { label: '运费', amount: '0.00' },
+        { label: '商品优惠', amount: '20.00' },
+        { label: '店铺优惠', amount: '5.00' },
+        { label: '商品改价', amount: '4.50' },
+      ],
+      payable: '70.50',
+      discountSummary: '25.00',
+    }
+  )
+  return confirmOrderReconciliation(plan.review, {
+    choice: plan.review.suggestedChoice,
+    evidenceKey: plan.review.evidenceKey,
+    reviewedAt: '2026-10-26T05:00:00.000Z',
+  })
+}
+const reviewJob = (overrides = {}) => ({
+  id: 'job-review',
+  accountId: 'local',
+  state: 'completed-with-errors',
+  phase: 'details',
+  total: 1,
+  orders: [
+    {
+      orderId: '10001',
+      sourceUrl: url('10001'),
+      state: 'failed',
+      expectedRows: 1,
+      reviewRequired: true,
+    },
+  ],
+  ...overrides,
+})
+
+test('saved discount review reads are order scoped and do not wait behind a held import mutation', async () => {
+  const s = setup()
+  const value = reviewed()
+  s.saved.set('10001', { snapshot: value })
+  const reader = {
+    id: 'synthetic',
+    tab: { id: 11 },
+    frameId: 0,
+    url: url('10001'),
+  }
+  let release
+  const held = new Promise((resolve) => {
+    release = resolve
+  })
+  const original = s.chrome.tabs.create
+  s.chrome.tabs.create = async (options) => {
+    await held
+    return original(options)
+  }
+  const mutation = s.send({ type: 'OPEN_LIBRARY' })
+  await settle()
+  const response = await s.send(
+    { type: 'ORDER_RECONCILIATION_GET', orderId: '10001' },
+    reader
+  )
+  assert.equal(response.ok, true, response.error)
+  assert.equal(
+    JSON.stringify(response.data),
+    JSON.stringify(value.reconciliationReview)
+  )
+  assert.equal(
+    (
+      await s.send(
+        { type: 'ORDER_RECONCILIATION_GET', orderId: '10002' },
+        reader
+      )
+    ).ok,
+    false
+  )
+  assert.equal(
+    (
+      await s.send(
+        { type: 'ORDER_RECONCILIATION_GET', orderId: '10001' },
+        sender
+      )
+    ).ok,
+    false
+  )
+  s.saved.get('10001').snapshot.accountId = 'another-account'
+  assert.equal(
+    (
+      await s.send(
+        { type: 'ORDER_RECONCILIATION_GET', orderId: '10001' },
+        reader
+      )
+    ).data,
+    null
+  )
+  release()
+  await mutation
+})
+
+test('queued ambiguity flags propagate without retries and public job views omit financial evidence', async () => {
+  const s = setup({ orderIds: ['10001', '10002'] })
+  let ambiguousReads = 0
+  const original = s.chrome.tabs.sendMessage
+  s.chrome.tabs.sendMessage = async (tabId, message, options) => {
+    if (message.type === 'DETAIL_READ' && message.orderId === '10001') {
+      ambiguousReads++
+      return {
+        ok: false,
+        code: 'ORDER_DISCOUNT_REVIEW_REQUIRED',
+        reviewRequired: true,
+        retryable: true,
+        error:
+          'The order total balances, but the discount allocation needs your review.',
+        review: { private: 'must not persist' },
+        diagnostics: {
+          version: 1,
+          fields: [{ label: 'Synthetic discount', value: '减 ¥1.00' }],
+        },
+      }
+    }
+    return original(tabId, message, options)
+  }
+  const started = await s.send(
+    { type: 'IMPORT_START', scope: 'selected', orderIds: ['10001', '10002'] },
+    sender
+  )
+  await settle()
+  for (let index = 0; index < 12; index++) {
+    for (const tab of s.tabs.values()) if (tab.id !== 7) tab.status = 'complete'
+    s.chrome.alarms.onAlarm.emit({ name: 'order-import' })
+    await settle()
+  }
+  const job = s.jobs.get(started.data.id)
+  assert.equal(job.state, 'completed-with-errors')
+  assert.equal(job.orders[0].reviewRequired, true)
+  assert.equal(job.orders[1].state, 'done')
+  assert.equal(ambiguousReads, 1)
+  assert.doesNotMatch(JSON.stringify(job), /must not persist|"private"/)
+  const response = await s.send({ type: 'JOBS_QUERY' })
+  assert.equal(response.data.jobs[0].orders[0].reviewRequired, true)
+  assert.equal(response.data.jobs[0].orders[0].lastFailure, undefined)
+})
+
+test('Activity opens only failed reviewed orders and confirmation is bound to its marked detail page', async () => {
+  const s = setup()
+  const job = reviewJob()
+  s.jobs.set(job.id, structuredClone(job))
+  const opened = await s.send({
+    type: 'IMPORT_REVIEW_OPEN',
+    jobId: job.id,
+    orderId: '10001',
+  })
+  assert.equal(opened.ok, true, opened.error)
+  const tab = s.tabs.get(opened.data.tabId)
+  assert.equal(tab.url, `${url('10001')}#1688topl-review=job-review`)
+  assert.equal(tab.active, true)
+  assert.equal(s.saved.size, 0)
+  assert.deepEqual(s.jobs.get(job.id), job)
+  assert.equal(
+    (
+      await s.send(
+        { type: 'IMPORT_REVIEW_OPEN', jobId: job.id, orderId: '10001' },
+        sender
+      )
+    ).ok,
+    false
+  )
+  assert.equal(
+    (
+      await s.send({
+        type: 'IMPORT_REVIEW_OPEN',
+        jobId: job.id,
+        orderId: '10002',
+      })
+    ).ok,
+    false
+  )
+  const reader = {
+    id: 'synthetic',
+    tab: { id: tab.id },
+    frameId: 0,
+    url: tab.url,
+  }
+  const message = {
+    type: 'SNAPSHOT_READY',
+    snapshot: reviewed(),
+    save: true,
+    reviewJobId: job.id,
+  }
+  for (const wrong of [
+    { ...reader, url: url('10001') },
+    { ...reader, url: `${url('10001')}#1688topl-review=another-job` },
+    { ...reader, url: `${url('10002')}#1688topl-review=job-review` },
+  ])
+    assert.equal((await s.send(message, wrong)).ok, false)
+  assert.equal((await s.send({ ...message, save: false }, reader)).ok, false)
+  assert.equal(s.saved.size, 0)
+  const response = await s.send(message, reader)
+  assert.equal(response.ok, true, response.error)
+  assert.equal(response.data.saved, true)
+  assert.equal(s.saved.size, 1)
+  assert.equal(s.jobs.get(job.id).state, 'completed')
+  const again = await s.send(message, reader)
+  assert.equal(again.ok, true, again.error)
+  assert.equal(again.data.alreadySaved, true)
+  assert.equal(
+    (
+      await s.send({
+        type: 'IMPORT_REVIEW_OPEN',
+        jobId: job.id,
+        orderId: '10001',
+      })
+    ).ok,
+    false
+  )
+})
+
+test('review confirmation preserves the queued expected-row guard and rejects foreign accounts', async () => {
+  const s = setup()
+  const job = reviewJob()
+  job.orders[0].expectedRows = 2
+  s.jobs.set(job.id, structuredClone(job))
+  const reader = {
+    id: 'synthetic',
+    tab: { id: 11 },
+    frameId: 0,
+    url: `${url('10001')}#1688topl-review=job-review`,
+  }
+  const response = await s.send(
+    {
+      type: 'SNAPSHOT_READY',
+      snapshot: reviewed(),
+      save: true,
+      reviewJobId: job.id,
+    },
+    reader
+  )
+  assert.equal(response.ok, false)
+  assert.match(response.error, /Expected 2 product rows/)
+  assert.equal(s.saved.size, 0)
+  assert.deepEqual(s.jobs.get(job.id), job)
+  s.jobs.get(job.id).accountId = 'another-account'
+  assert.equal(
+    (
+      await s.send({
+        type: 'IMPORT_REVIEW_OPEN',
+        jobId: job.id,
+        orderId: '10001',
+      })
+    ).ok,
+    false
+  )
+})
 
 test('import appearance reads the authoritative palette, persists only mode, and broadcasts to supported pages', async () => {
   const env = setup()
@@ -812,18 +1094,150 @@ test('refresh falls back automatically when background creation and unfocused wi
   assert.equal(s.tabs.has(reader), false)
 })
 
-test('reader navigation failures do not create more tabs and total API failure remains actionable', async () => {
+test('a provisional reader registers after a bounded wait without creating fallback tabs', async () => {
+  let s,
+    provisional,
+    waits = 0
+  s = setup({
+    registrationWait() {
+      waits++
+      if (waits === 2) s.tabs.set(provisional.id, { ...provisional })
+    },
+  })
+  await s.send({ type: 'LIBRARY_QUERY' })
+  s.chrome.tabs.create = async (options) => {
+    provisional = { id: 8001, ...options, status: 'loading' }
+    s.calls.push(['create', provisional.id])
+    return { ...provisional }
+  }
+  const checkpoints = []
+  const reader = await s.adapter().openDetailTab(url('10001'), 'lagging', {
+    checkpoint: async (attempt, diagnostic) =>
+      checkpoints.push(structuredClone({ attempt, diagnostic })),
+  })
+  assert.equal(reader.id, 8001)
+  assert.equal(waits, 2)
+  assert.equal(s.calls.filter(([type]) => type === 'create').length, 1)
+  assert.equal(provisional.url, url('10001') + '#1688topl-import=lagging')
+  assert.equal(
+    checkpoints.find(({ diagnostic }) => diagnostic?.outcome === 'missing')
+      .diagnostic.stage,
+    'registering'
+  )
+  assert.equal(
+    checkpoints.find(({ diagnostic }) => diagnostic?.outcome === 'missing')
+      .diagnostic.code,
+    'MISSING_TAB'
+  )
+  assert.ok(
+    checkpoints.some(
+      ({ attempt }) => attempt?.tabId === 8001 && attempt.check === -1
+    )
+  )
+  assert.deepEqual(
+    checkpoints
+      .filter(({ diagnostic }) => diagnostic?.check !== undefined)
+      .map(({ diagnostic }) => diagnostic.outcome),
+    ['missing', 'missing', 'owned']
+  )
+})
+
+test('worker recovery waits for its durable provisional ID and closes only duplicate exact marked readers', async () => {
+  let s,
+    waits = 0
+  const target = url('10001') + '#1688topl-import=resume'
+  s = setup({
+    registrationWait() {
+      waits++
+      s.tabs.set(8001, { id: 8001, url: target, status: 'loading' })
+      s.tabs.set(8002, { id: 8002, url: target, status: 'loading' })
+      s.tabs.set(8003, {
+        id: 8003,
+        url: 'https://login.1688.com/',
+        status: 'complete',
+      })
+    },
+  })
+  await s.send({ type: 'LIBRARY_QUERY' })
+  const reader = await s.adapter().openDetailTab(url('10001'), 'resume', {
+    attempt: {
+      method: 'background',
+      stage: 'registering',
+      tabId: 8001,
+      check: 0,
+      startedAt: new Date().toISOString(),
+    },
+  })
+  assert.equal(reader.id, 8001)
+  assert.equal(waits, 1)
+  assert.equal(s.tabs.has(8002), false)
+  assert.equal(s.tabs.has(8003), true)
+  assert.equal(s.calls.filter(([type]) => type === 'create').length, 0)
+  // A slower previous creation can appear after adoption. Only the exact
+  // duplicate is cleaned on the next read; another order and user page survive.
+  s.tabs.set(8004, { id: 8004, url: target, status: 'complete' })
+  s.tabs.set(8005, {
+    id: 8005,
+    url: url('10002') + '#1688topl-import=resume',
+    status: 'complete',
+  })
+  s.tabs.set(8006, { id: 8006, url: url('10001'), status: 'complete' })
+  await s.adapter().getDetailTab(8001, 'resume')
+  assert.equal(s.tabs.has(8004), false)
+  assert.equal(s.tabs.has(8005), true)
+  assert.equal(s.tabs.has(8006), true)
+})
+
+test('an interrupted creation without a checkpointed ID is recovered by its exact marker before another method', async () => {
+  let s
+  const target = url('10001') + '#1688topl-import=uncertain'
+  s = setup({
+    registrationWait() {
+      s.tabs.set(8001, { id: 8001, url: target, status: 'loading' })
+    },
+  })
+  await s.send({ type: 'LIBRARY_QUERY' })
+  const reader = await s.adapter().openDetailTab(url('10001'), 'uncertain', {
+    attempt: {
+      method: 'background',
+      stage: 'creating',
+      check: -1,
+      startedAt: new Date().toISOString(),
+    },
+  })
+  assert.equal(reader.id, 8001)
+  assert.equal(s.calls.filter(([type]) => type === 'create').length, 0)
+})
+
+test('a provisional reader redirected to sign-in is retained and no fallback is created', async () => {
   const s = setup()
   await s.send({ type: 'LIBRARY_QUERY' })
-  s.chrome.tabs.update = async () => {
-    throw new Error('Navigation is unavailable.')
+  s.chrome.tabs.create = async () => {
+    const tab = { id: 8001, url: 'https://login.1688.com/', status: 'complete' }
+    s.tabs.set(tab.id, tab)
+    s.calls.push(['create', tab.id])
+    return tab
+  }
+  await assert.rejects(
+    s.adapter().openDetailTab(url('10001'), 'redirect'),
+    (error) => error.attention === 'sign-in'
+  )
+  assert.equal(s.tabs.has(8001), true)
+  assert.equal(s.calls.filter(([type]) => type === 'create').length, 1)
+})
+
+test('reader inspection failures do not create more tabs and total API failure remains actionable', async () => {
+  const s = setup()
+  await s.send({ type: 'LIBRARY_QUERY' })
+  s.chrome.tabs.get = async () => {
+    throw new Error('Inspection is unavailable.')
   }
   await assert.rejects(
     s.adapter().openDetailTab(url('10001'), 'j1'),
-    /Navigation is unavailable/
+    /Inspection is unavailable/
   )
   assert.equal(s.calls.filter(([type]) => type === 'create').length, 1)
-  assert.equal(s.tabs.size, 1)
+  assert.equal(s.tabs.size, 2)
   const blocked = setup()
   blocked.chrome.tabs.create = async () => {
     throw new Error('Tab creation is unavailable.')
@@ -836,6 +1250,8 @@ test('reader navigation failures do not create more tabs and total API failure r
   const job = blocked.jobs.get(result.data.id)
   assert.equal(job.state, 'paused')
   assert.match(job.error, /Tab creation is unavailable/)
+  assert.equal(job.readerDiagnostics.at(-1).stage, 'creating')
+  assert.equal(job.readerDiagnostics.at(-1).code, 'CREATION_FAILED')
   assert.equal(job.attention, null)
   assert.equal(blocked.saved.size, 0)
 })
@@ -876,6 +1292,144 @@ test('refresh bypasses phantom background and window tab IDs without pausing', a
   await settle()
   assert.equal(job().state, 'completed')
   assert.equal(job().completed, 1)
+})
+
+test('a recovered reader lost during retargeting is replaced but unrelated update errors do not open more tabs', async () => {
+  const s = setup()
+  await s.send({ type: 'LIBRARY_QUERY' })
+  s.tabs.set(55, {
+    id: 55,
+    url: url('10001') + '#1688topl-import=j1',
+    status: 'complete',
+  })
+  const update = s.chrome.tabs.update
+  s.chrome.tabs.update = async (id, options) => {
+    if (id === 55) {
+      s.tabs.delete(id)
+      throw new Error(`No tab with id: ${id}.`)
+    }
+    return update(id, options)
+  }
+  const reader = await s.adapter().openDetailTab(url('10002'), 'j1'),
+    id = typeof reader === 'object' ? reader.id : reader
+  assert.notEqual(id, 55)
+  assert.equal(s.tabs.get(id).url, url('10002') + '#1688topl-import=j1')
+  assert.equal(s.calls.filter(([type]) => type === 'create').length, 1)
+
+  const blocked = setup()
+  await blocked.send({ type: 'LIBRARY_QUERY' })
+  blocked.tabs.set(55, {
+    id: 55,
+    url: url('10001') + '#1688topl-import=j1',
+    status: 'complete',
+  })
+  blocked.chrome.tabs.update = async () => {
+    throw new Error('Navigation is unavailable.')
+  }
+  await assert.rejects(
+    blocked.adapter().openDetailTab(url('10002'), 'j1'),
+    /Navigation is unavailable/
+  )
+  assert.equal(blocked.calls.filter(([type]) => type === 'create').length, 0)
+  assert.equal(blocked.tabs.has(55), true)
+})
+
+test('exhausted phantom reader methods pause refresh with actionable recovery and preserve its source and pending queue', async () => {
+  const s = setup(),
+    original = {
+      snapshot: { orderId: '10001', sourceUrl: url('10001'), items: [{}] },
+    },
+    methods = []
+  s.saved.set('10001', structuredClone(original))
+  s.chrome.tabs.create = async (options) => {
+    methods.push(options.active ? 'visible' : 'background')
+    return { id: 801540208, url: options.url, status: 'loading' }
+  }
+  s.chrome.tabs.update = async (id) => {
+    throw new Error(`No tab with id: ${id}.`)
+  }
+  s.chrome.windows = {
+    async create(options) {
+      methods.push('window')
+      return { tabs: [{ id: 801540209, url: options.url }] }
+    },
+  }
+  const response = await s.send({ type: 'REFRESH_ORDERS', orderIds: ['10001'] })
+  await settle()
+  const job = s.jobs.get(response.data.id)
+  assert.deepEqual(methods, ['background', 'window', 'visible'])
+  assert.equal(job.state, 'paused')
+  assert.equal(job.completed, 0)
+  assert.equal(job.failed, 0)
+  assert.equal(job.orders[0].state, 'pending')
+  assert.equal(job.workerTabId, null)
+  assert.match(job.error, /could not keep an import tab open/)
+  assert.doesNotMatch(job.error, /No tab with id|801540/)
+  assert.equal(job.readerDiagnostics.at(-1).stage, 'registering')
+  assert.equal(job.readerDiagnostics.at(-1).code, 'REGISTRATION_TIMEOUT')
+  assert.deepEqual(s.saved.get('10001'), original)
+  assert.equal(s.tabs.size, 1)
+})
+
+test('reader loss on the final detail attempt reopens the pending order instead of marking it failed', async () => {
+  const s = setup(),
+    original = {
+      snapshot: { orderId: '10001', sourceUrl: url('10001'), items: [{}] },
+    }
+  s.saved.set('10001', structuredClone(original))
+  const response = await s.send({ type: 'REFRESH_ORDERS', orderIds: ['10001'] })
+  await settle()
+  const job = () => s.jobs.get(response.data.id),
+    missing = job().workerTabId,
+    sendMessage = s.chrome.tabs.sendMessage
+  job().detailAttempts = 2
+  let lost = false
+  s.chrome.tabs.sendMessage = async (id, message, options) => {
+    if (!lost && message.type === 'DETAIL_READ') {
+      lost = true
+      s.tabs.delete(id)
+      throw new Error(`No tab with id: ${id}.`)
+    }
+    return sendMessage(id, message, options)
+  }
+  s.tabs.get(missing).status = 'complete'
+  s.chrome.tabs.onUpdated.emit(missing, { status: 'complete' })
+  await settle()
+  assert.equal(lost, true)
+  assert.equal(job().state, 'running')
+  assert.equal(job().orders[0].state, 'pending')
+  assert.equal(job().failed, 0)
+  assert.equal(job().readerReopens, 1)
+  assert.notEqual(job().workerTabId, missing)
+  assert.deepEqual(s.saved.get('10001'), original)
+  const replacement = job().workerTabId
+  s.tabs.get(replacement).status = 'complete'
+  s.chrome.tabs.onUpdated.emit(replacement, { status: 'complete' })
+  await settle()
+  assert.equal(job().state, 'completed')
+  assert.equal(job().completed, 1)
+  assert.equal(job().failed, 0)
+})
+
+test('owned reader disappearance during cleanup is harmless while other removal errors remain visible', async () => {
+  const s = setup()
+  await s.send({ type: 'LIBRARY_QUERY' })
+  s.tabs.set(55, { id: 55, url: url('10001') + '#1688topl-import=j1' })
+  s.chrome.tabs.remove = async (id) => {
+    s.tabs.delete(id)
+    throw new Error(`No tab with id: ${id}.`)
+  }
+  await s.adapter().closeDetailTab(55, 'j1')
+  assert.equal(s.tabs.has(55), false)
+  s.tabs.set(56, { id: 56, url: url('10001') + '#1688topl-import=j1' })
+  s.chrome.tabs.remove = async () => {
+    throw new Error('Tab removal is unavailable.')
+  }
+  await assert.rejects(
+    s.adapter().closeDetailTab(56, 'j1'),
+    /Tab removal is unavailable/
+  )
+  assert.equal(s.tabs.has(56), true)
 })
 
 test('a vanished reader ID is replaced without losing pending orders and repeated loss stays bounded', async () => {

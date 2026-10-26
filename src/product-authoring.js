@@ -62,7 +62,11 @@ import { applyAppearance } from './appearance.js'
 import { openStoreSpreadsheetGuide } from './store-spreadsheet-guide.js'
 import { createVirtualList } from './virtual-list.js'
 import { openProductDetailsDialog } from './product-detail-editor.js'
-import { eligibleOrderItems } from './inventory-model.js'
+import {
+  eligibleOrderItems,
+  sourceRevision,
+  stableValue,
+} from './inventory-model.js'
 import { mountMaterialVocabulary } from './material-vocabulary-settings.js'
 import { mountColorVocabulary } from './color-vocabulary-settings.js'
 import { mountAppearanceSettings } from './appearance-settings.js'
@@ -90,6 +94,8 @@ import { cartonBatchReviewChanges } from './carton-batch-review.js'
 import { mountPhysicalMarkChoices } from './order-carton-grid.js'
 import { makeOrderCartonPrintRef } from './print-store.js'
 import { physicalUnits } from './inventory-model.js'
+import { purchaseMonthForCodes } from './purchase-codes.js'
+import { productArticleIdentity } from './product-families.js'
 const $ = (id) => document.getElementById(id)
 const orderKey = ({ accountId = 'local', orderId }) =>
   JSON.stringify([accountId, orderId])
@@ -964,227 +970,1368 @@ export async function createProductAuthoring({
       })
     }
   }
+  let codeReviewGeneration = 0,
+    activeCodeReview
   async function reviewCodes(rows = getSelectedRows()) {
+    const request = ++codeReviewGeneration,
+      opener = document.activeElement,
+      selectedRefs = [
+        ...new Map(
+          rows.map((row) => {
+            const ref = {
+              accountId: row.accountId || row.record?.accountId || 'local',
+              orderId: row.orderId,
+              entryId: row.entryId,
+            }
+            return [entryKey(ref), ref]
+          })
+        ).values(),
+      ]
+    if (!selectedRefs.length)
+      throw new Error('Select at least one product to prepare.')
+    activeCodeReview?.close()
     await flushSaves()
-    const eligibility = new Map(),
-      records = getRecords()
-    const eligible = rows.filter((row) => {
-      const record = recordFor(row)
-      if (!record) return true
-      const key = orderKey(row)
-      if (!eligibility.has(key))
-        eligibility.set(
-          key,
-          new Map(
-            eligibleOrderItems(record, records).map((item) => [
-              item.entryId,
-              item,
-            ])
+    if (request !== codeReviewGeneration) return
+    const records = getRecords(),
+      eligibility = new Map(),
+      refs = selectedRefs.filter((ref) => {
+        if (!eligibility.has(orderKey(ref))) {
+          const record = recordFor(ref)
+          eligibility.set(
+            orderKey(ref),
+            new Map(
+              record
+                ? eligibleOrderItems(record, records).map((item) => [
+                    item.entryId,
+                    item,
+                  ])
+                : []
+            )
           )
+        }
+        const item = eligibility.get(orderKey(ref)).get(ref.entryId)
+        return (
+          !item ||
+          item.eligible === null ||
+          !(item.dispositionKind || item.paymentOnly) ||
+          BigInt(item.eligible) > 0n
         )
-      const item = eligibility.get(key).get(row.entryId)
-      // Keep unknown or invalid source quantities in the guarded review. Only
-      // a documented, resolved disposition removes a zero-eligible source ref.
-      return (
-        !item ||
-        item.eligible === null ||
-        !(item.dispositionKind || item.paymentOnly) ||
-        BigInt(item.eligible) > 0n
-      )
-    })
-    const refs = eligible.map((row) => ({
-      accountId: row.accountId || row.record?.accountId || 'local',
-      orderId: row.orderId,
-      entryId: row.entryId,
-    }))
-    if (!refs.length) throw new Error('Select product rows to review codes.')
-    const orderRefs = [
-      ...new Map(
-        refs.map((ref) => [
-          orderKey(ref),
-          { accountId: ref.accountId, orderId: ref.orderId },
-        ])
-      ).values(),
-    ]
-    const review = await repository.reviewPurchaseCodes({
-      orderRefs,
-      entryRefs: refs,
-    })
-    const modal = el(
-        'dialog',
-        undefined,
-        'packing-review purchase-code-review'
+      })
+    if (!refs.length) throw new Error('Select at least one product to prepare.')
+    const scope = [
+        ...new Map(
+          refs.map((ref) => [
+            orderKey(ref),
+            {
+              accountId: ref.accountId,
+              orderId: ref.orderId,
+            },
+          ])
+        ).values(),
+      ],
+      capturedSources = new Map(
+        scope.map((ref) => {
+          const record = recordFor(ref)
+          if (!record)
+            throw new Error(
+              'The selected products changed. Refresh before assigning codes.'
+            )
+          return [orderKey(ref), sourceRevision(record)]
+        })
       ),
+      preparedByEntry = new Map(
+        preparedRows(refs).map((row) => [entryKey(row), row])
+      ),
+      candidateRows = refs.map((ref) => {
+        const record = recordFor(ref),
+          item = record?.snapshot.items.find(
+            (item) => item.entryId === ref.entryId
+          )
+        if (!item)
+          throw new Error(
+            'The selected products changed. Refresh before assigning codes.'
+          )
+        return {
+          ...ref,
+          photo: structuredClone(item),
+          name: item.description || item.title || ref.entryId,
+          sellerName: record.snapshot.sellerName,
+          purchaseMonth: purchaseMonthForCodes(record) || '—',
+          quantity: item.quantity,
+          existingCode: preparedByEntry.get(entryKey(ref))?.barcode || '',
+          existingDetails: (() => {
+            const row = preparedByEntry.get(entryKey(ref))
+            return {
+              spanishName: row?.spanishName || '',
+              category: row?.chineseCategory || '',
+              material: row?.material || '',
+            }
+          })(),
+        }
+      }),
+      byEntry = new Map(candidateRows.map((row) => [entryKey(row), row])),
+      modal = el('dialog', undefined, 'packing-review purchase-code-review'),
       content = el('div', undefined, 'purchase-code-review-content'),
       items = el('div', undefined, 'purchase-code-review-items'),
       status = el('p'),
-      actions = el('div', undefined, 'dialog-actions')
+      issues = el('div'),
+      resolveSizes = el('button', uiMessage('Resolve size endings')),
+      resolveFamilies = el('button', uiMessage('Review product families')),
+      actions = el('div', undefined, 'dialog-actions'),
+      back = el('button', uiMessage('Back')),
+      cancel = el('button', uiMessage('Cancel')),
+      commit = el('button', uiMessage('Confirm preparation'), 'primary')
     modal.dataset.action = 'purchase-code-review'
+    modal.dataset.scope = 'selected-products'
+    bindAttribute(modal, 'aria-label', uiMessage('Prepare products'))
     modal.append(
-      el('h2', uiMessage('Review purchase-month codes')),
+      el('h2', uiMessage('Prepare products')),
       el(
         'p',
         uiMessage(
           'New codes use the original purchase month. Review does not reserve codes.'
         )
+      ),
+      el(
+        'p',
+        uiMessage(
+          'Review codes and product details for the selected products. Go back to Orders to change the selection.'
+        )
+      ),
+      el(
+        'p',
+        uiMessage('Selected products: {count} · Orders: {orders}', {
+          count: refs.length,
+          orders: scope.length,
+        })
       )
     )
-    function reviewCard(row) {
-      const card = el('article')
-      card.dataset.orderId = row.orderId || ''
-      card.dataset.entryId = row.entryId || ''
-      if (row.photo)
-        card.append(
-          media.photo(
-            typeof row.photo === 'string'
-              ? {
-                  thumbnail: row.photo,
-                  description: row.name || row.description || '',
-                  orderId: row.orderId,
-                  entryId: row.entryId,
-                }
-              : row.photo
-          )
+    modal.append(
+      el(
+        'p',
+        uiMessage(
+          'Add a Spanish name and Chinese category when needed for labels. Product details remain optional.'
         )
-      const code = el('code', undefined, 'ce-code purchase-code')
-      setCodeText(code, row.after || row.code || row.baseCode || '—')
-      card.append(
-        el('p', row.name || row.description || row.entryId || row.orderId),
-        code
       )
-      if (row.after === '' && row.baseCode)
-        card.append(
-          el('small', uiMessage('Product code')),
-          el('p', uiMessage('Map this variant size before generating labels'))
+    )
+    let review,
+      proposed = new Map(),
+      pending = false,
+      assigning = false,
+      closed = false,
+      generation = 0,
+      intentId = crypto.randomUUID(),
+      reviewList,
+      sizeDialog,
+      familyDialog,
+      detailDialog,
+      detailOpen = false,
+      reviewError = false,
+      sourceEvidence,
+      staleReview = false
+    const sizeChoices = new Map(),
+      detailChoices = new Map(),
+      familyChoices = [],
+      familyCohorts = new Map(),
+      selectedKeys = new Set(refs.map(entryKey))
+    const alive = () =>
+      !closed && modal.open && request === codeReviewGeneration
+    function matchPrepared(result, ref) {
+      const preparation = result?.plan?.preparations?.find(
+          (value) => orderKey(value) === orderKey(ref)
+        ),
+        group = preparation?.groups.find((value) =>
+          value.variants.some((variant) =>
+            variant.entryIds.includes(ref.entryId)
+          )
+        ),
+        variant = group?.variants.find((value) =>
+          value.entryIds.includes(ref.entryId)
         )
-      if (row.supplierIdentity) {
-        const identity = row.supplierIdentity
-        card.append(
+      return { preparation, group, variant }
+    }
+    function detailValues(match, entryId) {
+      return match.variant
+        ? {
+            spanishName:
+              match.variant.spanishName ?? match.group.spanishName ?? '',
+            category: match.group.category || '',
+            material: variantMaterial(match.variant, entryId).value || '',
+          }
+        : { spanishName: '', category: '', material: '' }
+    }
+    function detailButton(title, ref, scopeFor) {
+      const control = el('button', uiMessage(title))
+      control.type = 'button'
+      control.dataset.reviewDetails = title.toLowerCase().replaceAll(' ', '-')
+      control.addEventListener(
+        'click',
+        () =>
+          void editDraftDetails(
+            ref,
+            scopeFor(matchPrepared(review, ref)),
+            control
+          )
+      )
+      return control
+    }
+    function reviewCard(row) {
+      const card = el('article'),
+        code = el('code', undefined, 'ce-code purchase-code'),
+        before = el('code', undefined, 'ce-code purchase-before-code'),
+        details = el('div'),
+        beforeLine = el('p', uiMessage('Before')),
+        proposedLine = el('p', uiMessage('Proposed code')),
+        evidence = el('div', undefined, 'purchase-code-evidence'),
+        authored = el('div', undefined, 'purchase-detail-comparison')
+      card.dataset.orderId = row.orderId
+      card.dataset.entryId = row.entryId
+      card.dataset.accountId = row.accountId
+      setCodeText(before, row.existingCode || '—')
+      beforeLine.append(document.createTextNode(' '), before)
+      proposedLine.append(document.createTextNode(' '), code)
+      details.append(
+        el('p', row.name),
+        el(
+          'p',
+          uiMessage('Article: {article}', {
+            article: productArticleIdentity(row.photo) || '—',
+          })
+        ),
+        el(
+          'p',
+          (row.photo.skuProperties || [])
+            .map((property) => `${property.label}: ${property.value}`)
+            .join(' · ')
+        ),
+        el('p', uiMessage('Quantity: {quantity}', { quantity: row.quantity })),
+        beforeLine,
+        proposedLine,
+        evidence,
+        authored,
+        detailButton('Edit variant details', row, ({ group, variant }) => ({
+          kind: 'variant',
+          groupId: group?.id,
+          variantId: variant?.id,
+        }))
+      )
+      card.append(media.photo(row.photo), details)
+      return card
+    }
+    function paintCards() {
+      for (const card of items.querySelectorAll('article[data-entry-id]')) {
+        const key = entryKey(card.dataset),
+          row = byEntry.get(key),
+          change = proposed.get(key),
+          evidence = card.querySelector('.purchase-code-evidence'),
+          authored = card.querySelector('.purchase-detail-comparison'),
+          match = matchPrepared(review, row),
+          beforeDetails = change?.beforeDetails || row.existingDetails,
+          afterDetails = detailValues(match, row.entryId)
+        setCodeText(
+          card.querySelector('.purchase-before-code'),
+          change ? change.before || '—' : row.existingCode || '—'
+        )
+        setCodeText(card.querySelector('.purchase-code'), change?.after || '—')
+        authored.replaceChildren()
+        if (match.group)
+          authored.append(
+            el(
+              'p',
+              uiMessage('Product family: {family}', {
+                family:
+                  match.group.title || match.group.baseCode || match.group.id,
+              })
+            )
+          )
+        for (const [field, label] of [
+          ['spanishName', 'Spanish name'],
+          ['category', 'Chinese category'],
+          ['material', 'Material'],
+        ]) {
+          const line = el('p'),
+            before = el('span', beforeDetails[field] || '—'),
+            after = el('strong', afterDetails[field] || '—')
+          line.dataset.detailComparison = field
+          line.append(
+            el('span', uiMessage(label)),
+            document.createTextNode(': '),
+            before,
+            document.createTextNode(' → '),
+            after
+          )
+          const source =
+            field === 'material' && match.variant
+              ? variantMaterial(match.variant, row.entryId).source
+              : field === 'spanishName' &&
+                  match.variant &&
+                  Object.hasOwn(match.variant, 'spanishName')
+                ? 'manual'
+                : match.group?.naming?.[field]?.source
+          if (source === 'manual')
+            line.append(
+              document.createTextNode(' · '),
+              el('small', uiMessage('Custom value'))
+            )
+          authored.append(line)
+        }
+        evidence.replaceChildren(
           el(
             'p',
             uiMessage(
-              identity.provenance === 'manual-confirmed'
-                ? 'Operator-confirmed supplier identity'
-                : 'Original source supplier identity'
+              change?.before && change.after === change.before
+                ? 'Already assigned — unchanged'
+                : 'New assignment'
             )
-          ),
-          el('code', identity.sellerId || '—')
+          )
         )
-        if (identity.conflict)
-          card.append(
-            el(
-              'p',
-              uiMessage(
-                'Supplier identities disagree. Review the source and authored evidence before assigning or linking codes.'
+        if (change && !change.after)
+          evidence.append(
+            el('p', uiMessage('Map this variant size before generating labels'))
+          )
+      }
+      commit.disabled =
+        assigning ||
+        pending ||
+        !review ||
+        staleReview ||
+        reviewError ||
+        detailOpen ||
+        familyDialog?.open ||
+        sizeDialog?.open ||
+        refs.some((ref) => !proposed.get(entryKey(ref))?.after) ||
+        (review.issues || []).some((issue) => issue.severity === 'error')
+      resolveSizes.hidden =
+        !repository.previewPreparations ||
+        !review?.plan?.preparations ||
+        ![...proposed.values()].some((change) => !change.after)
+      resolveSizes.disabled = assigning || pending || staleReview
+      resolveFamilies.hidden = !familyCohorts.size
+      resolveFamilies.disabled = assigning || pending || staleReview
+      for (const control of modal.querySelectorAll('[data-review-details]'))
+        control.disabled =
+          assigning ||
+          pending ||
+          staleReview ||
+          !review?.plan?.preparations?.length
+      back.disabled = cancel.disabled = assigning
+      modal.setAttribute('aria-busy', String(pending || assigning))
+    }
+    function refreshReviewList() {
+      const anchor = reviewList?.anchor()
+      reviewList?.destroy()
+      media.forget(items)
+      items.replaceChildren()
+      const sections = []
+      for (const ref of scope) {
+        const rows = candidateRows.filter(
+            (row) => orderKey(row) === orderKey(ref)
+          ),
+          first = rows[0],
+          section = el('section'),
+          families = new Map(),
+          familyEvidence = (review?.familyReview || []).find(
+            (value) => orderKey(value) === orderKey(ref)
+          )
+        section.dataset.orderReview = 'true'
+        section.dataset.orderId = ref.orderId
+        section.dataset.accountId = ref.accountId
+        section.append(
+          el('h3', uiMessage('Order {orderId}', { orderId: ref.orderId })),
+          el('p', first.sellerName || '—'),
+          el(
+            'p',
+            uiMessage('Purchase month: {month}', { month: first.purchaseMonth })
+          ),
+          detailButton('Edit order details', first, () => ({ kind: 'order' }))
+        )
+        for (const row of rows) {
+          const match = matchPrepared(review, row),
+            evidence = familyEvidence?.families.find((family) =>
+              family.entryIds.includes(row.entryId)
+            ),
+            key = match.group?.id || evidence?.id || 'pending'
+          if (!families.has(key))
+            families.set(key, { match, evidence, rows: [] })
+          families.get(key).rows.push(row)
+        }
+        for (const [key, family] of families) {
+          const host = el('section'),
+            body = el('div'),
+            label =
+              family.match.group?.title ||
+              family.evidence?.articleFamily ||
+              family.evidence?.label ||
+              uiMessage('Product family')
+          host.dataset.productFamily = key
+          host.append(el('h4', label))
+          if (family.evidence?.articleFamily)
+            host.append(
+              el(
+                'p',
+                uiMessage('Article family: {article}', {
+                  article: family.evidence.articleFamily,
+                })
+              )
+            )
+          if (family.evidence?.provenance)
+            host.append(
+              el(
+                'p',
+                uiMessage(
+                  family.evidence.provenance === 'existing'
+                    ? 'Existing prepared family'
+                    : family.evidence.provenance === 'reviewed'
+                      ? 'Reviewed family'
+                      : 'Suggested source family'
+                )
+              )
+            )
+          host.append(
+            detailButton('Edit group details', family.rows[0], ({ group }) => ({
+              kind: 'group',
+              groupId: group?.id,
+            })),
+            body
+          )
+          section.append(host)
+          sections.push({
+            element: body,
+            entries: family.rows.map((row) => ({ key: entryKey(row), row })),
+          })
+        }
+        items.append(section)
+      }
+      reviewList = createVirtualList({
+        scroller: items,
+        sections,
+        render: ({ row }) => reviewCard(row),
+        remove: (node) => media.forget(node),
+        paint: paintCards,
+        limit: 100,
+      })
+      reviewList.update(anchor)
+    }
+    items.dataset.rowCount = String(refs.length)
+    bindAttribute(items, 'aria-label', uiMessage('Prepare products'))
+    resolveSizes.type = 'button'
+    resolveSizes.dataset.action = 'resolve-code-sizes'
+    resolveSizes.hidden = true
+    resolveSizes.onclick = () => void openSizeResolution()
+    resolveFamilies.type = 'button'
+    resolveFamilies.dataset.action = 'review-product-families'
+    resolveFamilies.hidden = true
+    resolveFamilies.onclick = () => void openFamilyReview()
+    content.append(items, issues, resolveFamilies, resolveSizes)
+    function detailProjection(preparation) {
+      const projected = structuredClone(preparation)
+      projected.groups = projected.groups
+        .map((group) => ({
+          ...group,
+          variants: group.variants
+            .map((variant) => ({
+              ...variant,
+              entryIds: variant.entryIds.filter((entryId) =>
+                selectedKeys.has(entryKey({ ...preparation, entryId }))
+              ),
+            }))
+            .filter((variant) => variant.entryIds.length),
+        }))
+        .filter((group) => group.variants.length)
+      return projected
+    }
+    function rememberDetails(before, after, choices) {
+      for (const group of before.groups) {
+        const next = after.groups.find((value) => value.id === group.id)
+        for (const variant of group.variants) {
+          const nextVariant = next.variants.find(
+            (value) => value.id === variant.id
+          )
+          for (const entryId of variant.entryIds) {
+            const key = entryKey({ ...before, entryId }),
+              patch = structuredClone(choices.get(key) || {})
+            for (const field of ['spanishName', 'category']) {
+              const previous = {
+                  value: group[field],
+                  provenance: group.naming?.[field],
+                },
+                authored = {
+                  value: next[field],
+                  provenance: next.naming?.[field],
+                }
+              if (stableValue(previous) !== stableValue(authored)) {
+                patch.group ??= {}
+                patch.group[field] = authored
+              }
+            }
+            if (
+              variant.spanishName !== nextVariant.spanishName ||
+              Object.hasOwn(variant, 'spanishName') !==
+                Object.hasOwn(nextVariant, 'spanishName')
+            )
+              patch.variantName = {
+                present: Object.hasOwn(nextVariant, 'spanishName'),
+                value: nextVariant.spanishName,
+              }
+            const original = variantMaterial(variant, entryId),
+              material = variantMaterial(nextVariant, entryId)
+            if (stableValue(original) !== stableValue(material))
+              patch.material = material.value
+            if (Object.keys(patch).length) choices.set(key, patch)
+          }
+        }
+      }
+    }
+    function detailedReview(result, choices) {
+      const next = structuredClone(result)
+      for (const preparation of next.plan.preparations)
+        for (const group of preparation.groups) {
+          const fields = new Map()
+          for (const variant of group.variants)
+            for (const entryId of variant.entryIds) {
+              const patch = choices.get(entryKey({ ...preparation, entryId }))
+              if (!patch) continue
+              for (const [field, value] of Object.entries(patch.group || {})) {
+                if (
+                  fields.has(field) &&
+                  stableValue(fields.get(field)) !== stableValue(value)
+                )
+                  throw new Error(
+                    'These products have different custom details. Keep them separate or apply the same details before joining their family.'
+                  )
+                fields.set(field, value)
+              }
+              if (patch.variantName) {
+                if (
+                  variant.entryIds.some(
+                    (id) =>
+                      !selectedKeys.has(
+                        entryKey({ ...preparation, entryId: id })
+                      )
+                  )
+                )
+                  throw new Error(
+                    'Select every source row sharing this product identity before changing its shared details.'
+                  )
+                if (patch.variantName.present)
+                  variant.spanishName = patch.variantName.value
+                else delete variant.spanishName
+              }
+              if (Object.hasOwn(patch, 'material'))
+                setVariantMaterial(variant, patch.material, [entryId])
+            }
+          if (
+            fields.size &&
+            group.variants.some((variant) =>
+              variant.entryIds.some(
+                (entryId) =>
+                  !selectedKeys.has(entryKey({ ...preparation, entryId }))
               )
             )
           )
-      }
-      return card
+            throw new Error(
+              'Select every prepared source row in this family before changing its shared name or category.'
+            )
+          for (const [field, authored] of fields) {
+            group[field] = authored.value
+            group.naming ??= {}
+            if (authored.provenance)
+              group.naming[field] = structuredClone(authored.provenance)
+            else delete group.naming[field]
+          }
+        }
+      for (const change of next.changes || [])
+        change.afterDetails = detailValues(
+          matchPrepared(next, change),
+          change.entryId
+        )
+      return next
     }
-    content.append(items)
-    items.dataset.rowCount = String(
-      (review.changes || review.assignments || []).length
-    )
-    items.setAttribute('role', 'list')
-    bindAttribute(items, 'aria-label', uiMessage('Review purchase-month codes'))
-    for (const issue of review.issues || []) {
-      const notice = el(
-        'p',
-        uiMessage(
-          issue.code === 'PURCHASE_SIZE_REQUIRED'
-            ? 'Map this variant size before generating labels'
-            : issue.message || issue
+    async function editDraftDetails(ref, scope, opener) {
+      if (!alive() || pending || assigning || staleReview || detailOpen) return
+      const preparation = matchPrepared(review, ref).preparation
+      if (!preparation) return
+      const projection = detailProjection(preparation)
+      detailOpen = true
+      paintCards()
+      try {
+        const done = openProductDetailsDialog({
+          preparation: projection,
+          scope,
+          opener,
+          async onApply(candidate) {
+            if (!alive())
+              throw new Error(
+                'The selected purchase changed. Close this review and select its products again.'
+              )
+            const choices = new Map(detailChoices)
+            rememberDetails(projection, candidate, choices)
+            const result = detailedReview(review, choices)
+            await previewSizes(result)
+            if (!alive()) return
+            detailChoices.clear()
+            for (const [key, value] of choices) detailChoices.set(key, value)
+            review = result
+            proposed = new Map(
+              result.changes.map((change) => [entryKey(change), change])
+            )
+            intentId = crypto.randomUUID()
+            paintCards()
+            if (reviewError) await replan()
+          },
+          onEditGroupCategory: async (source) => {
+            detailOpen = false
+            detailDialog = null
+            return editDraftDetails(
+              ref,
+              { kind: 'group', groupId: scope.groupId },
+              source
+            )
+          },
+        })
+        detailDialog = [
+          ...document.querySelectorAll('.product-detail-dialog'),
+        ].at(-1)
+        await done
+      } catch (error) {
+        if (alive()) bindText(status, uiMessage(error.message))
+      } finally {
+        detailOpen = false
+        detailDialog = null
+        if (alive()) paintCards()
+        if (alive() && opener?.isConnected) opener.focus()
+      }
+    }
+    async function openFamilyReview() {
+      if (!alive() || pending || assigning || staleReview || familyDialog?.open)
+        return
+      const dialog = el(
+          'dialog',
+          undefined,
+          'packing-review purchase-code-review'
+        ),
+        body = el('div', undefined, 'purchase-code-review-items'),
+        notice = el('p'),
+        footer = el('div', undefined, 'dialog-actions'),
+        cancel = el('button', uiMessage('Cancel')),
+        apply = el('button', uiMessage('Apply family choices'), 'primary'),
+        choices = new Map(
+          familyChoices.map((choice) => [
+            JSON.stringify([
+              choice.accountId,
+              choice.orderId,
+              ...choice.entryIds,
+            ]),
+            choice.kind,
+          ])
+        ),
+        cohorts = [...familyCohorts.entries()]
+      let disposed = false,
+        validating = false,
+        list
+      const current = () => !disposed && dialog.open && alive()
+      dialog.dataset.action = 'product-family-review'
+      bindAttribute(dialog, 'aria-label', uiMessage('Review product families'))
+      dialog.append(
+        el('h2', uiMessage('Review product families')),
+        el(
+          'p',
+          uiMessage(
+            'Choose which source products share one product family. Only the products selected in Orders will be prepared.'
+          )
         )
       )
-      if (issue.code) notice.dataset.issueCode = issue.code
-      content.append(notice)
-      if (issue.code === 'PURCHASE_SIZE_REQUIRED') continue
-      const ref = orderRefs.find(
-        (ref) => !issue.orderId || ref.orderId === issue.orderId
+      notice.setAttribute('role', 'status')
+      notice.id = `family-error-${crypto.randomUUID()}`
+      function card([key, cohort]) {
+        const section = el('section'),
+          fieldset = el('fieldset'),
+          legend = el(
+            'legend',
+            uiMessage('Order {orderId}', { orderId: cohort.orderId })
+          ),
+          record = recordFor(cohort)
+        fieldset.append(legend)
+        for (const [kind, title] of [
+          ['family', 'Use one product family'],
+          ['standalone', 'Keep products separate'],
+        ]) {
+          const label = el('label', uiMessage(title)),
+            input = el('input')
+          input.type = 'radio'
+          input.name = `family-${key}`
+          input.value = kind
+          input.checked = choices.get(key) === kind
+          input.disabled = validating
+          input.setAttribute('aria-describedby', notice.id)
+          input.dataset.action = 'choose-product-family'
+          input.onchange = () => {
+            choices.set(key, kind)
+            bindText(notice, '')
+          }
+          label.prepend(input)
+          fieldset.append(label)
+        }
+        section.append(fieldset)
+        return section
+      }
+      cancel.type = apply.type = 'button'
+      cancel.onclick = () => {
+        if (!validating) dialog.close()
+      }
+      apply.dataset.action = 'apply-family-choices'
+      apply.onclick = () =>
+        void (async () => {
+          if (!current() || validating) return
+          const missing = cohorts.find(([key]) => !choices.has(key))
+          if (missing) {
+            bindText(
+              notice,
+              uiMessage('Choose a family treatment for every listed group.')
+            )
+            list.ensureVisible(missing[0])?.querySelector('input')?.focus()
+            return
+          }
+          validating = true
+          apply.disabled = cancel.disabled = true
+          dialog.setAttribute('aria-busy', 'true')
+          try {
+            familyChoices.splice(
+              0,
+              familyChoices.length,
+              ...cohorts.map(([key, cohort]) => ({
+                accountId: cohort.accountId,
+                orderId: cohort.orderId,
+                entryIds: cohort.entryIds,
+                kind: choices.get(key),
+              }))
+            )
+            await replan()
+            if (current()) dialog.close('applied')
+          } finally {
+            validating = false
+            if (current()) {
+              apply.disabled = cancel.disabled = false
+              for (const input of body.querySelectorAll('input'))
+                input.disabled = false
+              dialog.setAttribute('aria-busy', 'false')
+            }
+          }
+        })()
+      footer.append(cancel, apply)
+      dialog.append(body, notice, footer)
+      dialog.oncancel = (event) => {
+        if (validating) event.preventDefault()
+      }
+      dialog.onclose = () => {
+        disposed = true
+        list?.destroy()
+        media.forget(dialog)
+        dialog.remove()
+        if (familyDialog === dialog) familyDialog = null
+        if (alive()) {
+          paintCards()
+          resolveFamilies.focus()
+        }
+      }
+      document.body.append(dialog)
+      familyDialog = dialog
+      dialog.showModal()
+      paintCards()
+      const sections = cohorts.map(([key, cohort]) => {
+        const host = el('section')
+        body.append(host)
+        return {
+          element: host,
+          entries: [
+            { key: `decision:${key}`, heading: true, cohortKey: key, cohort },
+            ...cohort.entryIds.map((entryId) => ({
+              key: entryKey({ ...cohort, entryId }),
+              cohort,
+              entryId,
+            })),
+          ],
+        }
+      })
+      list = createVirtualList({
+        scroller: body,
+        sections,
+        limit: 30,
+        render: (entry) => {
+          if (entry.heading) return card([entry.cohortKey, entry.cohort])
+          const item = recordFor(entry.cohort)?.snapshot.items.find(
+              (item) => item.entryId === entry.entryId
+            ),
+            row = el('div')
+          if (item)
+            row.append(
+              media.photo(item),
+              el(
+                'p',
+                [productArticleIdentity(item), item.title, item.description]
+                  .filter(Boolean)
+                  .join(' · ')
+              ),
+              el(
+                'p',
+                (item.skuProperties || [])
+                  .map((property) => `${property.label}: ${property.value}`)
+                  .join(' · ')
+              )
+            )
+          return row
+        },
+        remove: (node) => media.forget(node),
+      })
+      list.update()
+    }
+    function choiceEvidence(result, preparation) {
+      const index = result.plan.preparations.findIndex(
+        (value) => orderKey(value) === orderKey(preparation)
       )
-      if (ref) {
-        const resolve = button('Review purchase evidence', async () => {
-          modal.close()
-          await openInventoryRecovery({
-            ...ref,
-            entryId: refs.find((entry) => entry.orderId === ref.orderId)
-              ?.entryId,
-          })
+      return JSON.stringify({
+        source: result.plan.expectedSnapshots?.find(
+          (value) => orderKey(value) === orderKey(preparation)
+        ),
+        revision:
+          result.expectedRevisions?.[index] ??
+          result.plan.expectedRevisions?.[index],
+      })
+    }
+    function sizedReview(result, choices) {
+      const next = structuredClone(result)
+      for (const preparation of next.plan.preparations) {
+        for (const group of preparation.groups)
+          for (const variant of group.variants) {
+            const decisions = variant.entryIds
+              .map((entryId) =>
+                choices.get(entryKey({ ...preparation, entryId }))
+              )
+              .filter(Boolean)
+            if (!decisions.length) continue
+            if (
+              variant.entryIds.some(
+                (entryId) =>
+                  !selectedKeys.has(entryKey({ ...preparation, entryId }))
+              )
+            )
+              throw new Error(
+                'Select every source row sharing this barcode identity before resolving its size.'
+              )
+            if (
+              decisions.some(
+                (choice) =>
+                  choice.evidence !== choiceEvidence(next, preparation) ||
+                  choice.suffix !== decisions[0].suffix
+              )
+            )
+              throw new Error(
+                'The selected product evidence changed. Review its size endings again.'
+              )
+            variant.sizeSuffix = decisions[0].suffix
+            variant.needsSizeMapping = false
+          }
+        validatePreparationSuffixEdits(
+          preparation,
+          preparations.get(orderKey(preparation)),
+          {
+            snapshot: recordFor(preparation)?.snapshot,
+            sizeVocabulary: preferences.sizeVocabulary,
+          }
+        )
+      }
+      for (const change of next.changes || []) {
+        const preparation = next.plan.preparations.find(
+            (value) => orderKey(value) === orderKey(change)
+          ),
+          group = preparation?.groups.find((value) =>
+            value.variants.some((variant) =>
+              variant.entryIds.includes(change.entryId)
+            )
+          ),
+          variant = group?.variants.find((value) =>
+            value.entryIds.includes(change.entryId)
+          )
+        if (variant)
+          change.after = variant.needsSizeMapping
+            ? ''
+            : barcodeValue(group, variant)
+      }
+      next.issues = (next.issues || []).filter(
+        (issue) =>
+          issue.code !== 'PURCHASE_SIZE_REQUIRED' ||
+          (next.changes || []).some(
+            (change) =>
+              !change.after &&
+              change.orderId === issue.orderId &&
+              (!issue.entryId || change.entryId === issue.entryId)
+          )
+      )
+      next.plan.issues = structuredClone(next.issues)
+      return next
+    }
+    async function previewSizes(result) {
+      await repository.previewPreparations(result.plan.preparations, {
+        expectedRevisions:
+          result.expectedRevisions || result.plan.expectedRevisions,
+        expectedSnapshots: result.plan.expectedSnapshots,
+        preserveNaming: true,
+        preserveMaterials: true,
+      })
+      return result
+    }
+    async function openSizeResolution() {
+      if (
+        !alive() ||
+        pending ||
+        assigning ||
+        !review?.plan?.preparations ||
+        sizeDialog?.open
+      )
+        return
+      const baseline = structuredClone(review),
+        draftChoices = new Map(sizeChoices),
+        dialog = el('dialog', undefined, 'packing-review purchase-code-review'),
+        fields = el('div', undefined, 'purchase-code-review-items'),
+        notice = el('p'),
+        footer = el('div', undefined, 'dialog-actions'),
+        cancelSizes = el('button', uiMessage('Cancel')),
+        apply = el('button', uiMessage('Apply')),
+        rows = []
+      let validating = false,
+        disposed = false,
+        sizeList
+      const current = () => !disposed && dialog.open && alive()
+      notice.id = `size-review-error-${crypto.randomUUID()}`
+      dialog.dataset.action = 'resolve-purchase-code-sizes'
+      bindAttribute(dialog, 'aria-label', uiMessage('Resolve size endings'))
+      dialog.append(
+        el('h2', uiMessage('Resolve size endings')),
+        el(
+          'p',
+          uiMessage(
+            'Choose a size ending or explicitly keep no size ending. These changes stay in this review until you confirm preparation.'
+          )
+        )
+      )
+      for (const preparation of baseline.plan.preparations)
+        for (const group of preparation.groups)
+          for (const variant of group.variants) {
+            if (
+              !variant.needsSizeMapping ||
+              !variant.entryIds.some((entryId) =>
+                selectedKeys.has(entryKey({ ...preparation, entryId }))
+              )
+            )
+              continue
+            const foreign = variant.entryIds.some(
+                (entryId) =>
+                  !selectedKeys.has(entryKey({ ...preparation, entryId }))
+              ),
+              row = {
+                preparation,
+                group,
+                variant,
+                foreign,
+                suffix: variant.sizeSuffix || '',
+                resolved: false,
+              }
+            rows.push(row)
+          }
+      const busy = () => {
+        for (const control of fields.querySelectorAll('input,button'))
+          control.disabled = validating || control.dataset.foreign === 'true'
+        cancelSizes.disabled = validating
+        apply.disabled = validating || rows.some((row) => row.foreign)
+        dialog.setAttribute('aria-busy', String(validating))
+      }
+      function renderSizeRow(row) {
+        const { preparation, group, variant } = row,
+          section = el('section'),
+          label = el('label', uiMessage('Size ending')),
+          input = el('input'),
+          none = el('button', uiMessage('Do not add size endings')),
+          code = el('code', undefined, 'ce-code')
+        section.dataset.variantId = variant.id
+        section.dataset.orderId = preparation.orderId
+        section.append(
+          el('h3', group.title || group.spanishName || group.id),
+          el('p', [variant.variant, variant.size].filter(Boolean).join(' · ')),
+          el(
+            'p',
+            variant.entryIds
+              .map(
+                (entryId) =>
+                  byEntry.get(entryKey({ ...preparation, entryId }))?.name
+              )
+              .filter(Boolean)
+              .join(' / ')
+          )
+        )
+        input.type = 'text'
+        input.value = row.suffix
+        input.autocomplete = 'off'
+        input.spellcheck = false
+        input.dataset.action = 'review-size-ending'
+        input.dataset.variantId = variant.id
+        input.setAttribute('aria-describedby', notice.id)
+        input.id = `review-size-${crypto.randomUUID()}`
+        label.htmlFor = input.id
+        label.append(input)
+        none.type = 'button'
+        none.dataset.action = 'review-no-size-ending'
+        for (const control of [input, none]) {
+          control.dataset.foreign = String(row.foreign)
+          control.disabled = validating || row.foreign
+        }
+        const paint = () => {
+          let text = '—'
+          if (row.resolved && /^[A-Z0-9]*$/.test(row.suffix)) {
+            try {
+              text = barcodeValue(group, {
+                ...variant,
+                sizeSuffix: row.suffix,
+                needsSizeMapping: false,
+              })
+            } catch {}
+          }
+          setCodeText(code, text)
+        }
+        input.oninput = () => {
+          input.removeAttribute('aria-invalid')
+          row.suffix = input.value.trim().toUpperCase()
+          row.resolved = !!row.suffix
+          paint()
+        }
+        none.onclick = () => {
+          input.removeAttribute('aria-invalid')
+          row.suffix = ''
+          row.resolved = true
+          input.value = ''
+          paint()
+        }
+        section.append(label, none, code)
+        if (row.foreign)
+          section.append(
+            el(
+              'p',
+              uiMessage(
+                'Select every source row sharing this barcode identity before resolving its size.'
+              )
+            )
+          )
+        paint()
+        busy()
+        return section
+      }
+      cancelSizes.type = apply.type = 'button'
+      cancelSizes.onclick = () => {
+        if (!validating) dialog.close()
+      }
+      apply.dataset.action = 'apply-reviewed-size-endings'
+      notice.setAttribute('role', 'status')
+      apply.onclick = () =>
+        void (async () => {
+          if (!current() || validating || apply.disabled) return
+          const missing = rows.find((row) => !row.resolved)
+          if (missing) {
+            bindText(
+              notice,
+              uiMessage(
+                'Enter a size ending or choose Do not add size endings.'
+              )
+            )
+            const input = sizeList
+              .ensureVisible(missing.variant.id)
+              ?.querySelector('input')
+            input?.setAttribute('aria-invalid', 'true')
+            input?.focus()
+            return
+          }
+          validating = true
+          busy()
+          bindText(notice, uiMessage('Reviewing selected products…'))
+          try {
+            for (const row of rows)
+              for (const entryId of row.variant.entryIds)
+                draftChoices.set(entryKey({ ...row.preparation, entryId }), {
+                  suffix: row.suffix,
+                  evidence: choiceEvidence(baseline, row.preparation),
+                })
+            const candidate = await previewSizes(
+              detailedReview(sizedReview(baseline, draftChoices), detailChoices)
+            )
+            if (!current()) return
+            review = candidate
+            proposed = new Map(
+              candidate.changes.map((change) => [entryKey(change), change])
+            )
+            sizeChoices.clear()
+            for (const [key, value] of draftChoices) sizeChoices.set(key, value)
+            intentId = crypto.randomUUID()
+            issues.replaceChildren()
+            for (const issue of review.issues || [])
+              issues.append(el('p', uiMessage(issue.message)))
+            bindText(status, '')
+            paintCards()
+            dialog.close('applied')
+          } catch (error) {
+            if (current()) {
+              bindText(notice, uiMessage(error.message))
+              const affected =
+                rows.find(
+                  (row) => row.variant.id === error.packingIssue?.variantId
+                ) ||
+                rows.find((row) => !/^[A-Z0-9]*$/.test(row.suffix)) ||
+                rows[0]
+              const input =
+                affected &&
+                sizeList
+                  .ensureVisible(affected.variant.id)
+                  ?.querySelector('input')
+              input?.setAttribute('aria-invalid', 'true')
+              input?.focus()
+            }
+          } finally {
+            validating = false
+            if (current()) busy()
+          }
+        })()
+      footer.append(cancelSizes, apply)
+      dialog.append(fields, notice, footer)
+      dialog.oncancel = (event) => {
+        if (validating) event.preventDefault()
+      }
+      dialog.onclose = () => {
+        disposed = true
+        sizeList?.destroy()
+        dialog.remove()
+        if (sizeDialog === dialog) sizeDialog = null
+        if (alive()) {
+          paintCards()
+          resolveSizes.focus()
+        }
+      }
+      document.body.append(dialog)
+      sizeDialog = dialog
+      dialog.showModal()
+      paintCards()
+      sizeList = createVirtualList({
+        scroller: fields,
+        sections: [
+          {
+            element: fields,
+            entries: rows.map((row) => ({ key: row.variant.id, row })),
+          },
+        ],
+        render: ({ row }) => renderSizeRow(row),
+        limit: 30,
+      })
+      sizeList.update()
+      busy()
+    }
+    async function replan(message) {
+      const version = ++generation,
+        previousReview = review,
+        previousProposed = proposed
+      review = null
+      reviewError = false
+      proposed = new Map()
+      issues.replaceChildren()
+      pending = true
+      bindText(status, uiMessage('Reviewing selected products…'))
+      paintCards()
+      try {
+        let result = await repository.reviewPurchaseCodes({
+          orderRefs: scope,
+          entryRefs: refs,
+          ...(familyChoices.length
+            ? { familyChoices: structuredClone(familyChoices) }
+            : {}),
         })
-        resolve.dataset.action = 'review-purchase-evidence'
-        content.append(resolve)
+        if (!alive() || version !== generation) return
+        if (
+          (result.plan?.expectedSnapshots || []).some((expected) => {
+            const source =
+              expected.sourceRevision && JSON.parse(expected.sourceRevision)
+            if (!source) return false
+            source.preparationRevision = 0
+            return (
+              stableValue(source) !== capturedSources.get(orderKey(expected))
+            )
+          })
+        ) {
+          staleReview = true
+          throw new Error(
+            'The selected purchase changed. Close this review and select its products again.'
+          )
+        }
+        const evidence = JSON.stringify({
+          snapshots: result.plan?.expectedSnapshots,
+          revisions: result.expectedRevisions || result.plan?.expectedRevisions,
+        })
+        if (sourceEvidence !== undefined && evidence !== sourceEvidence) {
+          staleReview = true
+          throw new Error(
+            'The selected purchase changed. Close this review and select its products again.'
+          )
+        }
+        sourceEvidence = evidence
+        for (const family of result.familyReview || [])
+          for (const issue of family.issues || []) {
+            if (issue.code === 'PRODUCT_FAMILY_REVIEW_REQUIRED')
+              familyCohorts.set(
+                JSON.stringify([
+                  family.accountId,
+                  family.orderId,
+                  ...issue.entryIds,
+                ]),
+                {
+                  ...structuredClone(issue),
+                  accountId: family.accountId,
+                  orderId: family.orderId,
+                  sourceKey: family.sourceKey,
+                }
+              )
+          }
+        if (sizeChoices.size) result = sizedReview(result, sizeChoices)
+        if (detailChoices.size) result = detailedReview(result, detailChoices)
+        if (
+          (sizeChoices.size || detailChoices.size) &&
+          result.plan?.preparations?.length
+        )
+          result = await previewSizes(result)
+        if (!alive() || version !== generation) return
+        review = structuredClone(result)
+        refreshReviewList()
+        intentId = crypto.randomUUID()
+        proposed = new Map(
+          (result.changes || result.assignments || []).map((row) => [
+            entryKey(row),
+            row,
+          ])
+        )
+        for (const issue of result.issues || []) {
+          const notice = el(
+            'p',
+            uiMessage(
+              issue.code === 'PURCHASE_SIZE_REQUIRED'
+                ? 'Map this variant size before generating labels'
+                : issue.message || issue
+            )
+          )
+          if (issue.code) notice.dataset.issueCode = issue.code
+          issues.append(notice)
+          if (
+            issue.code === 'PURCHASE_SIZE_REQUIRED' ||
+            issue.code === 'PRODUCT_FAMILY_REVIEW_REQUIRED'
+          )
+            continue
+          const ref = scope.find(
+            (ref) => !issue.orderId || ref.orderId === issue.orderId
+          )
+          if (ref) {
+            const resolve = button('Review purchase evidence', async () => {
+              modal.close()
+              await openInventoryRecovery({
+                ...ref,
+                entryId: refs.find((entry) => orderKey(entry) === orderKey(ref))
+                  ?.entryId,
+              })
+            })
+            resolve.dataset.action = 'review-purchase-evidence'
+            issues.append(resolve)
+          }
+        }
+        if (message) {
+          status.replaceChildren(
+            el('span', uiMessage(message)),
+            document.createTextNode(' '),
+            el(
+              'span',
+              uiMessage(
+                'Codes were reviewed again. Check the current proposal and confirm again to retry.'
+              )
+            )
+          )
+        } else bindText(status, '')
+      } catch (error) {
+        if (alive() && version === generation) {
+          reviewError = true
+          if (previousReview) {
+            review = previousReview
+            proposed = previousProposed
+          }
+          bindText(status, uiMessage(error.message))
+        }
+      } finally {
+        if (alive() && version === generation) {
+          pending = false
+          paintCards()
+        }
       }
     }
-    const cancel = el('button', uiMessage('Cancel')),
-      commit = el('button', uiMessage('Assign purchase codes'), 'primary'),
-      intentId = crypto.randomUUID()
-    let assigning = false,
-      reviewList
+    for (const control of [back, cancel, commit]) control.type = 'button'
+    back.dataset.action = 'back-to-product-selection'
     commit.dataset.action = 'assign-purchase-codes'
-    commit.disabled = (review.issues || []).some(
-      (issue) => issue.severity === 'error'
-    )
-    cancel.onclick = () => modal.close()
+    commit.disabled = true
+    back.onclick = cancel.onclick = () => {
+      if (!assigning && !detailOpen && !familyDialog?.open && !sizeDialog?.open)
+        modal.close()
+    }
     commit.onclick = () =>
       void (async () => {
+        if (assigning || pending || !review || commit.disabled || !alive())
+          return
         assigning = true
-        commit.disabled = cancel.disabled = true
+        const submitted = structuredClone(review)
+        paintCards()
+        let saved = false
         try {
           await repository.assignPurchaseCodes({
-            plan: review.plan || review,
-            expectedRevisions: review.expectedRevisions,
+            plan: submitted.plan || submitted,
+            expectedRevisions: submitted.expectedRevisions,
             intentId,
           })
+          saved = true
           await reload()
           await changed()
           modal.close('assigned')
         } catch (error) {
-          bindText(status, uiMessage(error.message))
+          if (saved) {
+            modal.close('assigned')
+            feedback(error.message, true)
+          } else if (alive()) await replan(error.message)
         } finally {
           assigning = false
-          commit.disabled = cancel.disabled = false
+          if (alive()) paintCards()
         }
       })()
     status.setAttribute('role', 'status')
-    actions.append(cancel, commit)
+    actions.append(back, cancel, commit)
     modal.append(content, status, actions)
     modal.onclose = () => {
+      closed = true
+      sizeDialog?.close()
+      familyDialog?.close()
+      detailDialog?.close()
+      generation++
       reviewList?.destroy()
       media.forget(modal)
       modal.remove()
+      if (activeCodeReview === modal) {
+        activeCodeReview = null
+        if (opener?.isConnected) opener.focus()
+      }
     }
     document.body.append(modal)
+    activeCodeReview = modal
     modal.showModal()
     modal.oncancel = (event) => {
       if (assigning) event.preventDefault()
     }
-    reviewList = createVirtualList({
-      scroller: items,
-      sections: [
-        {
-          element: items,
-          entries: (review.changes || review.assignments || []).map((row) => ({
-            key: JSON.stringify([
-              row.accountId || 'local',
-              row.orderId,
-              row.entryId,
-              row.groupId,
-              row.variantId,
-            ]),
-            row,
-          })),
-        },
-      ],
-      render: ({ row }) => {
-        const card = reviewCard(row)
-        card.setAttribute('role', 'listitem')
-        return card
-      },
-      remove: (node) => media.forget(node),
-      limit: 100,
-    })
-    reviewList.update()
+    refreshReviewList()
+    await replan()
   }
   async function openInventoryRecovery(ref) {
     await flushSaves()
@@ -1619,7 +2766,14 @@ export async function createProductAuthoring({
       if (!session.stale && isCurrentSession(session))
         await flushSession(session)
     const match = membership.get(entryKey(ref))
-    if (!match) return reviewCodes([ref])
+    if (!match) {
+      const selected = getSelectedRows()
+      return reviewCodes(
+        selected.some((row) => entryKey(row) === entryKey(ref))
+          ? selected
+          : [ref]
+      )
+    }
     const session = getSession(match.prep)
     if (session.stale && !(await reviewRecovered(session))) return
     session.mounted = true

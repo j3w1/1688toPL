@@ -64,7 +64,12 @@ async function content(tabId, message, frameId = 0) {
   let response
   try {
     response = await chrome.tabs.sendMessage(tabId, message, { frameId })
-  } catch {
+  } catch (error) {
+    if (message.type === 'DETAIL_READ' && missingTab(error))
+      throw Object.assign(
+        new Error('The import tab was closed or changed. Resume to reopen it.'),
+        { readerMissing: true }
+      )
     throw Object.assign(
       new Error(
         'The order page is not ready. Refresh it or finish signing in, then resume.'
@@ -77,6 +82,10 @@ async function content(tabId, message, frameId = 0) {
       new Error(response?.error || 'The order page did not respond.'),
       {
         retryable: response?.retryable === true,
+        ...(response?.reviewRequired === true ||
+        response?.code === 'ORDER_DISCOUNT_REVIEW_REQUIRED'
+          ? { reviewRequired: true, code: 'ORDER_DISCOUNT_REVIEW_REQUIRED' }
+          : {}),
         diagnostics: financialDiagnostics(response?.diagnostics),
       }
     )
@@ -90,16 +99,37 @@ const browser = {
   async changePage(source, page) {
     return content(source.tabId, { type: 'LIST_PAGE', page }, source.frameId)
   },
-  async openDetailTab(url, id) {
+  async openDetailTab(url, id, options = {}) {
     // The marker is written atomically with tab creation. Reuse it if the
     // worker stopped between creating the tab and saving its numeric ID.
     const existing = (await chrome.tabs.query({})).find((tab) => owns(tab, id))
-    if (existing && (await this.getDetailTab(existing.id, id))) {
-      if (detailUrl(detailTabUrl(existing)) !== detailUrl(url))
-        await chrome.tabs.update(existing.id, { url: `${url}${marker(id)}` })
-      return existing.id
+    const verified = existing && (await this.getDetailTab(existing.id, id))
+    if (verified) {
+      let stage = 'retargeting'
+      try {
+        if (detailUrl(detailTabUrl(verified)) !== detailUrl(url))
+          await chrome.tabs.update(verified.id, { url: `${url}${marker(id)}` })
+        stage = 'cleanup'
+        await closeDuplicateReaders(verified.id, url, id)
+        await options.checkpoint?.(null, {
+          method: 'recovered',
+          outcome: 'owned',
+          stage,
+        })
+        return verified.id
+      } catch (error) {
+        await options.checkpoint?.(null, {
+          method: 'recovered',
+          outcome: 'api-error',
+          stage,
+          code: missingTab(error) ? 'MISSING_TAB' : 'BROWSER_API_FAILED',
+        })
+        if (!missingTab(error)) throw error
+        // The owned tab vanished after verification. Use the same bounded
+        // creation fallback instead of pausing on its now-stale numeric ID.
+      }
     }
-    return createReaderTab(`${url}${marker(id)}`)
+    return createReaderTab(url, id, options)
   },
   async navigateDetailTab(tabId, url, id) {
     const tab = await this.getDetailTab(tabId, id)
@@ -134,11 +164,13 @@ const browser = {
       throw error
     }
     if (!id) return tab
-    if (owns(tab, id))
+    if (owns(tab, id)) {
+      await closeDuplicateReaders(tab.id, detailUrl(detailTabUrl(tab)), id)
       return {
         ...tab,
         pendingUrl: detailUrl(tab.pendingUrl) ? tab.pendingUrl : undefined,
       }
+    }
     if (blankUrl(tab.url) && blankUrl(tab.pendingUrl)) {
       if (tab.status === 'loading') return tab
       throw new Error(
@@ -157,7 +189,13 @@ const browser = {
       ? await this.getDetailTab(tabId)
       : (await chrome.tabs.query({})).find((candidate) => owns(candidate, id))
     // A user-navigated or login tab is left open for the user to finish.
-    if (tab && owns(tab, id)) await chrome.tabs.remove(tab.id)
+    if (tab && owns(tab, id)) {
+      try {
+        await chrome.tabs.remove(tab.id)
+      } catch (error) {
+        if (!missingTab(error)) throw error
+      }
+    }
   },
   async readDetail(tabId, orderId) {
     return content(tabId, { type: 'DETAIL_READ', orderId })
@@ -212,45 +250,210 @@ async function pump() {
  * Prefer a background reader, then an unfocused window. Restricted browsers
  * can require a visible tab; use it automatically to complete the same import.
  */
-async function createReaderTab(url) {
-  let lastError
-  const methods = [
-    () => chrome.tabs.create({ url: 'about:blank', active: false }),
-    async () =>
-      (await chrome.windows.create({ url, focused: false }))?.tabs?.[0],
-    () => chrome.tabs.create({ url, active: true }),
-  ]
-  for (const [index, create] of methods.entries()) {
-    let tab
+async function closeDuplicateReaders(keepId, url, jobId) {
+  for (const tab of await chrome.tabs.query({})) {
+    if (
+      tab.id === keepId ||
+      !owns(tab, jobId) ||
+      detailUrl(detailTabUrl(tab)) !== detailUrl(url)
+    )
+      continue
+    // Recheck ownership immediately before cleanup; leave user/login tabs alone.
+    let current
     try {
-      tab = await create()
-      if (!Number.isInteger(tab?.id)) {
-        tab = undefined
-        throw new Error('The browser did not create an import tab.')
-      }
-      if (blankUrl(tab.url) && blankUrl(tab.pendingUrl))
-        await chrome.tabs.update(tab.id, { url })
-      // Some embedded browsers return an ID for a tab that was never retained.
-      // Verify it before the durable job takes ownership of that reader.
-      await chrome.tabs.get(tab.id)
-      try {
-        await chrome.tabs.update(tab.id, { autoDiscardable: false })
-      } catch {}
-      return { id: tab.id, visible: index === 2 }
+      current = await chrome.tabs.get(tab.id)
     } catch (error) {
-      lastError = error
-      try {
-        const current = tab && (await chrome.tabs.get(tab.id))
-        // Never close a login page or a tab the user has navigated elsewhere.
-        if (current && blankUrl(current.url) && blankUrl(current.pendingUrl))
-          await chrome.tabs.remove(tab.id)
-      } catch {}
-      // A lost ID allows another reader method; unrelated navigation failures
-      // stay actionable without creating more tabs or retrying indefinitely.
-      if (tab && !missingTab(error)) throw error
+      if (missingTab(error)) continue
+      throw error
+    }
+    if (
+      !owns(current, jobId) ||
+      detailUrl(detailTabUrl(current)) !== detailUrl(url)
+    )
+      continue
+    try {
+      await chrome.tabs.remove(current.id)
+    } catch (error) {
+      if (!missingTab(error)) throw error
     }
   }
-  throw lastError
+}
+
+async function createReaderTab(
+  url,
+  jobId,
+  { attempt, checkpoint = async () => {} } = {}
+) {
+  const target = `${url}${marker(jobId)}`
+  const methods = [
+    ['background', () => chrome.tabs.create({ url: target, active: false })],
+    [
+      'window',
+      async () =>
+        (await chrome.windows.create({ url: target, focused: false }))
+          ?.tabs?.[0],
+    ],
+    ['visible', () => chrome.tabs.create({ url: target, active: true })],
+  ]
+  const checks = [0, 100, 250, 500, 1000, 2000]
+  let lastError
+  const start = Math.max(
+    0,
+    methods.findIndex(([method]) => method === attempt?.method)
+  )
+  for (let index = start; index < methods.length; index++) {
+    const [method, create] = methods[index]
+    let currentAttempt = attempt?.method === method ? attempt : null
+    let stage = 'creating'
+    try {
+      if (!currentAttempt) {
+        currentAttempt = {
+          method,
+          stage: 'creating',
+          check: -1,
+          startedAt: new Date().toISOString(),
+        }
+        await checkpoint(currentAttempt, { method, outcome: 'creating', stage })
+        const tab = await create()
+        if (!Number.isInteger(tab?.id))
+          throw new Error('The browser did not create an import tab.')
+        currentAttempt = {
+          ...currentAttempt,
+          stage: 'registering',
+          tabId: tab.id,
+        }
+        // Persist the provisional ID before its first registration lookup.
+        await checkpoint(currentAttempt)
+      }
+      stage = 'registering'
+      for (
+        let check = Math.max(0, currentAttempt.check + 1);
+        check < checks.length;
+        check++
+      ) {
+        const elapsed = Date.now() - Date.parse(currentAttempt.startedAt)
+        const delay = Math.max(0, checks[check] - elapsed)
+        if (delay) await new Promise((resolve) => setTimeout(resolve, delay))
+        let tab
+        try {
+          if (Number.isInteger(currentAttempt.tabId))
+            tab = await chrome.tabs.get(currentAttempt.tabId)
+        } catch (error) {
+          if (!missingTab(error)) throw error
+          lastError = error
+        }
+        const exact = (await chrome.tabs.query({})).find(
+          (candidate) =>
+            owns(candidate, jobId) &&
+            detailUrl(detailTabUrl(candidate)) === detailUrl(url)
+        )
+        // A concrete unowned destination on the returned ID belongs to the user.
+        if (
+          tab &&
+          !(
+            owns(tab, jobId) && detailUrl(detailTabUrl(tab)) === detailUrl(url)
+          ) &&
+          !(blankUrl(tab.url) && blankUrl(tab.pendingUrl))
+        ) {
+          await checkpoint(
+            { ...currentAttempt, check },
+            {
+              method,
+              check,
+              outcome: 'navigated',
+              elapsedMs: checks[check],
+              stage,
+              code: 'NAVIGATED',
+            }
+          )
+          throw Object.assign(
+            new Error(
+              'The import tab left its marked order page. Complete sign-in or verification, then resume.'
+            ),
+            { attention: 'sign-in' }
+          )
+        }
+        if (exact) tab = exact
+        const owned =
+          tab &&
+          owns(tab, jobId) &&
+          detailUrl(detailTabUrl(tab)) === detailUrl(url)
+        currentAttempt = {
+          ...currentAttempt,
+          check,
+          ...(owned ? { tabId: tab.id } : {}),
+        }
+        await checkpoint(currentAttempt, {
+          method,
+          check,
+          outcome: owned ? 'owned' : tab ? 'blank' : 'missing',
+          elapsedMs: checks[check],
+          stage,
+          ...(!tab ? { code: 'MISSING_TAB' } : {}),
+        })
+        if (owned) {
+          stage = 'cleanup'
+          await closeDuplicateReaders(tab.id, url, jobId)
+          try {
+            await chrome.tabs.update(tab.id, { autoDiscardable: false })
+          } catch {}
+          return { id: tab.id, visible: method === 'visible' }
+        }
+      }
+      stage = 'cleanup'
+      if (Number.isInteger(currentAttempt.tabId)) {
+        let unfinished
+        try {
+          unfinished = await chrome.tabs.get(currentAttempt.tabId)
+        } catch (error) {
+          if (!missingTab(error)) throw error
+        }
+        if (
+          unfinished &&
+          blankUrl(unfinished.url) &&
+          blankUrl(unfinished.pendingUrl)
+        ) {
+          try {
+            await chrome.tabs.remove(unfinished.id)
+          } catch (error) {
+            if (!missingTab(error)) throw error
+          }
+        }
+      }
+      await checkpoint(currentAttempt, {
+        method,
+        outcome: 'missing',
+        stage: 'registering',
+        code: 'REGISTRATION_TIMEOUT',
+        elapsedMs: 2000,
+      })
+      lastError = new Error('No tab retained its import marker.')
+    } catch (error) {
+      lastError = error
+      if (error.attention) throw error
+      await checkpoint(currentAttempt, {
+        method,
+        outcome: 'api-error',
+        stage,
+        code: missingTab(error)
+          ? 'MISSING_TAB'
+          : stage === 'creating'
+            ? 'CREATION_FAILED'
+            : 'BROWSER_API_FAILED',
+      })
+      // Unsupported creation methods allow fallback; unrelated inspection errors do not.
+      if (currentAttempt?.stage === 'registering' && !missingTab(error))
+        throw error
+    }
+    attempt = null
+  }
+  if (!missingTab(lastError)) throw lastError
+  throw Object.assign(
+    new Error(
+      'The browser could not keep an import tab open. Pending orders are preserved. Open a regular browser window, then resume.'
+    ),
+    { code: 'IMPORT_READER_UNAVAILABLE', cause: lastError }
+  )
 }
 
 /** Bring the tab that needs a sign-in or verification forward, on request only. */
@@ -355,6 +558,20 @@ async function dispatch(message, sender, repository, controller) {
     case 'CONTENT_READY':
       requireContent(sender, 'detail')
       return true
+    case 'ORDER_RECONCILIATION_GET': {
+      requireContent(sender, 'detail')
+      if (
+        typeof message.orderId !== 'string' ||
+        !detailUrl(sender.url, message.orderId)
+      )
+        throw new Error('The review does not match this order page.')
+      const record = await repository.getOrder(message.orderId, {
+        accountId: 'local',
+      })
+      return record?.snapshot.accountId === 'local'
+        ? record.snapshot.reconciliationReview || null
+        : null
+    }
     case 'SNAPSHOT_READY': {
       requireContent(sender, 'detail')
       if (
@@ -362,6 +579,20 @@ async function dispatch(message, sender, repository, controller) {
         message.snapshot?.accountId !== 'local'
       )
         throw new Error('The snapshot does not match this order page.')
+      if (message.reviewJobId !== undefined) {
+        if (
+          message.save !== true ||
+          typeof message.reviewJobId !== 'string' ||
+          !message.reviewJobId ||
+          new URL(sender.url).hash !==
+            `#1688topl-review=${encodeURIComponent(message.reviewJobId)}`
+        )
+          throw new Error('Open this order from its import discount review.')
+        return controller.confirmReviewedOrder(
+          message.reviewJobId,
+          message.snapshot
+        )
+      }
       // Import snapshots are committed only after the queued completeness check.
       const jobs = await repository.listJobs()
       if (
@@ -468,6 +699,23 @@ async function dispatch(message, sender, repository, controller) {
       }
     case 'IMPORT_ATTENTION_OPEN':
       return openAttentionTab(await repository.getJob(message.jobId))
+    case 'IMPORT_REVIEW_OPEN': {
+      const job = await repository.getJob(message.jobId)
+      const order = job?.orders.find((item) => item.orderId === message.orderId)
+      const sourceUrl = detailUrl(order?.sourceUrl, message.orderId)
+      if (
+        job?.accountId !== 'local' ||
+        order?.state !== 'failed' ||
+        order.reviewRequired !== true ||
+        !sourceUrl
+      )
+        throw new Error('This order no longer needs a discount review.')
+      const tab = await chrome.tabs.create({
+        url: `${sourceUrl}#1688topl-review=${encodeURIComponent(job.id)}`,
+        active: true,
+      })
+      return { tabId: tab.id }
+    }
     case 'JOBS_QUERY':
       return { jobs: (await repository.listJobs()).map(importJobView) }
     case 'LIBRARY_HISTORY':
@@ -534,6 +782,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       const data = [
         'IMAGE_GET',
         'WORKSPACE_APPEARANCE_GET',
+        'ORDER_RECONCILIATION_GET',
         'WORKSPACE_APPEARANCE_CHANGED',
         'LIBRARY_QUERY',
         'JOBS_QUERY',
