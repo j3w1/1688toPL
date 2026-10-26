@@ -14,6 +14,12 @@ Other-source orders carry `source: 'other'`, human `reference` and generated int
 
 Reviewed `paymentLinks` retain source/optional fee-row IDs, exact amount, reason, frozen receiving IDs and observed source payable/shipping evidence. New/repointed sources require same account/known store, except an eligible same-order fee. Validate final graph for cycles, oversubscription, missing references and exclusions. Receiving attribution never adds another source payment. Scoped dependencies include recursive supporting source records without opening their preparations. Repeat-product links retain shared group/variant identities and owner aliases while preserving purchase prices/quantities; identity/feature changes require unlinking, cost-only edits do not.
 
+### Authoritative spreadsheet updates
+
+`reviewStoreOrderUpdate()` previews one existing same-account/store spreadsheet purchase; `updateStoreOrder()` recomputes and commits the reviewed replacement in one operational transaction. The original purchase identity/date survive. Source rows, photos, exact financial values, capacities and supported unsealed carton facts are replaced completely, including removed rows and blank optional values. Matching never relies on sequential freshly parsed entry IDs or Excel row position: confirmed matches keep existing entry/group/variant/carton identities, while ambiguous mappings block confirmation. Existing CE codes and authored preparation/annotations remain unless an explicit correction is reviewed.
+
+The update retains source and carton history, uses existing retirement tombstones, validates current/historical code ownership and protects shipment/payment/exclusion dependencies. Complete reconciliation revision guards and operation intents prevent stale or duplicate commits. A failed operation leaves the entire purchase unchanged. Full/scoped backups retain the resulting source, preparation and physical evidence without an IndexedDB migration.
+
 ## Money and reconciliation
 
 Use exact decimal/cents and BigInt helpers, never floating tolerances or inferred balancing differences. Base price may already include wholesale reductions. Round price × quantity once per source row. Allocate remaining order adjustments proportionally after item discounts with deterministic cent rounding; a price increase has a negative discount allocation. Shipping stays separate. Legacy CSV contains item discounts only; library copy includes allocated order adjustments.

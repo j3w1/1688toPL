@@ -11,6 +11,7 @@ import { popupLanguageToggle } from './popup-language-toggle.js'
 import { photoCopyTile } from './photo-copy.js'
 import { copySingleImage } from './clipboard.js'
 import { mountStoreImportCodeReview } from './store-import-code-review.js'
+import { mountStoreImportUpdateReview } from './store-import-update-review.js'
 
 const positiveInteger = (value) =>
   /^\d+$/.test(String(value ?? '')) &&
@@ -349,6 +350,7 @@ export function openStoreImportDialog({
   repository,
   onImported = () => {},
   getSizeClassifier,
+  accountId = 'local',
 }) {
   const dialog = el('dialog', undefined, 'store-import-dialog'),
     form = el('form', undefined, 'store-import-form'),
@@ -370,6 +372,7 @@ export function openStoreImportDialog({
     layout = el('div', undefined, 'store-import-layout'),
     body = el('div', undefined, 'store-import-body'),
     workbookReview = el('div', undefined, 'store-import-workbook-review'),
+    changeReview = el('fieldset', undefined, 'store-import-change-review'),
     codeReview = el('fieldset', undefined, 'store-import-code-review'),
     guide = el('aside', undefined, 'store-import-sidebar'),
     guideTitle = el('h3', m('Workbook guide')),
@@ -378,12 +381,16 @@ export function openStoreImportDialog({
     sheet = el('select'),
     storeName = textInput('storeName'),
     purchaseDate = textInput('purchaseDate', 'date'),
+    importMode = el('select'),
+    updatePurchase = el('select'),
+    updateSetup = el('section', undefined, 'store-import-update-setup'),
     identity = el('p', undefined, 'store-import-identity'),
     status = el(
       'p',
       m('Choose the marked .xlsx or .xls file to begin.'),
       'store-import-status'
     ),
+    updateContext = el('p', undefined, 'store-import-update-context'),
     issues = el('ul', undefined, 'store-import-issues'),
     duplicateNotice = el('p', undefined, 'store-import-warning'),
     checksHeader = el('div', undefined, 'store-import-checks-header'),
@@ -405,6 +412,11 @@ export function openStoreImportDialog({
     codeView,
     codeFingerprint,
     codeIntent,
+    updateView,
+    updateDraft,
+    identityChangesConfirmed = false,
+    purchases = [],
+    reviewingChanges = false,
     reviewingCodes = false,
     codeValidity = { pending: false, valid: false }
   const allocations = new Map(),
@@ -458,7 +470,11 @@ export function openStoreImportDialog({
   status.setAttribute('role', 'status')
   status.setAttribute('aria-live', 'polite')
   status.tabIndex = -1
+  updatePurchase.setAttribute('aria-describedby', status.id)
+  updatePurchase.setAttribute('aria-errormessage', status.id)
   duplicateNotice.hidden = true
+  updateContext.hidden = true
+  updateContext.dataset.action = 'store-import-update-context'
   duplicateNotice.dataset.action = 'duplicate-import-warning'
   duplicateNotice.setAttribute('role', 'status')
   form.noValidate = true
@@ -466,6 +482,22 @@ export function openStoreImportDialog({
   submit.dataset.action = 'review-import-codes'
   codeReview.dataset.action = 'store-import-code-review'
   codeReview.hidden = true
+  changeReview.hidden = true
+  importMode.name = 'importMode'
+  updatePurchase.name = 'updatePurchase'
+  for (const [value, label] of [
+    ['update', 'Update existing purchase'],
+    ['new', 'Create new purchase'],
+  ]) {
+    const option = el('option', m(label))
+    option.value = value
+    importMode.append(option)
+  }
+  updateSetup.hidden = true
+  updateSetup.append(
+    field('Import action', importMode),
+    field('Purchase to update', updatePurchase)
+  )
   for (const button of [back, resetCodes, cancelCodes]) {
     button.type = 'button'
     button.hidden = true
@@ -556,6 +588,7 @@ export function openStoreImportDialog({
   checksHeader.hidden = true
   workbookReview.append(
     setup,
+    updateSetup,
     identity,
     duplicateNotice,
     checksHeader,
@@ -564,31 +597,61 @@ export function openStoreImportDialog({
     products,
     reviewLabel
   )
-  body.append(status, workbookReview, codeReview)
+  body.append(status, updateContext, workbookReview, changeReview, codeReview)
   layout.append(body, guide)
   form.append(header, layout)
   dialog.append(form)
 
+  const targetPurchase = () =>
+    importMode.value === 'update'
+      ? purchases.find(
+          ({ snapshot }) =>
+            `${snapshot.accountId}/${snapshot.orderId}` === updatePurchase.value
+        )
+      : undefined
+  const updateMode = () => !updateSetup.hidden && importMode.value === 'update'
   const updateSubmit = () => {
     submit.disabled =
       busy ||
       submitted ||
+      (reviewingChanges &&
+        (!updateView?.review.summary?.hasChanges ||
+          updateView.review.issues?.some((issue) =>
+            [
+              'STORE_UPDATE_MAPPING_REQUIRED',
+              'STORE_UPDATE_IDENTITY_REVIEW_REQUIRED',
+            ].includes(issue.code)
+          ))) ||
       (reviewingCodes && (codeValidity.pending || !codeValidity.valid))
     resetCodes.disabled = busy || codeValidity.pending
     back.disabled = busy || codeValidity.resetting
     codeReview.disabled = busy || codeValidity.resetting
+    changeReview.disabled = busy
     cancelCodes.disabled = saveLocked
   }
   const setCodeStage = (value) => {
+    reviewingChanges = false
     reviewingCodes = value
     workbookReview.hidden = value
+    changeReview.hidden = true
     codeReview.hidden = !value
     for (const button of [back, resetCodes, cancelCodes]) button.hidden = !value
     bindText(
       submit,
-      m(value ? 'Import and assign codes' : 'Review products and codes')
+      m(
+        value
+          ? updateMode()
+            ? 'Update purchase'
+            : 'Import and assign codes'
+          : updateMode()
+            ? 'Review changes'
+            : 'Review products and codes'
+      )
     )
-    if (value) submit.dataset.action = 'import-and-assign-codes'
+    if (value) {
+      if (updateMode()) submit.dataset.action = 'update-store-purchase'
+      else submit.dataset.action = 'import-and-assign-codes'
+    } else if (updateMode()) submit.dataset.action = 'review-import-changes'
     else submit.dataset.action = 'review-import-codes'
     updateSubmit()
     body.scrollTop = 0
@@ -597,15 +660,43 @@ export function openStoreImportDialog({
       codeReview.querySelector('input')?.focus()
     } else purchaseDate.focus()
   }
+  const setChangeStage = () => {
+    reviewingChanges = true
+    reviewingCodes = false
+    workbookReview.hidden = true
+    codeReview.hidden = true
+    changeReview.hidden = false
+    back.hidden = cancelCodes.hidden = false
+    resetCodes.hidden = true
+    bindText(submit, m('Review products and codes'))
+    submit.dataset.action = 'review-update-codes'
+    bindText(
+      status,
+      m('Review all replacements before updating this purchase.')
+    )
+    body.scrollTop = 0
+    updateView?.update()
+    updateSubmit()
+  }
   const discardCodes = () => {
     codeView?.destroy()
     codeView = undefined
     codeFingerprint = undefined
     codeIntent = undefined
+    updateView?.destroy()
+    updateView = undefined
+    updateDraft = undefined
+    identityChangesConfirmed = false
     codeValidity = { pending: false, valid: false }
     setCodeStage(false)
   }
-  back.addEventListener('click', () => setCodeStage(false))
+  back.addEventListener('click', () => {
+    if (reviewingCodes && updateMode()) {
+      updateDraft = codeView.review
+      updateView?.setReview(updateDraft)
+      setChangeStage()
+    } else setCodeStage(false)
+  })
   cancelCodes.addEventListener('click', () => dialog.close())
   resetCodes.addEventListener('click', () => {
     void codeView?.validate({ resetCodes: true })
@@ -617,7 +708,11 @@ export function openStoreImportDialog({
     close.disabled = saveLocked
     file.disabled = value
     sheet.disabled = value || !workbook
-    storeName.disabled = purchaseDate.disabled = photosReviewed.disabled = value
+    storeName.disabled = purchaseDate.disabled =
+      value || Boolean(targetPurchase())
+    photosReviewed.disabled = value
+    importMode.disabled = value
+    updatePurchase.disabled = value || !updateMode()
     for (const control of products.querySelectorAll('input,button'))
       control.disabled = value
     form.setAttribute('aria-busy', String(value))
@@ -830,15 +925,105 @@ export function openStoreImportDialog({
     )
     status.classList.toggle('is-error', errors > 0)
   }
+  const applyTarget = () => {
+    discardCodes()
+    const target = targetPurchase()
+    updateContext.hidden = !target
+    if (target)
+      bindText(
+        updateContext,
+        m('Updating {store} · {date} · Purchase {purchase}', {
+          store: target.snapshot.store.name,
+          date: target.snapshot.purchasedAt.slice(0, 10),
+          purchase: target.snapshot.orderId,
+        })
+      )
+    updatePurchase.removeAttribute('aria-invalid')
+    status.classList.remove('is-error')
+    bindText(
+      status,
+      m(
+        'Check the photos and totals, confirm the date, and complete the highlighted reviews.'
+      )
+    )
+    bindText(
+      subtitle,
+      m(
+        updateMode()
+          ? 'Review the workbook changes, preserved codes and new proposals before updating.'
+          : 'Review the workbook, then review and assign its product codes.'
+      )
+    )
+    if (target) {
+      purchaseDate.value = target.snapshot.purchasedAt.slice(0, 10)
+      storeName.value = target.snapshot.store.name
+      bindText(
+        identity,
+        m(
+          'Updating purchase {date} · {rows} rows · ¥{total}. Purchase identity and date stay unchanged.',
+          {
+            date: purchaseDate.value,
+            rows: target.snapshot.items.length,
+            total: target.snapshot.spreadsheet.total,
+          }
+        )
+      )
+    } else {
+      purchaseDate.value = ''
+      storeName.value = analysis?.store.name || ''
+      bindText(
+        identity,
+        m(
+          updateMode()
+            ? 'Choose the purchase to update.'
+            : 'A new purchase will be created.'
+        )
+      )
+    }
+    purchaseDate.disabled = storeName.disabled = busy || Boolean(target)
+    updatePurchase.disabled = busy || !updateMode()
+    setCodeStage(false)
+  }
+  importMode.addEventListener('change', applyTarget)
+  updatePurchase.addEventListener('change', applyTarget)
   const analyze = async () => {
     const current = generation,
       result = await analyzeStoreSheet(workbook, sheet.value),
-      matches = await findMatchingStoreImports(
-        result,
-        await repository.listOrders()
-      )
+      records = await repository.listOrders({ accountId }),
+      matches = await findMatchingStoreImports(result, records)
     if (current !== generation || !dialog.isConnected) return
     analysis = result
+    purchases = records.filter(
+      ({ snapshot }) =>
+        snapshot.sourceType === 'spreadsheet' &&
+        snapshot.accountId === accountId &&
+        snapshot.store.key === analysis.store.key
+    )
+    updateSetup.hidden = !purchases.length || !repository.reviewStoreOrderUpdate
+    const placeholder = el('option', m('Choose the purchase to update.'))
+    placeholder.value = ''
+    updatePurchase.replaceChildren(
+      placeholder,
+      ...purchases.map(({ snapshot }) => {
+        const option = el(
+          'option',
+          m('{date} · {rows} rows · ¥{total} · {id}', {
+            date: snapshot.purchasedAt.slice(0, 10),
+            rows: snapshot.items.length,
+            total: snapshot.spreadsheet.total,
+            id: snapshot.orderId,
+          })
+        )
+        option.value = `${snapshot.accountId}/${snapshot.orderId}`
+        return option
+      })
+    )
+    importMode.value =
+      purchases.length && !updateSetup.hidden ? 'update' : 'new'
+    updatePurchase.value =
+      purchases.length === 1
+        ? `${purchases[0].snapshot.accountId}/${purchases[0].snapshot.orderId}`
+        : ''
     duplicateNotice.hidden = !matches.length
     if (matches.length)
       bindText(
@@ -849,6 +1034,7 @@ export function openStoreImportDialog({
         )
       )
     render()
+    if (purchases.length && !updateSetup.hidden) applyTarget()
   }
   file.addEventListener('change', async () => {
     const selected = file.files?.[0]
@@ -859,6 +1045,9 @@ export function openStoreImportDialog({
     storeName.removeAttribute('aria-invalid')
     analysis = undefined
     workbook = undefined
+    purchases = []
+    updateSetup.hidden = true
+    updateContext.hidden = true
     duplicateNotice.hidden = true
     render()
     setBusy(true)
@@ -906,9 +1095,114 @@ export function openStoreImportDialog({
       setBusy(false)
     }
   })
+  const codeSourceRows = (rows) =>
+    rows.map((row) => ({
+      ...row,
+      variantDeclaration:
+        workbook.sheets
+          .find((value) => value.name === analysis.sheetName)
+          ?.rows.find((value) => value.row === row.row)
+          ?.cells.find((cell) => cell.address === row.cells.var)?.value ?? '',
+    }))
+  const mountCodes = (result, rows) => {
+    codeView?.destroy()
+    codeView = mountStoreImportCodeReview(codeReview, {
+      repository,
+      review: result,
+      sourceRows: codeSourceRows(rows),
+      ...(updateMode()
+        ? {
+            reviewCandidate: async (draft) => {
+              const next = await repository.reviewStoreOrderUpdate({
+                sourceCandidate: draft.sourceCandidate,
+                candidate: draft.candidate,
+                draftCandidate: draft.candidate,
+                previousSuggestedPreparation: draft.suggestedPreparation,
+                target: draft.target,
+                mappings: draft.mappings,
+                preparation: draft.preparation,
+                expectedRevisions: draft.expectedRevisions,
+                identityChangesConfirmed,
+                resetCodes: draft.resetCodes,
+              })
+              updateDraft = next
+              return next
+            },
+          }
+        : {}),
+      onValidity: (value) => {
+        codeValidity = value
+        updateSubmit()
+      },
+    })
+  }
+  const mountChanges = (result, rows) => {
+    updateDraft = result
+    updateView?.destroy()
+    updateView = mountStoreImportUpdateReview(changeReview, {
+      repository,
+      review: result,
+      sourceRows: rows,
+      onIdentityConfirmation(confirmed) {
+        identityChangesConfirmed = confirmed
+        void refreshChanges({}, rows)
+      },
+      onMappingChange(row, previous) {
+        return refreshChanges({ [row]: previous }, rows)
+      },
+    })
+  }
+  const refreshChanges = async (mappings, rows) => {
+    if (busy) return
+    const current = generation
+    setBusy(true)
+    try {
+      const result = await repository.reviewStoreOrderUpdate({
+        sourceCandidate: updateDraft.sourceCandidate,
+        candidate: updateDraft.candidate,
+        draftCandidate: codeView?.review.candidate || updateDraft.candidate,
+        previousSuggestedPreparation:
+          codeView?.review.suggestedPreparation ||
+          updateDraft.suggestedPreparation,
+        target: updateDraft.target,
+        mappings: { ...updateDraft.mappings, ...mappings },
+        preparation: codeView?.review.preparation || updateDraft.preparation,
+        expectedRevisions: updateDraft.expectedRevisions,
+        identityChangesConfirmed,
+      })
+      if (current !== generation || !dialog.isConnected) return
+      updateDraft = result
+      updateView.setReview(result)
+      mountCodes(result, rows)
+      setChangeStage()
+    } catch (error) {
+      fail(error)
+    } finally {
+      setBusy(false)
+    }
+  }
   form.addEventListener('submit', async (event) => {
     event.preventDefault()
     if (busy || submitted) return
+    if (reviewingChanges) {
+      if (
+        updateDraft?.issues?.some(
+          (issue) =>
+            issue.code === 'STORE_UPDATE_MAPPING_REQUIRED' ||
+            issue.code === 'STORE_UPDATE_IDENTITY_REVIEW_REQUIRED'
+        )
+      ) {
+        updateView.showErrors()
+        return
+      }
+      setCodeStage(true)
+      bindText(
+        status,
+        m('Review the preserved codes and new proposals before updating.')
+      )
+      void codeView.validate()
+      return
+    }
     if (reviewingCodes) {
       if (!codeView?.valid) {
         codeView?.showErrors()
@@ -916,7 +1210,14 @@ export function openStoreImportDialog({
       }
       setBusy(true, { saving: true })
       status.classList.remove('is-error')
-      bindText(status, m('Saving the reviewed order and codes…'))
+      bindText(
+        status,
+        m(
+          updateMode()
+            ? 'Saving the reviewed purchase update…'
+            : 'Saving the reviewed order and codes…'
+        )
+      )
       try {
         if (!(await codeView.validate())) {
           bindText(status, m('Resolve these code issues before importing.'))
@@ -924,12 +1225,25 @@ export function openStoreImportDialog({
           codeView.showErrors()
           return
         }
-        const { candidate, preparation } = codeView.review
-        const record = await repository.importStoreOrder({
-          candidate,
-          preparation,
-          intentId: codeIntent,
-        })
+        const draft = codeView.review
+        const record = updateMode()
+          ? await repository.updateStoreOrder({
+              sourceCandidate: draft.sourceCandidate,
+              candidate: draft.candidate,
+              draftCandidate: draft.candidate,
+              previousSuggestedPreparation: draft.suggestedPreparation,
+              target: draft.target,
+              mappings: draft.mappings,
+              preparation: draft.preparation,
+              expectedRevisions: draft.expectedRevisions,
+              identityChangesConfirmed,
+              intentId: codeIntent,
+            })
+          : await repository.importStoreOrder({
+              candidate: draft.candidate,
+              preparation: draft.preparation,
+              intentId: codeIntent,
+            })
         submitted = true
         await onImported(record)
         dialog.close()
@@ -938,14 +1252,21 @@ export function openStoreImportDialog({
         fail(
           submitted
             ? {
-                message:
-                  'The order was imported. Close this window and reopen the workspace to refresh the table.',
+                message: updateMode()
+                  ? 'The purchase was updated. Close this window and reopen the workspace to refresh the table.'
+                  : 'The order was imported. Close this window and reopen the workspace to refresh the table.',
               }
             : error
         )
       } finally {
         setBusy(false)
       }
+      return
+    }
+    if (updateMode() && !targetPurchase()) {
+      updatePurchase.setAttribute('aria-invalid', 'true')
+      fail({ message: 'Choose the purchase to update.' })
+      updatePurchase.focus()
       return
     }
     const review = validateStoreImportReview(analysis, {
@@ -973,11 +1294,20 @@ export function openStoreImportDialog({
       purchaseDate: purchaseDate.value,
       store: { ...analysis.store, name: storeName.value.trim() },
       rows: review.rows,
+      ...(updateMode() ? { target: targetPurchase().snapshot.orderId } : {}),
     })
     if (codeView && codeFingerprint === fingerprint) {
-      setCodeStage(true)
+      if (updateMode()) setChangeStage()
+      else setCodeStage(true)
       status.classList.remove('is-error')
-      bindText(status, m('Review the proposed codes before importing.'))
+      bindText(
+        status,
+        m(
+          updateMode()
+            ? 'Review all replacements before updating this purchase.'
+            : 'Review the proposed codes before importing.'
+        )
+      )
       void codeView.validate()
       return
     }
@@ -1007,41 +1337,40 @@ export function openStoreImportDialog({
           thumbnail: row.thumbnail || thumbnails.get(original),
         })
       }
-      const result = await repository.reviewStoreOrderImport({
+      const input = {
+        accountId,
         filename: analysis.filename,
         sheetName: analysis.sheetName,
         total: analysis.total,
         purchaseDate: purchaseDate.value,
         store: { ...analysis.store, name: storeName.value.trim() },
         rows: importRows,
-      })
+      }
+      const result = updateMode()
+        ? await repository.reviewStoreOrderUpdate({
+            ...input,
+            target: {
+              accountId: targetPurchase().snapshot.accountId,
+              orderId: targetPurchase().snapshot.orderId,
+            },
+          })
+        : await repository.reviewStoreOrderImport(input)
       if (generation !== reviewGeneration || !dialog.isConnected) return
       codeFingerprint = fingerprint
       codeIntent = crypto.randomUUID()
-      codeView = mountStoreImportCodeReview(codeReview, {
-        repository,
-        review: result,
-        sourceRows: review.rows.map((row) => ({
-          ...row,
-          variantDeclaration:
-            workbook.sheets
-              .find((value) => value.name === analysis.sheetName)
-              ?.rows.find((value) => value.row === row.row)
-              ?.cells.find((cell) => cell.address === row.cells.var)?.value ??
-            '',
-        })),
-        onValidity: (value) => {
-          codeValidity = value
-          updateSubmit()
-        },
-      })
-      setCodeStage(true)
+      mountCodes(result, review.rows)
+      if (updateMode()) {
+        mountChanges(result, review.rows)
+        setChangeStage()
+      } else setCodeStage(true)
       bindText(
         status,
         m(
-          previousDraft
-            ? 'Workbook details changed. Review the regenerated codes.'
-            : 'Review the proposed codes before importing.'
+          updateMode()
+            ? 'Review all replacements before updating this purchase.'
+            : previousDraft
+              ? 'Workbook details changed. Review the regenerated codes.'
+              : 'Review the proposed codes before importing.'
         )
       )
     } catch (error) {
@@ -1068,6 +1397,7 @@ export function openStoreImportDialog({
       generation++
       readingController?.abort()
       codeView?.destroy()
+      updateView?.destroy()
       photoViewer.close()
       dialog.remove()
     },

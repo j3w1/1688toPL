@@ -8,6 +8,8 @@ import {
   productFamilySourceMatches,
 } from './product-families.js'
 import { reviewStoreImportCodes } from './store-import-codes.js'
+import { planStoreOrderUpdate } from './store-order-update.js'
+import { parseStoreFilename } from './store-workbook-model.js'
 import { planOrderRemoval } from './order-removal.js'
 import { validateReconciliationReview } from './order-reconciliation.js'
 import { createLibraryChanges } from './library-changes.js'
@@ -25,6 +27,7 @@ import {
 import {
   validateContainerRecord,
   reconciliationRevisions,
+  assertReconciliationRevisions,
 } from './container-model.js'
 import {
   sourceRevision,
@@ -72,6 +75,7 @@ import {
   mergePaymentLinks,
   validatePaymentGraph,
   paymentSourceDependencies,
+  paymentLinkReviews,
 } from './payment-links.js'
 import { createPaymentLinksRepository } from './payment-links-repository.js'
 import {
@@ -2477,6 +2481,116 @@ export async function openDatabase({ name = '1688-order-library' } = {}) {
     return record
   }
 
+  async function storeUpdateCandidate(input) {
+    const target = input.target
+    object(target, 'Spreadsheet update purchase')
+    identifier(target.orderId, 'Spreadsheet update order ID')
+    const accountId = target.accountId || 'local'
+    const existing = await read(['orders'], (tx) =>
+      requested(tx.objectStore('orders').get([accountId, target.orderId]))
+    )
+    if (existing?.snapshot.sourceType !== 'spreadsheet')
+      throw new Error('Choose an existing spreadsheet purchase to update.')
+    const supplied = input.sourceCandidate || input.candidate
+    const candidate = supplied
+      ? validateStoreImportCandidate(supplied)
+      : validateStoreImportCandidate(
+          await createStoreOrder(
+            {
+              ...input,
+              accountId,
+              purchaseDate: existing.snapshot.purchasedAt.slice(0, 10),
+            },
+            {
+              orderId: target.orderId,
+              now: nextEditTimestamp(existing.snapshot.observedAt),
+            }
+          )
+        )
+    if (
+      candidate.snapshot.accountId !== accountId ||
+      candidate.snapshot.orderId !== target.orderId ||
+      candidate.snapshot.store.key !== existing.snapshot.store.key ||
+      parseStoreFilename(candidate.snapshot.spreadsheet.filename).key !==
+        existing.snapshot.store.key
+    )
+      throw new Error(
+        'The workbook filename must identify the same store and account as this purchase.'
+      )
+    return candidate
+  }
+
+  function reviewedStoreUpdate(state, input, candidate) {
+    if (input.expectedRevisions)
+      assertReconciliationRevisions(
+        state,
+        input.target,
+        input.expectedRevisions
+      )
+    const review = planStoreOrderUpdate(
+      {
+        ...state,
+        preferences: initializedPackingPreferences(state.preferences),
+      },
+      {
+        ...input,
+        candidate,
+        sourceCandidate: candidate,
+        draftCandidate: input.draftCandidate || input.candidate,
+      }
+    )
+    if (review.issues.some((issue) => issue.severity === 'error')) return review
+    try {
+      const previous = state.records.find(
+        (record) => orderKey(record.snapshot) === orderKey(review.target)
+      )
+      const record = reconcile(review.candidate.snapshot, previous).order
+      record.unitsPerCarton = { ...review.candidate.unitsPerCarton }
+      record.cartonDetails = {}
+      const projected = {
+        ...state,
+        records: state.records.map((value) =>
+          value === previous ? record : value
+        ),
+        preparations: state.preparations
+          .filter((value) => orderKey(value) !== orderKey(review.target))
+          .concat(review.preparation),
+      }
+      projected.batches = containerRepository.validateChanges(
+        projected,
+        review.target,
+        review.cartonBatchChanges
+      )
+      validatePaymentGraph(projected.records)
+      for (const owner of projected.records)
+        for (const warning of paymentLinkReviews(owner, projected.records))
+          if (
+            warning.sourceOrderId === review.target.orderId &&
+            owner.snapshot.accountId === review.target.accountId
+          )
+            review.issues.push({
+              code: 'STORE_UPDATE_PAYMENT_REVIEW',
+              message: 'Review changes to the linked source payment',
+              severity: 'warning',
+              orderId: owner.snapshot.orderId,
+              ...warning,
+            })
+      containerRepository.graph(projected)
+    } catch (error) {
+      const containerIds = error.detail?.containerIds || []
+      review.issues.push({
+        code: error.code || 'STORE_UPDATE_BLOCKED',
+        message: error.message,
+        severity: 'error',
+        ...error.detail,
+        containerNames: state.containers
+          .filter((container) => containerIds.includes(container.id))
+          .map((container) => container.name),
+      })
+    }
+    return review
+  }
+
   return {
     ...containerRepository.api,
     ...reportRepository.api,
@@ -2675,6 +2789,90 @@ export async function openDatabase({ name = '1688-order-library' } = {}) {
           }
         )
       })
+    },
+
+    async reviewStoreOrderUpdate(input) {
+      const candidate = await storeUpdateCandidate(input)
+      return read(OPERATIONAL_STORES, async (tx) =>
+        reviewedStoreUpdate(
+          await containerRepository.state(tx),
+          input,
+          candidate
+        )
+      )
+    },
+
+    async updateStoreOrder(input) {
+      const candidate = await storeUpdateCandidate(input)
+      if (!input.preparation || !input.expectedRevisions)
+        throw new Error(
+          'Review the spreadsheet changes and product codes before updating.'
+        )
+      return containerRepository.mutate(
+        'updateStoreOrder',
+        input,
+        async (tx, state) => {
+          const review = reviewedStoreUpdate(state, input, candidate)
+          const issue = review.issues.find(
+            (value) => value.severity === 'error'
+          )
+          if (issue)
+            throw Object.assign(new Error(issue.message), {
+              code: issue.code,
+              issues: review.issues,
+              detail: issue,
+            })
+          const previous = state.records.find(
+            (record) => orderKey(record.snapshot) === orderKey(review.target)
+          )
+          if (!review.summary.hasChanges) return previous
+          const snapshot = validateSnapshot({
+            ...review.candidate.snapshot,
+            store: { ...previous.snapshot.store },
+            sellerName: previous.snapshot.sellerName,
+            purchasedAt: previous.snapshot.purchasedAt,
+            observedAt: nextEditTimestamp(previous.snapshot.observedAt),
+          })
+          const result = reconcile(snapshot, previous)
+          const record = result.order
+          const timestamp = snapshot.observedAt
+          record.unitsPerCarton = { ...review.candidate.unitsPerCarton }
+          record.unitsPerCartonUpdatedAt = timestamp
+          record.cartonDetails = {}
+          record.cartonDetailsUpdatedAt = timestamp
+          for (const field of ['unitsPerCarton', 'cartonDetails'])
+            delete record[`${field}PartialClocks`]
+          const preferences = await packingPreferencesFor(tx)
+          record.namingSuggestions = orderNamingSuggestions(
+            snapshot,
+            createNameSuggester(preferences.vocabulary)
+          )
+          tx.objectStore('history').put(historicalRecord(previous))
+          for (const image of review.candidate.images)
+            tx.objectStore('images').put(image)
+          tx.objectStore('orders').put(record)
+          validatePaymentGraph(
+            await requested(tx.objectStore('orders').getAll())
+          )
+          await savePreparations(
+            [review.preparation],
+            {
+              expectedRevisions: [review.expectedRevisions.preparation],
+              preserveNaming: true,
+              preserveMaterials: true,
+              cartonBatchChanges: review.cartonBatchChanges,
+            },
+            tx
+          )
+          containerRepository.graph(await containerRepository.state(tx))
+          for (const draft of await requested(
+            tx.objectStore('orderCartonDrafts').getAll()
+          ))
+            if (orderKey(draft.orderKey || draft) === orderKey(review.target))
+              tx.objectStore('orderCartonDrafts').delete(draft.id)
+          return record
+        }
+      )
     },
 
     async importStoreOrder(input) {

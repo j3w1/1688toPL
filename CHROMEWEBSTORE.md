@@ -17,6 +17,8 @@ Import selected 1688 orders or a marked supplier workbook. Add purchases from ot
 
 If a complete order's total balances but its discount allocation is ambiguous, compare the valid treatments and confirm before saving. Reuse that confirmed treatment only while the same order's financial evidence is unchanged. Select products in Orders, review their proposed barcodes together and confirm once. Complete-order context determines groups and variant endings while only selected products receive assignments; existing codes remain intact.
 
+Supplier workbooks can update one existing same-store purchase after a visual current-versus-updated review. Unit-price changes are distinguished from quantity-driven totals; matched codes and custom product details survive, while imported rows and unsealed carton facts use the new workbook as authority. Sealed history and other dependencies remain protected. New-purchase import remains available for separate repeat orders.
+
 Supplier workbook import includes an editable product-code review. Check one base per source group, adjust variant and size endings, and see the full barcodes before saving. Invalid codes, unresolved sizes and ownership conflicts stay visible until resolved; the final import saves the reviewed purchase and its codes together.
 
 Prepare products in Orders with CE codes, Spanish names and Chinese categories using editable local rules. New codes use the original purchase calendar month. Review size/material suggestions, paste a 1688 supplier packing report or enter Pcs/box once, then review carton/remainder proposals. Preserve actual uneven cartons and honest unknown contents or measurements. Eligible repeat purchases can share reviewed codes while retaining separate purchase values; shipped code lineages cannot accept new members.
@@ -126,6 +128,12 @@ Visibility/regions are unselected. Repository rename, local implementation or Gi
 Earlier release and verification chronology remains in Git history. It is not current-candidate acceptance.
 
 ## Review Notes
+
+### Authoritative spreadsheet purchase updates — local candidate, 2026-10-26
+
+The candidate adds a same-account/store target review, before/after row and price comparison, stable identity mapping and one atomic source/preparation/carton update. Excel replaces current supported source and unsealed physical facts, while matched CE codes and authored details remain. Missing rows retire their owned cartons; history, payment/exclusion checks, code ownership and sealed shipment protections remain authoritative. No new permissions, remote service or IndexedDB migration is introduced. Private workbooks and backups remain outside tracked fixtures.
+
+Final local `npm run verify` passed all **1,602 unit tests** and **663 Chromium cases** (39.7 minutes), plus source syntax, documentation and the production build. The browser cases cover complete updates, Back/Cancel, no-op detection, explicit ambiguous-row mapping, unsaved photo previews, multiple purchase targets, all three languages, narrow layouts and bounded 52-row review. Native IndexedDB regressions cover preserved codes/details, transaction rollback/retry, reopening/restore, newly sealed blockers and retained deletion tombstones. Synthetic desktop/narrow screenshots were regenerated and inspected; changed-file formatting and diff checks passed. The explicit 2.10.0 development build verified **30 manifest resources**. The repository trial also built successfully but returned `loaded:false`, `staged:false`, `verified:false`, `reason:no-local-trial-target`; installed acceptance remains unverified. Native Excel and physical printing were not run. Earlier results below belong to their recorded candidates. No owner-library mutation, push, merge or store publication is part of this local delivery.
 
 ### Refresh reader recovery — local candidate, 2026-10-26
 

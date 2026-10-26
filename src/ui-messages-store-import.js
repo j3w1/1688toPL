@@ -1,4 +1,7 @@
+import { STORE_UPDATE_MESSAGES } from './ui-messages-store-update.js'
+
 export const STORE_IMPORT_MESSAGES = {
+  ...STORE_UPDATE_MESSAGES,
   'Review products and codes before saving': {
     zh: '保存前审核商品与货号',
     es: 'Revisa productos y códigos antes de guardar',
