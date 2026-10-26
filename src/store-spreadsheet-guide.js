@@ -80,7 +80,7 @@ export function mountStoreSpreadsheetGuide(
     intro = el(
       'p',
       m(
-        'Prepare a copy of the seller’s workbook, then review its rows, photos, totals and editable code proposals before saving a new order.'
+        'Prepare a copy of the seller’s workbook, then review its rows, photos, totals and editable code proposals before saving or updating a purchase.'
       ),
       'store-import-guide-intro'
     ),
@@ -137,7 +137,7 @@ export function mountStoreSpreadsheetGuide(
   const start = makePanel('Setup', 'setup')
   const filenames = section(
     'Name the file',
-    'Use the store number or factory name as the filename. Copy suffixes keep the same store; each import adds a new order.'
+    'Use the store number or factory name as the filename. Copy suffixes keep the same store; choose an existing purchase to update or create a separate new purchase.'
   )
   const examples = el('dl', undefined, 'store-import-filenames')
   for (const [title, files] of [
@@ -172,6 +172,12 @@ export function mountStoreSpreadsheetGuide(
     steps.append(el('li', m(text)))
   workflow.append(steps)
   start.append(filenames, workflow)
+  start.append(
+    section(
+      'Update an existing purchase',
+      'Choose the matching purchase, review current → updated values and resolve row matches before confirming. Excel replaces imported rows and unsealed carton facts; matched CE codes and custom details remain. Missing rows are removed and blank measurements become unknown. Sealed history and ownership conflicts block the complete update.'
+    )
+  )
   start.append(
     section(
       'Use the exact English markers',

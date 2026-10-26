@@ -11,7 +11,7 @@ import { reviewPackingChanges } from './packing-review.js'
 /** Unsaved authoring lives outside the mounted card window. */
 export function mountStoreImportCodeReview(
   host,
-  { repository, review: initial, sourceRows, onValidity }
+  { repository, review: initial, sourceRows, onValidity, reviewCandidate }
 ) {
   const summary = el('div', undefined, 'store-import-code-errors'),
     list = el('div', undefined, 'store-import-code-list'),
@@ -113,6 +113,19 @@ export function mountStoreImportCodeReview(
   }
   function issueText(issue) {
     const fragment = el('span', m(issue.message, issue.params))
+    if (issue.containerNames?.length)
+      fragment.append(el('span', ` · ${issue.containerNames.join(', ')}`))
+    if (issue.values?.length)
+      fragment.append(
+        el(
+          'span',
+          m(' · Existing values: {0}', {
+            0: issue.values
+              .map((value) => (value === '' ? m('Blank value') : value))
+              .join(' / '),
+          })
+        )
+      )
     const conflict = issue.conflict || issue.detail?.conflict
     if (conflict) {
       const owners = conflict.owners || (conflict.owner ? [conflict.owner] : [])
@@ -265,6 +278,22 @@ export function mountStoreImportCodeReview(
         button.append(issueText(issue))
         button.addEventListener('click', () => {
           const node = windowed.ensureVisible(target.groupId || entries[0]?.key)
+          if (
+            target.groupId &&
+            ['spanishName', 'category', 'material'].includes(target.field)
+          ) {
+            void editDetails(
+              target.variantId
+                ? {
+                    kind: 'variant',
+                    groupId: target.groupId,
+                    variantId: target.variantId,
+                  }
+                : { kind: 'group', groupId: target.groupId },
+              button
+            )
+            return
+          }
           const fields = [
             ...(node?.querySelectorAll('input[data-code-field]') || []),
           ]
@@ -303,11 +332,14 @@ export function mountStoreImportCodeReview(
     pending = true
     showSummary()
     try {
-      const next = await repository.reviewStoreOrderImport({
+      const requestInput = {
         candidate: review.candidate,
         preparation: structuredClone(review.preparation),
         ...(resetCodes ? { resetCodes: true } : {}),
-      })
+      }
+      const next = reviewCandidate
+        ? await reviewCandidate({ ...review, ...requestInput })
+        : await repository.reviewStoreOrderImport(requestInput)
       if (disposed || current !== request) return false
       review = next
       if (resetCodes) {
@@ -456,6 +488,24 @@ export function mountStoreImportCodeReview(
           )
       }
       section.append(evidence)
+      if (review.target && review.rowChanges) {
+        const previousCodes = [
+          ...new Set(
+            review.rowChanges
+              .filter((row) =>
+                row.entryIds?.some((id) => variant.entryIds.includes(id))
+              )
+              .flatMap((row) => row.before?.codes || [])
+          ),
+        ]
+        if (previousCodes.length)
+          section.append(
+            el(
+              'small',
+              m('Current codes: {0}', { 0: previousCodes.join(' · ') })
+            )
+          )
+      }
       const variantScope = {
           kind: 'variant',
           groupId: group.id,

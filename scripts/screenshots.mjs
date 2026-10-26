@@ -354,6 +354,114 @@ try {
     path: 'work/order-discount-review-narrow.png',
   })
   await discountPage.close()
+  const updatePage = await browser.newPage({
+    viewport: { width: 1280, height: 960 },
+    deviceScaleFactor: 1,
+    colorScheme: 'light',
+  })
+  await updatePage.goto(`${preview.url}/library.html`)
+  await expect(updatePage.locator('#view-orders')).toBeEnabled()
+  const updateWorkbook = (updated = false) =>
+    workbookFile({
+      name: 'Synthetic update factory.xlsx',
+      rows: [
+        [
+          'pic',
+          'desc',
+          'boxes',
+          'perbox',
+          'price',
+          'amount',
+          'group',
+          'var',
+          'kg',
+          'cbm',
+        ],
+        [
+          '',
+          'Ceramic cup · ivory',
+          1,
+          24,
+          updated ? 4 : 3,
+          updated ? 96 : 72,
+          'Cups',
+          '',
+          updated ? 6.5 : '',
+          updated ? 0.03 : '',
+        ],
+        [
+          '',
+          'Serving tray · natural',
+          updated ? 2 : 1,
+          12,
+          5,
+          updated ? 120 : 60,
+          'Trays',
+          '',
+          updated ? 7.2 : '',
+          updated ? 0.04 : '',
+        ],
+        [
+          '',
+          updated ? 'Glass vase · blue' : 'Ceramic bowl · white',
+          1,
+          10,
+          updated ? 8 : 4,
+          updated ? 80 : 40,
+          updated ? 'Vases' : 'Bowls',
+          '',
+          updated ? 4.5 : '',
+          updated ? 0.025 : '',
+        ],
+        ['total', updated ? 296 : 172, 'total'],
+      ],
+      photoBytes: Buffer.from(importPhoto, 'base64'),
+      photoSpans: [{ from: 1, to: 4 }],
+    })
+  await updatePage
+    .getByRole('button', { name: 'Import spreadsheet', exact: true })
+    .click()
+  let updateDialog = updatePage.locator('.store-import-dialog')
+  await updateDialog
+    .getByLabel('Workbook', { exact: true })
+    .setInputFiles(updateWorkbook())
+  await expect(updateDialog.locator('.store-import-product')).toHaveCount(3)
+  await updateDialog.locator('input[name="purchaseDate"]').fill('2026-10-20')
+  await updateDialog.locator('input[name="allReviews"]').check()
+  await updateDialog.locator('input[name="photosReviewed"]').check()
+  await updateDialog.locator('[data-action="review-import-codes"]').click()
+  await expect(
+    updateDialog.locator('[data-action="import-and-assign-codes"]')
+  ).toBeEnabled()
+  await updateDialog.locator('[data-action="import-and-assign-codes"]').click()
+  await expect(updateDialog).toHaveCount(0)
+  await updatePage
+    .getByRole('button', { name: 'Import spreadsheet', exact: true })
+    .click()
+  updateDialog = updatePage.locator('.store-import-dialog')
+  await updateDialog
+    .getByLabel('Workbook', { exact: true })
+    .setInputFiles(updateWorkbook(true))
+  await expect(updateDialog.locator('select[name="importMode"]')).toHaveValue(
+    'update'
+  )
+  await updateDialog.locator('input[name="allReviews"]').check()
+  await updateDialog.locator('input[name="photosReviewed"]').check()
+  await updateDialog.locator('[data-action="review-import-changes"]').click()
+  await expect(
+    updateDialog.locator('[data-action="store-import-update-review"]')
+  ).toBeVisible()
+  await expect(
+    updateDialog.locator('[data-action="review-update-codes"]')
+  ).toBeEnabled()
+  await updateDialog.screenshot({
+    path: 'screenshots/store-spreadsheet-update.png',
+  })
+  await updatePage.setViewportSize({ width: 390, height: 740 })
+  await updateDialog.screenshot({
+    path: 'work/store-spreadsheet-update-narrow.png',
+  })
+  await updatePage.close()
 } finally {
   await browser.close()
   await preview.close()

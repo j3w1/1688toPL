@@ -6,7 +6,7 @@
 
 Choose **Import spreadsheet** for a marked `.xlsx` or genuine Excel `.xls` workbook. A numeric filename such as `12345.xlsx` identifies a market store; a company-name filename identifies a factory. Windows copy suffixes preserve store identity. Confirm the purchase date and display name during review. You can edit the display name later without changing the underlying store identity.
 
-Every successful import creates a separate purchase. When content appears to match an earlier import, a nonblocking warning asks you to review the date before continuing. It does not merge purchases or prevent a deliberate repeat order. Changing only the filename suffix or date does not make identical content a different match.
+Choose **Create new purchase** for a separate purchase. When the filename identifies a store already in the current account, **Update existing purchase** lets you replace one saved spreadsheet purchase instead. A single matching purchase is shown with its date, total and product count; choose the target explicitly when several exist. Store names alone never combine purchases. Familiar Windows copy suffixes preserve store identity; an archival suffix such as `_antiguo` does not identify the original numeric store.
 
 Use **Download template** beside Purchase date for a blank **Orders / Guide** workbook. It includes markers, 20 photo-ready rows, frozen headings, numeric formats and quantity/amount formulas. Save a completed copy under the store number or factory name, embed photos in each product's photo cell, recalculate/save in Excel or WPS, then select **Orders** when importing. Enter the supplier's invoice total independently of the calculated comparison. For a manually supplied total quantity, replace that row's quantity formula and leave Pcs/box blank.
 
@@ -47,6 +47,20 @@ After these checks, choose **Review products and codes**. This opens editable pr
 Financial and quantity mismatches block import. Formula cells need saved results without Excel errors; the importer never runs formulas or macros. Recalculate and save the workbook when those results are absent.
 
 Every included row needs a readable linked picture. A picture whose anchor or merged `pic` cell covers several included rows can serve all covered groups after explicit shared-photo review. Blank groups stay skipped. Picture proximity or another row's group does not fill an uncovered row. Shared originals are retained once, while gallery associations remain separate.
+
+## Update a saved purchase
+
+<a href="../screenshots/store-spreadsheet-update.png"><img src="../screenshots/store-spreadsheet-update.png" alt="Synthetic spreadsheet update with before and after totals, price changes and grouped source comparisons" width="800" /></a>
+
+Use the store number or factory name as the filename, choose the matching purchase and complete the normal workbook checks. The saved source is the comparison baseline; uploading the old workbook is unnecessary. Updates retain the purchase ID and original purchase date.
+
+**Review changes** shows current → updated product, piece, carton and amount totals. Cards group products by Excel `group`, with existing codes, photos, descriptions, declarations and source cells. **Changes**, **Price changes**, **Added**, **Removed** and **All products** filter the view only; the operation replaces the complete reviewed purchase. A changed subtotal caused by quantity is distinct from an increased/decreased unit price. Unchanged unit prices are stated explicitly, while new products show a new price rather than a price increase.
+
+The new workbook is authoritative for all supported imported values: missing rows are removed, new rows are added, and blank optional measurements become unknown. Excel also replaces current unsealed carton counts, capacities, dimensions, weight and volume, including manual facts. Matched products retain their entry/group/variant/carton identities, CE codes and authored names, categories, materials, intentional blanks, notes and tags. Changed photos remain visible in the comparison.
+
+Rows are matched by supported product identity, not their Excel position. Reordered rows retain identities; ambiguous matches need an explicit existing-row or new-row choice. Changed grouping/declarations that conflict with assigned codes require a correction review. New variants can join the existing group base; only genuinely new groups need new bases.
+
+Choose **Update purchase** after reviewing changes and product codes. Source/history, original photos, capacities, preparation, cartons and assignments save together; a failure saves none of them. Sealed shipment history, incompatible loading/reservations, payment links, exclusions, code ownership or a concurrent edit may block the operation and identify what needs resolution. Back retains the draft, Cancel saves nothing, and retrying a successful confirmation cannot create a duplicate purchase. An identical workbook reports **No changes to apply**.
 
 ## Review and edit codes
 

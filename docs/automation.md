@@ -33,16 +33,28 @@ Progress distinguishes discount reviews from genuine failures and offers **Revie
 
 Open **Import spreadsheet** after the Orders readiness control is enabled. Upload through the labeled Workbook field, select the sheet, confirm the purchase date and supplier, resolve review/quantity items, and check the final photos/totals confirmation. Then use `review-import-codes`; this creates no purchase or code reservation.
 
-| `data-action`                 | Accessible name / behavior                                                              |
-| ----------------------------- | --------------------------------------------------------------------------------------- |
-| `review-import-codes`         | Review products and codes; validate the workbook and propose assignments and details.   |
-| `store-import-code-review`    | The grouped code-review fieldset; disabled during a final save or reset.                |
-| `store-import-code-errors`    | Live validation summary; its buttons focus the affected field.                          |
-| `back-import-workbook`        | Back; return to workbook checks and retain unchanged draft edits.                       |
-| `reset-import-codes`          | Reset to suggested; regenerate proposals against the current library.                   |
-| `no-size-difference`          | Do not add size endings; remove only coding suffixes for the containing group.          |
-| `suggest-import-size-endings` | Review optional size endings inferred from descriptions; Cancel keeps declared endings. |
-| `import-and-assign-codes`     | Import and assign codes; commit the complete reviewed purchase atomically.              |
+| `data-action`                 | Accessible name / behavior                                                                        |
+| ----------------------------- | ------------------------------------------------------------------------------------------------- |
+| `review-import-codes`         | Review products and codes; validate the workbook and propose assignments and details.             |
+| `store-import-code-review`    | The grouped code-review fieldset; disabled during a final save or reset.                          |
+| `store-import-code-errors`    | Live validation summary; its buttons focus the affected field.                                    |
+| `back-import-workbook`        | Back; return to workbook checks and retain unchanged draft edits.                                 |
+| `reset-import-codes`          | Reset to suggested; regenerate proposals against the current library.                             |
+| `no-size-difference`          | Do not add size endings; remove only coding suffixes for the containing group.                    |
+| `suggest-import-size-endings` | Review optional size endings inferred from descriptions; Cancel keeps declared endings.           |
+| `import-and-assign-codes`     | Import and assign codes; commit the complete reviewed purchase atomically.                        |
+| `review-import-changes`       | Review changes; validate the complete workbook against the selected existing purchase.            |
+| `store-import-update-review`  | Bounded grouped comparison of source values, row matches, price changes and carton replacements.  |
+| `store-import-update-context` | Persistent target-store, original purchase-date and purchase-ID context throughout update review. |
+| `store-update-totals`         | Current → updated source-row, group, piece, carton and financial totals.                          |
+| `review-update-codes`         | Review products and codes after resolving source matching and declaration decisions.              |
+| `update-store-purchase`       | Update purchase; atomically commit the complete reviewed replacement against current guards.      |
+
+For a matching store, select **Update existing purchase** and the target purchase before workbook review. The target must belong to the current account and immutable store identity. **Review changes** compares the saved source with the complete workbook; its filters change visibility, not which products are replaced. Resolve ambiguous row mappings explicitly. Existing purchase date and matched codes/custom details remain; Excel replaces all supported source and unsealed carton facts, including blanks. **Update purchase** commits the complete review atomically. An unchanged workbook offers no update to submit. Do not create another purchase as an update workaround.
+
+Update mode uses `select[name="importMode"]` (`update` or `new`) and `select[name="updatePurchase"]` (`accountId/orderId`). `review-import-changes` opens `store-import-update-review`; `review-update-codes` advances to the shared preparation editor; `update-store-purchase` is the final write. The `store-update-totals` summary and `data-update-filter="changes|prices|added|removed|all"` controls retain the full operation scope. Cards expose incoming/previous source rows; `select[name="update-mapping-ROW"]` resolves a row to a saved row number or `new`. These are view/mapping controls, never a partial-import selection.
+
+Repository automation previews with `reviewStoreOrderUpdate({target, ...rawInput})`, retains the returned stable `sourceCandidate`, mappings, preparation and expected revisions, and submits `updateStoreOrder({...review, intentId})`. Use a fresh intent after correcting a failed draft; retry the identical successful request with its original intent. Concurrency or shipment/financial blockers leave the draft open and every persisted store unchanged.
 
 Code cards retain `data-source-group`; inputs expose `data-code-field="baseCode"`, `variantSuffix` or `sizeSuffix`, plus stable group/variant IDs. Full barcode previews use `.store-import-barcode`. Use the labeled inputs rather than deriving codes from literal group values. The scrollable review mounts a bounded window and preserves the active editor; scroll or follow the error-summary link before selecting an unmounted group.
 

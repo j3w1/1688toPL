@@ -1409,6 +1409,8 @@ test('editing a repeated import photo in Orders updates its exact order and pres
       await expect(
         dialog.locator('[data-action="duplicate-import-warning"]')
       ).toBeHidden()
+    const importMode = dialog.locator('select[name="importMode"]')
+    if (await importMode.isVisible()) await importMode.selectOption('new')
     await dialog.getByLabel('Purchase date', { exact: true }).fill(date)
     await dialog
       .getByRole('checkbox', {
