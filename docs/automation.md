@@ -14,7 +14,7 @@ Photo Close stays disabled while an edit saves. Its accessible description and t
 
 ## Order discount review
 
-The detail page exposes `data-action="review-order-discounts"` when its complete source amounts have multiple valid discount allocations. Activity uses the same action with `data-order-id` to open the affected purchase. Failed-order navigation reaches reviews beyond the first three errors. Merely opening a review writes nothing.
+The detail page exposes `data-action="review-order-discounts"` when its complete source amounts still have multiple supported discount allocations after the source-based automatic rule. An explicit signed separate seller reduction whose row discounts match the full footer discount breakdown imports through the normal save/checkpoint path, retaining the reduction at order level; it does not add a review-required attempt or row allocation. Activity uses the review action with `data-order-id` for genuinely ambiguous purchases. Failed-order navigation reaches reviews beyond the first three errors. Merely opening a review writes nothing.
 
 | `data-action`              | Accessible name / behavior                                                                 |
 | -------------------------- | ------------------------------------------------------------------------------------------ |
@@ -25,7 +25,7 @@ The detail page exposes `data-action="review-order-discounts"` when its complete
 | `confirm-discount-review`  | Re-read the financial evidence and save the confirmed treatment.                           |
 | `cancel-discount-review`   | Close without saving a treatment or source snapshot.                                       |
 
-Inside the native modal, `data-discount-choice` identifies each semantic treatment. Compare source amounts, the unchanged payable and the bounded product-cost table, then use `confirm-discount-review` or `cancel-discount-review`. A suggested treatment still requires confirmation. Saving disables further submission and dismissal; a failure retains the draft. Changed source financial evidence refreshes the choices and requires another confirmation. Exact matching saved reviews can be reused for the same account/order. Report export remains bounded financial diagnostics, without full candidates or page HTML.
+Inside the native modal, `data-discount-choice` identifies each semantic treatment. Compare source amounts, the unchanged payable and the bounded product-cost table, then use `confirm-discount-review` or `cancel-discount-review`. A suggested manual treatment still requires confirmation. Saving disables further submission and dismissal; a failure retains the draft. Changed source financial evidence is reconciled afresh; genuinely ambiguous choices require another confirmation, while a supported automatic result returns to the normal import path. Exact matching saved reviews can be reused for the same account/order. Version-1 human decisions remain compatible; version-2 automatic evidence records its rule and resolution without inventing human confirmation. Report export remains bounded financial diagnostics, without full candidates or page HTML.
 
 Progress distinguishes discount reviews from genuine failures and offers **Review discounts** on the source order list as well as Activity. Reports retain legacy `counts.failed` for terminal failed attempts, and add `counts.reviewRequired`, `counts.failures` and an explicit per-order `reviewRequired` boolean. A review-required order does not enter hydration retries; confirmation uses the existing expected-row and durable checkpoint path.
 
@@ -324,17 +324,19 @@ Full/packing backup uses `.json.gz` archives and [atomic scope rules](data-and-b
 
 ## Print menu and dialog
 
-| `data-action`              | Name / behavior                                                                       |
-| -------------------------- | ------------------------------------------------------------------------------------- |
-| `print-labels`             | Open labels for the selected prepared scope.                                          |
-| `print-carton-marks`       | Open carton marks for the selected prepared scope.                                    |
-| `print-recent`             | Recent five jobs.                                                                     |
-| `export-pdf`               | Save PDF plus summary.                                                                |
-| `print-calibration`        | Save calibration PDF without summary.                                                 |
-| `close-print-dialog`       | Cancel; abandon an in-progress export.                                                |
-| `print-preview`            | Page N preview; zoom/pan changes no export dimensions.                                |
-| `apply-print-quantities`   | Apply to all: Multiply/Divide by integer 1–9999; division rounds up, zero stays zero. |
-| `increment-print-quantity` | Add N for CODE: five labels or one mark, within 0–9999.                               |
+| `data-action`              | Name / behavior                                                                                                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `print-labels`             | Open labels for the selected prepared scope.                                                                                                                       |
+| `print-carton-marks`       | Open carton marks for the selected prepared scope.                                                                                                                 |
+| `print-recent`             | Recent five jobs.                                                                                                                                                  |
+| `export-pdf`               | Save PDF plus summary.                                                                                                                                             |
+| `export-single-label-pdf`  | Labels only: one enlarged, proportional label per distinct code, on a page trimmed exactly to its dimensions, plus summary; ignores quantities and sheet settings. |
+| `repeat-code-per-page`     | Labels-only checkbox: start each code on separate standard sheets, retaining spare/cap settings.                                                                   |
+| `print-calibration`        | Save calibration PDF without summary.                                                                                                                              |
+| `close-print-dialog`       | Cancel; abandon an in-progress export.                                                                                                                             |
+| `print-preview`            | Page N preview; zoom/pan changes no export dimensions.                                                                                                             |
+| `apply-print-quantities`   | Apply to all: Multiply/Divide by integer 1–9999; division rounds up, zero stays zero.                                                                              |
+| `increment-print-quantity` | Add N for CODE: five labels or one mark, within 0–9999.                                                                                                            |
 
 `data-preview-state` is loading/ready/empty/error; `aria-busy` marks rendering. Layout updates need no blur. Dashed safe areas are an unexported overlay. Physical page navigation remains. Unknown/partial carton counts retain the explicit Carton count reviewed for CODE flow; request overrides never change physical records or receipts.
 
@@ -358,6 +360,8 @@ Browser downloads use local `YYYY-MM-DD-HHMMSS`, with `-2` for same-second repea
 Packing summaries use `1688-export-summary` version 3 with `scope: "container-revision"`. They name the actual workbook/JSON files and identify the container and immutable revision, complete loaded logical membership, source-line costs and physical coverage. Se quedó uses that revision’s frozen included-order remainder; later purchases and shipments cannot rewrite it. Historical version 1/2 summary files remain readable evidence. A summary is not a restorable backup. Full cost evidence includes original/effective amounts, additional/feature/linked costs, reasons and IDs independently of workbook columns. [Workbook scope](exports.md#packing-workbook) follows the full loaded revision regardless of UI selection/filter; distinct physical cartons count once and purchases sharing codes remain separate financial rows. Detailed JSON is off for every newly opened export and includes full costs, reasons and identifiers independently of chosen workbook columns.
 
 Label/mark summaries use kind `labels` / `carton-marks`, pages/perPage, orders with orderId/seller and products with code/name/order IDs/requested/extra (labels)/total. Totals include orders, requested and printed. Quantities are JSON numbers or exact decimal strings beyond 2^53. Other-source orders additionally carry source/reference. File/summary format names are backward-compatible and do not follow display branding.
+
+Single-label exports retain kind `labels` and add `labelFormat: "single-label"`, `perPage: 1`, with requested/total of 1 and extra of 0 for every distinct code. Their PDF/summary filenames add `-1-label` before the extension. Recent-job records preserve the optional `labelFormat`; standard sheet layouts preserve `repeatCodePerPage` (default false). Both exports use the same source guards, cancellation and `print-export-settled` completion event.
 
 ## Typical run
 

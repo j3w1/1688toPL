@@ -13,6 +13,40 @@ import {
   orderCartonPrintIdentity,
 } from '../src/print-store.js'
 
+test('single-label jobs retain their format through storage and regeneration; repeat-code sheets remain a separate layout choice', () => {
+  const storage = memoryStorage()
+  const store = createPrintStore(storage)
+  const ref = { orderId: 'O1', groupId: 'G1', variantId: 'V1' }
+  store.saveLayout('labels', { repeatCodePerPage: true })
+  store.recordJob({
+    kind: 'labels',
+    labelFormat: 'single-label',
+    language: 'zh',
+    products: [{ code: 'CE26100101', quantity: 1, ref }],
+    pages: 1,
+    total: 1,
+  })
+  const reopened = createPrintStore(storage)
+  assert.equal(reopened.layout('labels').repeatCodePerPage, true)
+  assert.equal(reopened.layout('marks').repeatCodePerPage, undefined)
+  const [job] = reopened.recentJobs()
+  assert.equal(job.labelFormat, 'single-label')
+  assert.equal(job.language, 'zh')
+  const restored = restoreJob(job, [
+    { key: 'CE26100101', code: 'CE26100101', ref },
+  ])
+  assert.equal(restored.labelFormat, 'single-label')
+  assert.equal(restored.items[0].quantity, 1)
+  assert.equal(
+    reopened.recordJob({
+      kind: 'marks',
+      labelFormat: 'single-label',
+      products: [{ code: 'CE26100101', quantity: 1 }],
+    }).labelFormat,
+    undefined
+  )
+})
+
 function physicalContext() {
   return {
     record: {

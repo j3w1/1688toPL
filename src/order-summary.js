@@ -48,6 +48,7 @@ const requiredFields = [
 const optionalFields = [
   'priceIncludedDiscount',
   'rowIncludedAdjustment',
+  'orderLevelAdjustment',
   'orderDiscount',
   'redPacketDiscount',
   'customizationService',
@@ -171,6 +172,12 @@ export function summarizeOrders(records) {
         gross - serviceIncluded - seller - product - order
     )
     if (
+      (raw.orderLevelAdjustment !== null &&
+        (raw.orderLevelAdjustment < 0n ||
+          (raw.orderLevelAdjustment !== 0n &&
+            raw.orderLevelAdjustment !== raw.orderAdjustment) ||
+          (raw.orderLevelAdjustment !== 0n &&
+            raw.rowIncludedAdjustment !== 0n))) ||
       (payable !== null && payable !== raw.payable) ||
       (goodsNet !== null &&
         raw.goodsNet !== null &&

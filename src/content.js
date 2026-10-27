@@ -38,12 +38,18 @@ async function send(type, data = {}) {
 async function readSnapshot() {
   try {
     const initial = reviewOrderSnapshot(document, location.href)
-    if (initial.status === 'ready') {
+    if (
+      initial.status === 'ready' &&
+      initial.snapshot.reconciliationReview?.mode !== 'automatic'
+    ) {
       panel.setDiscountReviewRequired(false)
       return initial.snapshot
     }
     const reconciliationReview = await send('ORDER_RECONCILIATION_GET', {
-      orderId: initial.review.orderId,
+      orderId:
+        initial.status === 'ready'
+          ? initial.snapshot.orderId
+          : initial.review.orderId,
     })
     const snapshot = extractOrderSnapshot(document, location.href, {
       reconciliationReview,
@@ -81,7 +87,7 @@ async function saveSnapshot(snapshot) {
 async function reviewDiscounts() {
   if (openReview) return openReview
   const result = reviewOrderSnapshot(document, location.href)
-  if (result.status === 'ready') return saveSnapshot(result.snapshot)
+  if (result.status === 'ready') return saveSnapshot(await readSnapshot())
   let savedMessage = ''
   openReview = (async () => {
     const saved = await openOrderDiscountReview({

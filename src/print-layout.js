@@ -33,6 +33,7 @@ export const DEFAULT_LABEL_LAYOUT = Object.freeze({
   boundaries: false,
   pageSummary: true,
   limitExtras: false,
+  repeatCodePerPage: false,
 })
 
 export const DEFAULT_MARK_LAYOUT = Object.freeze({
@@ -73,6 +74,7 @@ export function normalizeLabelLayout(input = {}) {
     boundaries: input.boundaries === true,
     pageSummary: input.pageSummary !== false,
     limitExtras: input.limitExtras === true,
+    repeatCodePerPage: input.repeatCodePerPage === true,
   }
 }
 
@@ -279,6 +281,37 @@ export function planLabels(itemsInput, grid, layoutInput = {}) {
       pageSummaries: [],
       excess: null,
     }
+  // Plan each code independently so blanks and capped extras never let the
+  // next product spill onto its sheet. Reuse the ordinary spare allocator.
+  if (layout.repeatCodePerPage) {
+    const parts = items.map((item) =>
+      planLabels([{ ...item, quantity: item.requested }], grid, {
+        ...layout,
+        repeatCodePerPage: false,
+      })
+    )
+    const pages = parts.reduce((sum, part) => sum + part.pages, 0)
+    const extras = parts.reduce((sum, part) => sum + part.extras, 0)
+    const sequence = parts.flatMap((part) => part.sequence)
+    return {
+      pages,
+      perPage,
+      requested,
+      extras,
+      blanks: parts.reduce((sum, part) => sum + part.blanks, 0),
+      items: parts.flatMap((part) => part.items),
+      sequence,
+      pageSummaries: pageRuns(sequence, perPage, pages),
+      excess:
+        extras > EXCESS_RATIO * requested
+          ? {
+              extras,
+              requested,
+              percent: Math.round((extras / requested) * 100),
+            }
+          : null,
+    }
+  }
   const pages = Math.ceil(requested / perPage)
   const spare = pages * perPage - requested
   const extra = allocateSpares(items, spare, layout.spares)
@@ -307,6 +340,50 @@ export function planLabels(itemsInput, grid, layoutInput = {}) {
       extras > EXCESS_RATIO * requested
         ? { extras, requested, percent: Math.round((extras / requested) * 100) }
         : null,
+  }
+}
+
+/** One enlarged, upright label per distinct code, independent of quantities
+ * and sheet settings. Retain the enlarged scale, then trim the page to the
+ * artwork bounds so no sheet margins surround the label. */
+export function singleLabelPages(items, label) {
+  const width = Number(label?.widthMm)
+  const height = Number(label?.heightMm)
+  if (!(width > 0 && height > 0) || !Number.isFinite(width + height))
+    throw new Error('Label size must be greater than zero')
+  const scale = Math.min((A4.widthMm - 10) / width, (A4.heightMm - 10) / height)
+  const widthMm = width * scale
+  const heightMm = height * scale
+  const grid = {
+    perPage: 1,
+    rotated: false,
+    cells: [
+      {
+        xMm: 0,
+        yMm: 0,
+        widthMm,
+        heightMm,
+      },
+    ],
+  }
+  const layout = normalizeLabelLayout({
+    guides: false,
+    boundaries: false,
+    pageSummary: false,
+    spares: 'blank',
+  })
+  return {
+    pageSize: { widthMm, heightMm },
+    grid,
+    layout,
+    plan: planLabels(
+      [...new Set(items.map((item) => item.key))].map((key) => ({
+        key,
+        quantity: 1,
+      })),
+      grid,
+      layout
+    ),
   }
 }
 

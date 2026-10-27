@@ -67,7 +67,8 @@ export function shipmentMoney(
     costs = paymentCostAdjustments(record, records)
   const rowDiscounts = allocateCostCents(
     items,
-    moneyToCents(record.snapshot.totals.orderDiscount || '0.00')
+    moneyToCents(record.snapshot.totals.orderDiscount || '0.00') +
+      moneyToCents(record.snapshot.totals.orderLevelAdjustment || '0.00')
   )
   const freight = allocateCostCents(
     items,

@@ -19,6 +19,7 @@ import { buildOrderFixture } from './fixtures/order-fixture.mjs'
 import { validateBackup } from '../src/database.js'
 import {
   planOrderReconciliation,
+  planOrderReconciliationCandidates,
   validateReconciliationReview,
 } from '../src/order-reconciliation.js'
 
@@ -136,7 +137,7 @@ function snapshot(source) {
   })
 }
 
-function discountReviewFixture() {
+function discountReviewFixture({ signedAdjustment = false } = {}) {
   const rows = [
     ['5.10', '60', '15.55'],
     ['4.60', '60', '14.02'],
@@ -164,7 +165,7 @@ function discountReviewFixture() {
       goodsGross: '6210.00',
       shipping: '100.00',
       sourceDiscount: '0.00',
-      orderAdjustment: '减 ¥4.50',
+      orderAdjustment: `${signedAdjustment ? '减 ' : ''}¥4.50`,
       redPacketDiscount: '减 ¥30.00',
       payable: '5960.00',
     },
@@ -205,7 +206,58 @@ function reviewedBackup(value) {
   })
 }
 
-test('a complete fifteen-row PLUS and shop discount order requires explicit review instead of guessing its allocation', () => {
+test('a signed separate footer seller reduction imports automatically without changing the displayed row discounts', () => {
+  const source = discountReviewFixture({ signedAdjustment: true })
+  const planned = review(source)
+  assert.equal(planned.status, 'ready')
+  const result = snapshot(source)
+  assert.equal(result.items.length, 15)
+  assert.equal(result.totals.sourceDiscount, '315.50')
+  assert.equal(result.totals.orderAdjustment, '4.50')
+  assert.equal(result.totals.orderLevelAdjustment, '4.50')
+  assert.equal(result.totals.rowIncludedAdjustment, undefined)
+  assert.equal(result.totals.orderDiscount, undefined)
+  assert.equal(result.totals.goodsNet, '5890.00')
+  assert.equal(result.totals.payable, '5960.00')
+  assert.ok(
+    result.items.every(
+      (item) =>
+        item.allocatedDiscount === '0.00' &&
+        item.discount === item.sourceDiscount
+    )
+  )
+  assert.equal(result.reconciliationReview.version, 2)
+  assert.equal(result.reconciliationReview.mode, 'automatic')
+  assert.deepEqual(reviewedBackup(result).orders[0].snapshot, result)
+})
+
+test('previously confirmed signed-source receipts remain valid and take precedence over the new automatic convention', () => {
+  const source = discountReviewFixture({ signedAdjustment: true })
+  const current = review(source).snapshot
+  const legacy = planOrderReconciliationCandidates(
+    current,
+    current.reconciliationReview.sourceTotals
+  )
+  assert.equal(legacy.status, 'review-required')
+  const chosen = confirmOrderReconciliation(legacy.review, {
+    choice: legacy.review.suggestedChoice,
+    evidenceKey: legacy.review.evidenceKey,
+    reviewedAt: observedAt,
+  })
+  assert.equal(chosen.reconciliationReview.version, 1)
+  assert.equal(chosen.totals.orderLevelAdjustment, undefined)
+  const reused = review(source, {
+    reconciliationReview: chosen.reconciliationReview,
+  }).snapshot
+  assert.deepEqual(reused.reconciliationReview, chosen.reconciliationReview)
+  assert.deepEqual(
+    reused.items.map((item) => item.allocatedDiscount),
+    chosen.items.map((item) => item.allocatedDiscount)
+  )
+  assert.deepEqual(reviewedBackup(chosen).orders[0].snapshot, chosen)
+})
+
+test('an unsigned fifteen-row seller change retains explicit review instead of guessing its allocation', () => {
   const source = discountReviewFixture()
   const planned = review(source)
   assert.equal(planned.status, 'review-required')
@@ -501,7 +553,7 @@ test('missing seller retains complete reconciled products with an explicit unava
   assert.throws(() => snapshot(source), /payable amount does not reconcile/)
 })
 
-test('wholesale prices and adjustments already in row discounts are not subtracted twice', () => {
+test('wholesale prices retain row discounts while an additional signed seller reduction stays at order level', () => {
   for (const includedAdjustment of [false, true]) {
     const rowDiscount = includedAdjustment ? '15.00' : '10.00'
     const source = fixture({
@@ -527,11 +579,13 @@ test('wholesale prices and adjustments already in row discounts are not subtract
     assert.equal(result.totals.goodsNet, '85.00')
     assert.equal(result.items[0].price, '2.00')
     assert.equal(result.items[0].sourceDiscount, rowDiscount)
+    assert.equal(result.items[0].allocatedDiscount, '0.00')
     assert.equal(
-      result.items[0].allocatedDiscount,
-      includedAdjustment ? '0.00' : '5.00'
+      result.totals.orderLevelAdjustment,
+      includedAdjustment ? undefined : '5.00'
     )
-    assert.equal(result.items[0].discount, '15.00')
+    assert.equal(result.items[0].discount, rowDiscount)
+    assert.deepEqual(reviewedBackup(result).orders[0].snapshot, result)
   }
 })
 
@@ -1162,7 +1216,7 @@ test('keeps explicit per-product discounts separate from shipping for a five-row
   )
 })
 
-test('allocates an explicit whole-order reduction across forty synthetic products without losing cents', () => {
+test('keeps an explicit whole-order reduction separate across forty synthetic products without changing row discounts or losing cents', () => {
   const result = snapshot(
     fixture({
       rows: [
@@ -1184,18 +1238,33 @@ test('allocates an explicit whole-order reduction across forty synthetic product
   )
   assert.equal(result.items.length, 40)
   assert.equal(result.totals.goodsNet, '24500.00')
+  assert.equal(result.totals.orderAdjustment, '278.86')
+  assert.equal(result.totals.orderLevelAdjustment, '278.86')
   assert.equal(
     result.items.reduce(
       (sum, row) => sum + moneyToCents(row.allocatedDiscount),
       0n
     ),
-    27886n
+    0n
   )
   assert.equal(
     result.items.reduce((sum, row) => sum + moneyToCents(row.discount), 0n),
-    70670n
+    42784n
   )
   assert.equal(result.items[39].sourceDiscount, '37.84')
+  assert.equal(
+    centsToMoney(
+      result.items.reduce(
+        (sum, row) =>
+          sum +
+          lineGrossCents(row.price, row.quantity) -
+          moneyToCents(row.discount),
+        0n
+      ) - moneyToCents(result.totals.orderLevelAdjustment)
+    ),
+    result.totals.goodsNet
+  )
+  assert.deepEqual(reviewedBackup(result).orders[0].snapshot, result)
 })
 
 test('allocation weights use row value after source discounts and deterministic entry ID ties', () => {

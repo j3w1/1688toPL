@@ -194,6 +194,22 @@ try {
   await page
     .getByRole('button', { name: 'Close label editor', exact: true })
     .click()
+  const selectedBeforePrint = await first.getByRole('checkbox').isChecked()
+  await first.getByRole('checkbox').check()
+  await page.locator('#orders-print-actions .copy-actions-trigger').click()
+  await page.locator('#print-labels').click()
+  const printDialog = page.getByRole('dialog', {
+    name: 'Print labels',
+    exact: true,
+  })
+  await printDialog.locator('[data-action="repeat-code-per-page"]').check()
+  await expect(printDialog.locator('canvas.print-preview')).toHaveAttribute(
+    'data-preview-state',
+    'ready'
+  )
+  await printDialog.screenshot({ path: 'screenshots/print-labels.png' })
+  await printDialog.locator('[data-action="close-print-dialog"]').click()
+  if (!selectedBeforePrint) await first.getByRole('checkbox').uncheck()
   await page.locator('[data-action="open-order-cartons"]').first().click()
   await expect(page.locator('.reconciliation-summary')).toBeVisible()
   await page.screenshot({ path: 'screenshots/preparation.png' })

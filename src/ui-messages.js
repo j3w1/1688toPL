@@ -1022,6 +1022,10 @@ export const UI_MESSAGES = {
     zh: '订单改价（已分摊）',
     es: 'Ajuste del pedido (repartido)',
   },
+  'Seller reduction (order level)': {
+    zh: '卖家减价（订单级，未分摊到商品）',
+    es: 'Rebaja del vendedor (a nivel del pedido)',
+  },
   'Order-only discount': {
     zh: '订单专属优惠',
     es: 'Descuento general del pedido',

@@ -322,7 +322,7 @@ export function reviewOrderSnapshot(
   )
 }
 
-/** Existing programmatic callers remain strict until an exact review is supplied. */
+/** Unresolved ambiguity stays strict; complete supported footer evidence can resolve automatically. */
 export function extractOrderSnapshot(document, url, options = {}) {
   const plan = reviewOrderSnapshot(document, url, options)
   if (plan.status === 'review-required')
