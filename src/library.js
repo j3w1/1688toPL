@@ -3056,9 +3056,11 @@ export async function startLibrary(
         : []),
       ['Product discounts', order.totals.sourceDiscount],
       [
-        Number(order.totals.rowIncludedAdjustment) > 0
-          ? 'Order adjustment (already in product discounts)'
-          : 'Order adjustment (allocated)',
+        Number(order.totals.orderLevelAdjustment) > 0
+          ? 'Seller reduction (order level)'
+          : Number(order.totals.rowIncludedAdjustment) > 0
+            ? 'Order adjustment (already in product discounts)'
+            : 'Order adjustment (allocated)',
         order.totals.orderAdjustment,
       ],
       ...(order.totals.orderDiscount !== undefined

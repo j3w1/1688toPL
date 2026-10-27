@@ -150,6 +150,7 @@ const optionalTotalFields = [
   'orderDiscount',
   'priceIncludedDiscount',
   'rowIncludedAdjustment',
+  'orderLevelAdjustment',
 ]
 
 function object(value, label) {
@@ -252,7 +253,13 @@ function validateAmounts(items, totals) {
   const orderDiscount = amounts.orderDiscount ?? 0n
   const priceIncludedDiscount = amounts.priceIncludedDiscount ?? 0n
   const rowIncludedAdjustment = amounts.rowIncludedAdjustment ?? 0n
-  const goodsNet = goodsGross - sourceDiscount - orderAdjustment - orderDiscount
+  const orderLevelAdjustment = amounts.orderLevelAdjustment ?? 0n
+  const goodsNet =
+    goodsGross -
+    sourceDiscount -
+    orderAdjustment -
+    orderDiscount -
+    orderLevelAdjustment
   const customizationService = amounts.customizationService ?? 0n
   const grossIncludedCustomization = amounts.grossIncludedCustomization ?? 0n
   const redPacketDiscount = amounts.redPacketDiscount ?? 0n
@@ -260,10 +267,15 @@ function validateAmounts(items, totals) {
     goodsGross + priceIncludedDiscount + grossIncludedCustomization !==
       amounts.goodsGross ||
     sourceDiscount !== amounts.sourceDiscount ||
-    orderAdjustment + rowIncludedAdjustment !== amounts.orderAdjustment ||
+    orderAdjustment + rowIncludedAdjustment + orderLevelAdjustment !==
+      amounts.orderAdjustment ||
     priceIncludedDiscount < 0n ||
     rowIncludedAdjustment < 0n ||
     rowIncludedAdjustment > sourceDiscount ||
+    orderLevelAdjustment < 0n ||
+    (orderLevelAdjustment !== 0n &&
+      orderLevelAdjustment !== amounts.orderAdjustment) ||
+    (orderLevelAdjustment !== 0n && rowIncludedAdjustment !== 0n) ||
     (rowIncludedAdjustment !== 0n &&
       rowIncludedAdjustment !== amounts.orderAdjustment) ||
     goodsNet !== amounts.goodsNet ||

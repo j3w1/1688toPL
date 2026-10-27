@@ -31,6 +31,37 @@ export const PRINT_MESSAGES = {
       es: 'Exporta PDF A4 listos para imprimir con etiquetas o marcas de caja de los productos seleccionados.',
     },
   'Export PDF': { zh: '导出 PDF', es: 'Exportar PDF' },
+  'Export 1-label PDF': {
+    zh: '导出单标签 PDF',
+    es: 'Exportar PDF de 1 etiqueta',
+  },
+  'One enlarged label per product code, with the PDF page trimmed to the label. Quantities and sheet settings do not apply.':
+    {
+      zh: '每个商品编码一张大标签，PDF 页面裁切至标签大小。数量和整页设置不适用。',
+      es: 'Una etiqueta grande por código, con la página PDF ajustada al tamaño de la etiqueta. No se aplican las cantidades ni los ajustes de hoja.',
+    },
+  '1-label PDF: one large label per product code, regardless of quantity.': {
+    zh: '单标签 PDF：每个商品编码一张大标签，不受数量影响。',
+    es: 'PDF de 1 etiqueta: una etiqueta grande por código, independientemente de la cantidad.',
+  },
+  'This job used one large label per code. Choose Export 1-label PDF to regenerate it.':
+    {
+      zh: '此任务每个编码一张大标签。请选择“导出单标签 PDF”重新生成。',
+      es: 'Este trabajo usó una etiqueta grande por código. Elige Exportar PDF de 1 etiqueta para regenerarlo.',
+    },
+  'Repeat code per page': {
+    zh: '每页仅重复同一编码',
+    es: 'Repetir código por página',
+  },
+  '{0} places across the product sheets stay blank.': {
+    zh: '各商品页面共有 {0} 个位置留空。',
+    es: 'Quedan {0} espacios en blanco entre las hojas de los productos.',
+  },
+  'Keep each product code on separate A4 sheets. Spare places use the Advanced settings.':
+    {
+      zh: '每个商品编码使用独立的 A4 页面。空余位置按高级设置处理。',
+      es: 'Usa hojas A4 separadas para cada código. Los espacios sobrantes usan los ajustes avanzados.',
+    },
   'Print at 100% (Actual size).': {
     zh: '请按 100%（实际大小）打印。',
     es: 'Imprime al 100 % (tamaño real).',

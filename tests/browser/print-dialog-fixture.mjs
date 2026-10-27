@@ -75,6 +75,7 @@ export async function showPrintDialog(
           settings: settings ?? structuredClone(Print.DEFAULT_LABEL_SETTINGS),
           logoUrl,
           job,
+          validateSource: () => globalThis.testPrintSourceValidator?.(),
           items:
             items ??
             [1, 3, 0].map((quantity, index) => {

@@ -4,6 +4,7 @@ import {
   A4,
   labelGrid,
   planLabels,
+  singleLabelPages,
   planCartonMarks,
   cartonSlots,
   allocateSpares,
@@ -22,6 +23,80 @@ import {
 import { createPdf } from '../src/pdf-writer.js'
 
 const label = { widthMm: 40, heightMm: 20 }
+
+test('single-label pages deduplicate codes, ignore quantities and trim each page to proportional artwork', () => {
+  for (const size of [
+    label,
+    { widthMm: 20, heightMm: 300 },
+    { widthMm: 300, heightMm: 20 },
+  ]) {
+    const state = singleLabelPages(
+      [
+        { key: 'A', quantity: 1654 },
+        { key: 'B', quantity: 0 },
+        { key: 'A', quantity: 7 },
+      ],
+      size
+    )
+    assert.equal(state.plan.pages, 2)
+    assert.deepEqual(state.plan.sequence, ['A', 'B'])
+    assert.equal(state.plan.extras, 0)
+    const [op] = labelPageOps({ ...state, page: 0 })
+    assert.equal(op.type, 'image')
+    assert.equal(op.rotate, false)
+    assert.ok(
+      Math.abs(
+        op.box.widthMm / op.box.heightMm - size.widthMm / size.heightMm
+      ) < 1e-9
+    )
+    assert.equal(op.box.xMm, 0)
+    assert.equal(op.box.yMm, 0)
+    assert.deepEqual(state.pageSize, {
+      widthMm: op.box.widthMm,
+      heightMm: op.box.heightMm,
+    })
+    const pdf = createPdf(state.pageSize)
+    assert.ok(Math.abs(pdf.pageWidth - (op.box.widthMm * 72) / 25.4) < 1e-9)
+    assert.ok(Math.abs(pdf.pageHeight - (op.box.heightMm * 72) / 25.4) < 1e-9)
+    assert.equal(labelPageOps({ ...state, page: 0 }).length, 1)
+  }
+  assert.equal(singleLabelPages([], label).plan.pages, 0)
+  assert.deepEqual(singleLabelPages([], label).pageSize, {
+    widthMm: 200,
+    heightMm: 100,
+  })
+  assert.throws(() => singleLabelPages([], { widthMm: Infinity, heightMm: 20 }))
+})
+
+test('repeat-code sheets keep products separate, preserving quantity, blank-spare and cap rules', () => {
+  const products = [
+    { key: 'A', quantity: 71 },
+    { key: 'B', quantity: 3, cap: 2 },
+    { key: 'C', quantity: 0 },
+  ]
+  for (const spares of ['proportional', 'equal', 'blank']) {
+    const layout = { repeatCodePerPage: true, spares }
+    const value = planLabels(products, { perPage: 70 }, layout)
+    assert.equal(value.pages, 3)
+    assert.deepEqual(
+      value.pageSummaries.map((runs) => runs.map((run) => run.key)),
+      [['A'], ['A'], ['B']]
+    )
+    assert.deepEqual(
+      value.items.map((row) => row.requested),
+      [71, 3]
+    )
+    assert.equal(value.items[1].extra, spares === 'blank' ? 0 : 2)
+    assert.equal(value.items[0].extra, spares === 'blank' ? 0 : 69)
+    assert.equal(value.sequence.length, 210)
+    assert.equal(value.blanks + value.requested + value.extras, 210)
+  }
+  assert.equal(normalizeLabelLayout({}).repeatCodePerPage, false)
+  assert.equal(
+    normalizeLabelLayout({ repeatCodePerPage: 'true' }).repeatCodePerPage,
+    false
+  )
+})
 const mark = { widthMm: 148.5, heightMm: 105 }
 const totals = (plan) =>
   Object.fromEntries(plan.items.map((item) => [item.key, item.total]))

@@ -37,6 +37,8 @@ The installed loop refuses an unregistered/wrong folder, running import, incompa
 
 ## Runtime ownership
 
+The read-only `planOrderReconciliationCandidates()` retains the complete mathematical candidate set for genuine review and version-1 receipt validation. `planOrderReconciliation()` applies the narrow signed-footer rule only when complete row discounts match the other displayed discounts and one additional-reduction candidate reconciles. The result keeps source row amounts unchanged and uses `totals.orderLevelAdjustment` for the seller reduction, with version-2 automatic evidence in the existing `reconciliationReview` field. Validate/reuse historical manual decisions without applying the new default to their saved allocations. See the [reconciliation contract](data-model.md#money-and-reconciliation) for equations and receipt compatibility.
+
 | Responsibility                                           | Source                                                                                                                                                                                                       |
 | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Layout extraction, complete snapshot validation          | Page adapters, [order-snapshot.js](../src/order-snapshot.js), [money.js](../src/money.js)                                                                                                                    |

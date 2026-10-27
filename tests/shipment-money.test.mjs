@@ -3,6 +3,35 @@ import assert from 'node:assert/strict'
 import { syntheticOrder } from './fixtures/container-fixture.mjs'
 import { shipmentMoney, shipmentIntervalCents } from '../src/shipment-money.js'
 import { moneyToCents } from '../src/money.js'
+
+test('order-level seller reduction enters shipment valuation once without modifying source row discounts', () => {
+  const record = syntheticOrder('1001', '3')
+  Object.assign(record.snapshot.totals, {
+    orderAdjustment: '0.05',
+    orderLevelAdjustment: '0.05',
+    shipping: '1.00',
+    goodsNet: '29.95',
+    payable: '30.95',
+  })
+  const before = structuredClone(record)
+  const full = shipmentMoney(record, { 2001: '3' })[0]
+  const parts = [0, 1, 2].map(
+    (from) => shipmentMoney(record, { 2001: '1' }, { 2001: String(from) })[0]
+  )
+  assert.equal(full.allocatedDiscount, '0.05')
+  assert.equal(full.sourceAmount, '29.95')
+  assert.equal(full.freightAllocated, '1.00')
+  assert.equal(
+    parts.reduce((sum, row) => sum + moneyToCents(row.allocatedDiscount), 0n),
+    5n
+  )
+  assert.equal(
+    parts.reduce((sum, row) => sum + moneyToCents(row.sourceAmount), 0n),
+    2995n
+  )
+  assert.deepEqual(record, before)
+  assert.equal(record.snapshot.items[0].allocatedDiscount, '0.00')
+})
 test('partial shipments use exact cumulative source cents and freight once, with final rounding reconciliation', () => {
   const record = syntheticOrder('1001', '3')
   record.snapshot.totals.shipping = '1.00'

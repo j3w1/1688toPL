@@ -9,6 +9,7 @@ const orderDiscountLabels = new Set(['店铺优惠', '活动优惠', '跨店满�
 const reviewMessage =
   'The order total balances, but the discount allocation needs your review.'
 const canonicalMoney = (value) => centsToMoney(moneyToCents(value))
+const automaticRule = 'separate-seller-reduction'
 
 function invalidReview() {
   return new Error('The saved discount review does not match this order.')
@@ -206,8 +207,8 @@ function candidateId(candidate) {
   ].join('|')
 }
 
-/** One planner serves page extraction, explicit review and stored receipts. */
-export function planOrderReconciliation(snapshot, rawSourceTotals) {
+/** Enumerate supported interpretations, including those retained by v1 receipts. */
+export function planOrderReconciliationCandidates(snapshot, rawSourceTotals) {
   const sourceTotals = normalizeReconciliationSource(rawSourceTotals)
   const {
     totals,
@@ -363,6 +364,85 @@ export function planOrderReconciliation(snapshot, rawSourceTotals) {
   return { status: 'review-required', review }
 }
 
+function readyCandidate(snapshot) {
+  return {
+    id: candidateId(
+      Object.fromEntries(
+        [
+          'orderAdjustment',
+          'rowIncludedAdjustment',
+          'priceIncludedDiscount',
+          'grossIncludedCustomization',
+        ].map((field) => [
+          field,
+          moneyToCents(snapshot.totals[field] || '0.00'),
+        ])
+      )
+    ),
+    snapshot,
+  }
+}
+
+/** Keep a separately itemized seller reduction outside the observed row discounts. */
+export function planOrderReconciliation(snapshot, rawSourceTotals) {
+  const plan = planOrderReconciliationCandidates(snapshot, rawSourceTotals)
+  const sourceTotals = normalizeReconciliationSource(rawSourceTotals)
+  const sellerChange = sourceTotals.fields.find(
+    (field) => field.label === '商品改价'
+  )
+  if (
+    !sellerChange ||
+    sellerChange.unsigned ||
+    moneyToCents(sellerChange.amount) <= 0n
+  )
+    return plan
+  const { totals } = sourceAmounts(sourceTotals)
+  const rowDiscount = snapshot.items.reduce(
+    (sum, item) => sum + moneyToCents(item.sourceDiscount),
+    0n
+  )
+  const candidates =
+    plan.status === 'review-required'
+      ? plan.review.candidates
+      : [readyCandidate(plan.snapshot)]
+  const eligible = candidates.filter(
+    ({ snapshot: candidate }) =>
+      !moneyToCents(candidate.totals.rowIncludedAdjustment || '0.00') &&
+      moneyToCents(candidate.totals.orderAdjustment) ===
+        moneyToCents(sellerChange.amount) &&
+      rowDiscount ===
+        totals.sourceDiscount -
+          moneyToCents(candidate.totals.priceIncludedDiscount || '0.00')
+  )
+  if (eligible.length !== 1) return plan
+  const selected = eligible[0]
+  const resolvedAt = new Date(snapshot.observedAt || Date.now()).toISOString()
+  return {
+    status: 'ready',
+    snapshot: {
+      ...selected.snapshot,
+      items: selected.snapshot.items.map((item) => ({
+        ...item,
+        allocatedDiscount: '0.00',
+        discount: canonicalMoney(item.sourceDiscount),
+      })),
+      totals: {
+        ...selected.snapshot.totals,
+        orderLevelAdjustment: canonicalMoney(sellerChange.amount),
+      },
+      reconciliationReview: {
+        version: 2,
+        mode: 'automatic',
+        rule: automaticRule,
+        choice: selected.id,
+        resolvedAt,
+        evidenceKey: financialEvidence(snapshot, sourceTotals),
+        sourceTotals,
+      },
+    },
+  }
+}
+
 export function discountReviewRequired(review) {
   return Object.assign(new Error(reviewMessage), {
     code: 'ORDER_DISCOUNT_REVIEW_REQUIRED',
@@ -390,7 +470,7 @@ export function confirmOrderReconciliation(
     (candidate) => candidate.id === choice
   )
   if (!selected) throw invalidReview()
-  const regenerated = planOrderReconciliation(
+  const regenerated = planOrderReconciliationCandidates(
     selected.snapshot,
     review.sourceTotals
   )
@@ -416,44 +496,50 @@ export function confirmOrderReconciliation(
 }
 
 export function reuseOrderReconciliation(plan, receipt) {
-  if (plan.status !== 'review-required' || !receipt) return plan
+  if (!receipt) return plan
   try {
+    const context =
+      plan.status === 'review-required'
+        ? {
+            snapshot: plan.review.candidates[0].snapshot,
+            sourceTotals: plan.review.sourceTotals,
+          }
+        : plan.snapshot.reconciliationReview?.version === 2
+          ? {
+              snapshot: plan.snapshot,
+              sourceTotals: plan.snapshot.reconciliationReview.sourceTotals,
+            }
+          : null
     if (
-      receipt.version !== 1 ||
-      typeof receipt.reviewedAt !== 'string' ||
+      !context ||
       JSON.stringify(normalizeReconciliationSource(receipt.sourceTotals)) !==
-        JSON.stringify(plan.review.sourceTotals)
+        JSON.stringify(context.sourceTotals)
     )
       return plan
-    const snapshot = confirmOrderReconciliation(plan.review, receipt)
+    if (receipt.version === 2) {
+      const snapshot = { ...context.snapshot, reconciliationReview: receipt }
+      const saved = validateReconciliationReview(snapshot)
+      return {
+        status: 'ready',
+        snapshot: { ...snapshot, reconciliationReview: saved },
+      }
+    }
+    if (receipt.version !== 1 || typeof receipt.reviewedAt !== 'string')
+      return plan
+    const historical = planOrderReconciliationCandidates(
+      context.snapshot,
+      context.sourceTotals
+    )
+    if (historical.status !== 'review-required') return plan
+    const snapshot = confirmOrderReconciliation(historical.review, receipt)
     return { status: 'ready', snapshot }
   } catch {
     return plan
   }
 }
 
-/** Rebuild every interpreted amount before accepting receipt-bearing storage. */
-export function validateReconciliationReview(snapshot) {
-  const receipt = snapshot.reconciliationReview
-  if (receipt === undefined) return undefined
-  if (snapshot.source === 'other' || snapshot.sourceType === 'spreadsheet')
-    throw invalidReview()
-  if (
-    !receipt ||
-    receipt.version !== 1 ||
-    typeof receipt.reviewedAt !== 'string'
-  )
-    throw invalidReview()
-  const source = normalizeReconciliationSource(receipt.sourceTotals)
-  if (
-    Boolean(snapshot.foreignCurrencyFeeUnspecified) !==
-    source.fields.some((field) => field.unspecified)
-  )
-    throw invalidReview()
-  const plan = planOrderReconciliation(snapshot, receipt.sourceTotals)
-  if (plan.status !== 'review-required') throw invalidReview()
-  const reviewed = confirmOrderReconciliation(plan.review, receipt)
-  const output = (value) => ({
+function interpretedOutput(value) {
+  return {
     totals: Object.fromEntries(
       Object.entries(value.totals)
         .sort(([a], [b]) => a.localeCompare(b, 'en'))
@@ -464,8 +550,59 @@ export function validateReconciliationReview(snapshot) {
       allocatedDiscount: canonicalMoney(item.allocatedDiscount),
       discount: canonicalMoney(item.discount),
     })),
-  })
-  if (JSON.stringify(output(snapshot)) !== JSON.stringify(output(reviewed)))
+  }
+}
+
+/** Rebuild every interpreted amount before accepting receipt-bearing storage. */
+export function validateReconciliationReview(snapshot) {
+  const receipt = snapshot.reconciliationReview
+  if (receipt === undefined) {
+    if (moneyToCents(snapshot.totals?.orderLevelAdjustment || '0.00') !== 0n)
+      throw invalidReview()
+    return undefined
+  }
+  if (snapshot.source === 'other' || snapshot.sourceType === 'spreadsheet')
+    throw invalidReview()
+  if (!receipt || ![1, 2].includes(receipt.version)) throw invalidReview()
+  const source = normalizeReconciliationSource(receipt.sourceTotals)
+  if (
+    Boolean(snapshot.foreignCurrencyFeeUnspecified) !==
+    source.fields.some((field) => field.unspecified)
+  )
+    throw invalidReview()
+  if (receipt.version === 2) {
+    if (
+      receipt.mode !== 'automatic' ||
+      receipt.rule !== automaticRule ||
+      typeof receipt.resolvedAt !== 'string' ||
+      !Number.isFinite(Date.parse(receipt.resolvedAt))
+    )
+      throw invalidReview()
+    const automatic = planOrderReconciliation(snapshot, source)
+    const expected =
+      automatic.status === 'ready' && automatic.snapshot.reconciliationReview
+    if (
+      !expected ||
+      expected.version !== 2 ||
+      receipt.choice !== expected.choice ||
+      receipt.evidenceKey !== expected.evidenceKey ||
+      JSON.stringify(interpretedOutput(snapshot)) !==
+        JSON.stringify(interpretedOutput(automatic.snapshot))
+    )
+      throw invalidReview()
+    return {
+      ...expected,
+      resolvedAt: new Date(receipt.resolvedAt).toISOString(),
+    }
+  }
+  if (typeof receipt.reviewedAt !== 'string') throw invalidReview()
+  const plan = planOrderReconciliationCandidates(snapshot, receipt.sourceTotals)
+  if (plan.status !== 'review-required') throw invalidReview()
+  const reviewed = confirmOrderReconciliation(plan.review, receipt)
+  if (
+    JSON.stringify(interpretedOutput(snapshot)) !==
+    JSON.stringify(interpretedOutput(reviewed))
+  )
     throw invalidReview()
   return reviewed.reconciliationReview
 }

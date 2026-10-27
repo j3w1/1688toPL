@@ -21,6 +21,7 @@ import {
   DEFAULT_PRESET,
   labelGrid,
   planLabels,
+  singleLabelPages,
   planCartonMarks,
   cartonSlots,
   normalizeLabelLayout,
@@ -196,6 +197,18 @@ export function openPrintDialog({
   cancel.dataset.action = 'close-print-dialog'
   const exportButton = el('button', uiMessage('Export PDF'), 'primary')
   exportButton.dataset.action = 'export-pdf'
+  const singleLabelButton = marks
+    ? null
+    : el('button', uiMessage('Export 1-label PDF'))
+  if (singleLabelButton) {
+    singleLabelButton.dataset.action = 'export-single-label-pdf'
+    preparationHelp(
+      singleLabelButton,
+      uiMessage(
+        'One enlarged label per product code, with the PDF page trimmed to the label. Quantities and sheet settings do not apply.'
+      )
+    )
+  }
   preparationHelp(
     exportButton,
     uiMessage(
@@ -208,7 +221,9 @@ export function openPrintDialog({
   )
   const actions = el('div', undefined, 'dialog-actions')
   const languages = popupLanguageToggle(dialog, { language: job?.language })
-  actions.append(languages, cancel, exportButton)
+  actions.append(languages, cancel)
+  if (singleLabelButton) actions.append(singleLabelButton)
+  actions.append(exportButton)
   dialog.append(heading, actions)
   const body = pinDialogActions(dialog, actions)
 
@@ -222,6 +237,16 @@ export function openPrintDialog({
       'print-hint'
     )
   )
+  if (singleLabelButton)
+    left.append(
+      el(
+        'p',
+        uiMessage(
+          '1-label PDF: one large label per product code, regardless of quantity.'
+        ),
+        'print-hint'
+      )
+    )
   if (job) {
     const note = el('p', undefined, 'print-note')
     bindText(
@@ -232,6 +257,16 @@ export function openPrintDialog({
       )
     )
     left.append(note)
+    if (job.labelFormat === 'single-label')
+      left.append(
+        el(
+          'p',
+          uiMessage(
+            'This job used one large label per code. Choose Export 1-label PDF to regenerate it.'
+          ),
+          'print-note'
+        )
+      )
   }
   const summary = el('p', undefined, 'print-summary')
   summary.setAttribute('role', 'status')
@@ -592,11 +627,18 @@ export function openPrintDialog({
       layout.boundaries,
       'Draw solid separators where neighbouring labels belong to different products.'
     )
+    const repeatCode = check(
+      'Repeat code per page',
+      layout.repeatCodePerPage,
+      'Keep each product code on separate A4 sheets. Spare places use the Advanced settings.'
+    )
+    repeatCode.input.dataset.action = 'repeat-code-per-page'
     kindFields.append(
       el('legend', uiMessage('Sheet')),
       guides.wrapper,
       pageSummary.wrapper,
-      boundaries.wrapper
+      boundaries.wrapper,
+      repeatCode.wrapper
     )
     const spares = choice(
       'print-spares',
@@ -660,6 +702,7 @@ export function openPrintDialog({
       guides: guides.input.checked,
       pageSummary: pageSummary.input.checked,
       boundaries: boundaries.input.checked,
+      repeatCodePerPage: repeatCode.input.checked,
       spares: spares.value(),
       limitExtras: capsBox.input.checked,
       gapXMm: gapX.value,
@@ -1104,9 +1147,14 @@ export function openPrintDialog({
         )
       if (plan.blanks > 0 && plan.pages)
         warning(
-          uiMessage('{0} places on the last page stay blank.', {
-            0: count(plan.blanks),
-          })
+          uiMessage(
+            layout.repeatCodePerPage
+              ? '{0} places across the product sheets stay blank.'
+              : '{0} places on the last page stay blank.',
+            {
+              0: count(plan.blanks),
+            }
+          )
         )
     }
     if (plan && marks) {
@@ -1186,6 +1234,7 @@ export function openPrintDialog({
         (cells) =>
           cells.review && (!cells.review.checked || !cells.input.value.trim())
       )
+    if (singleLabelButton) singleLabelButton.disabled = busy || !items.length
     dialog.dataset.pages = String(plan?.pages || 0)
     void drawPreview()
   }
@@ -1310,12 +1359,18 @@ export function openPrintDialog({
     }
   }
 
-  async function exportPdf() {
-    if (!plan?.pages || busy || exportButton.disabled) return
+  async function exportPdf(singleLabel = false) {
+    if (
+      closed ||
+      busy ||
+      (singleLabel ? singleLabelButton?.disabled : exportButton.disabled)
+    )
+      return
     let saved = false
     busy = true
     for (const button of languages.children) button.disabled = true
     exportButton.disabled = true
+    if (singleLabelButton) singleLabelButton.disabled = true
     // Freeze what is exported: edits wait until the PDF is saved or fails.
     left.inert = true
     const state = {
@@ -1325,8 +1380,10 @@ export function openPrintDialog({
       layout,
       caps: new Map(caps),
       language: getLanguage(dialog),
+      singleLabel,
     }
     try {
+      if (singleLabel) Object.assign(state, singleLabelPages(items, labelSize))
       await validateSource?.()
       if (closed) return
       const pages = Array.from({ length: state.plan.pages }, (_, index) =>
@@ -1341,6 +1398,7 @@ export function openPrintDialog({
         ),
       ]
       const pdf = createPdf({
+        ...state.pageSize,
         title: printText(marks ? 'marks' : 'labels', state.language),
         draft: container?.draft === true,
       })
@@ -1350,13 +1408,41 @@ export function openPrintDialog({
           status,
           uiMessage('Preparing {0} of {1}', { 0: index + 1, 1: keys.length })
         )
-        await ensureImages([key], PDF_DPI, state.language, closing.signal)
-        if (closed) return
-        const full = images.get(artworkKey(key, PDF_DPI, state.language))
-        names.set(key, pdf.addImage(await rgbImage(full.pixels)))
-        // Full-resolution pixels are needed once; free them before the next label.
-        full.bitmap.close?.()
-        images.delete(artworkKey(key, PDF_DPI, state.language))
+        let full
+        if (singleLabel) {
+          // Render at the enlarged physical size, rather than stretching the
+          // small sheet bitmap. 300 dpi keeps even tall A4 labels bounded.
+          const box = state.grid.cells[0]
+          const scale = Math.max(1, box.widthMm / labelSize.widthMm)
+          const result = await renderLabel({
+            ...itemByKey.get(key).model,
+            language: state.language,
+            settings: {
+              ...settings,
+              dpi: 300,
+              barcode: {
+                ...settings.barcode,
+                widthMm: labelSize.widthMm * scale,
+                heightMm: labelSize.heightMm * scale,
+              },
+            },
+            logoUrl,
+            signal: closing.signal,
+          })
+          full = await decode(result.blob)
+        } else {
+          await ensureImages([key], PDF_DPI, state.language, closing.signal)
+          full = images.get(artworkKey(key, PDF_DPI, state.language))
+        }
+        try {
+          if (closed) return
+          names.set(key, pdf.addImage(await rgbImage(full.pixels)))
+        } finally {
+          // Full-resolution pixels are needed once; free before the next label.
+          full.bitmap.close?.()
+          if (!singleLabel)
+            images.delete(artworkKey(key, PDF_DPI, state.language))
+        }
         if (closed) return
       }
       bindText(status, uiMessage('Building PDF…'))
@@ -1373,7 +1459,7 @@ export function openPrintDialog({
       await validateSource?.()
       if (closed) return
       const filename = uniqueFileName(
-        `${container?.draft ? 'DRAFT-' : ''}${printFileName(kind, state.plan.items.length, new Date(), state.language)}`
+        `${container?.draft ? 'DRAFT-' : ''}${printFileName(kind, state.plan.items.length, new Date(), state.language).replace(/\.pdf$/, singleLabel ? '-1-label.pdf' : '.pdf')}`
       )
       savePdf(bytes, filename)
       saved = true
@@ -1394,6 +1480,7 @@ export function openPrintDialog({
           total: entry.total,
         })),
       })
+      if (singleLabel) summary.labelFormat = 'single-label'
       if (physicalMarks.length) summary.physicalMarks = physicalMarks
       saveFile(
         new Blob([JSON.stringify(summary, null, 2)], {
@@ -1405,6 +1492,7 @@ export function openPrintDialog({
       const cap = (key) => whole(state.caps.get(key), null)
       const recorded = store.recordJob({
         kind,
+        ...(singleLabel ? { labelFormat: 'single-label' } : {}),
         language: state.language,
         products: state.plan.items.map((entry) => ({
           code: entry.key,
@@ -1414,7 +1502,10 @@ export function openPrintDialog({
             ? { refs: itemByKey.get(entry.key).refs }
             : {}),
           quantity: entry.requested,
-          ...(marks || !state.layout.limitExtras || cap(entry.key) === null
+          ...(singleLabel ||
+          marks ||
+          !state.layout.limitExtras ||
+          cap(entry.key) === null
             ? {}
             : { cap: cap(entry.key) }),
         })),
@@ -1439,6 +1530,7 @@ export function openPrintDialog({
       for (const button of languages.children) button.disabled = false
       left.inert = false
       exportButton.disabled = !plan?.pages
+      if (singleLabelButton) singleLabelButton.disabled = !items.length
       // Observable end of every export attempt, saved or abandoned.
       document.dispatchEvent(
         new CustomEvent('print-export-settled', {
@@ -1495,6 +1587,7 @@ export function openPrintDialog({
       if (!closed) bindText(status, uiMessage(error.message))
     })
   exportButton.onclick = () => void exportPdf()
+  if (singleLabelButton) singleLabelButton.onclick = () => void exportPdf(true)
   cancel.onclick = () => dialog.close()
   enableLightDismiss(dialog)
   dialog.addEventListener('close', () => {

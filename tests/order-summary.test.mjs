@@ -62,6 +62,28 @@ test('seller changes included in row discounts are not deducted twice', () => {
   assert.equal(result.reconciled, true)
 })
 
+test('a separate footer seller reduction stays distinct from row and promotion discounts', () => {
+  const result = summarizeOrders([
+    order({
+      goodsGross: '6210.00',
+      sourceDiscount: '315.50',
+      orderAdjustment: '4.50',
+      orderLevelAdjustment: '4.50',
+      goodsNet: '5890.00',
+      shipping: '100.00',
+      redPacketDiscount: '30.00',
+      payable: '5960.00',
+    }),
+  ])
+  assert.equal(result.amounts.productDiscount, '315.50')
+  assert.equal(result.amounts.sellerAdjustment, '4.50')
+  assert.equal(result.amounts.orderDiscount, '0.00')
+  assert.equal(result.amounts.payable, '5960.00')
+  assert.equal(result.reconciled, true)
+  const invalid = summarizeOrders([order({ orderLevelAdjustment: '3.00' })])
+  assert.equal(invalid.reconciled, false)
+})
+
 test('already-in-price wholesale reductions, order discounts and red packets stay distinct', () => {
   const result = summarizeOrders([
     order({

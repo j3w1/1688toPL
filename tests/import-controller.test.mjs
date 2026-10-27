@@ -246,7 +246,7 @@ function reviewedSnapshot(id = '10001') {
         { label: '运费', amount: '0.00' },
         { label: '商品优惠', amount: '20.00' },
         { label: '店铺优惠', amount: '5.00' },
-        { label: '商品改价', amount: '4.50' },
+        { label: '商品改价', amount: '4.50', unsigned: true },
       ],
       payable: '70.50',
       discountSummary: '25.00',

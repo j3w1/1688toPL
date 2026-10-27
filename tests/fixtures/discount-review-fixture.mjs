@@ -1,6 +1,6 @@
 import { buildOrderFixture } from './order-fixture.mjs'
 
-/** Numeric regression evidence only: descriptions, identities and images are synthetic. */
+/** Synthetic ambiguous evidence uses an unsigned seller change; signed reductions can resolve automatically. */
 export function buildDiscountReviewFixture(document, orderId, options = {}) {
   const pattern = [
     ['5.10', '60', '15.55'],
@@ -93,6 +93,7 @@ export function buildDiscountReviewFixture(document, orderId, options = {}) {
     shop: '5.00',
     shipping: '100.00',
     redPacket: '30.00',
+    signedAdjustment: options.signedAdjustment ?? false,
     ...options.amounts,
   }
   field('原价总计', `¥ ${money(gross)}`)
@@ -105,7 +106,8 @@ export function buildDiscountReviewFixture(document, orderId, options = {}) {
   function setAmounts(changes = {}) {
     Object.assign(state, changes)
     fields['运费'].textContent = `¥ ${state.shipping}`
-    fields['商品改价'].textContent = `减 ¥ ${state.adjustment}`
+    fields['商品改价'].textContent =
+      `${state.signedAdjustment ? '减 ' : ''}¥ ${state.adjustment}`
     fields['PLUS价优惠'].textContent =
       `减 ¥ ${money(rowDiscount - cents(state.shop))}`
     fields['店铺优惠'].textContent = `减 ¥ ${state.shop}`

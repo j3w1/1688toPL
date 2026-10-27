@@ -1,6 +1,6 @@
 # Chrome Web Store Listing — 1688toPL
 
-Last updated: 2026-10-26. **SEAL implementation, version 2.10.0; unpublished to the store.** This file is the store metadata source of truth, not authorization to submit or release. Current verification is tracked below; historical test counts do not establish acceptance of this candidate.
+Last updated: 2026-10-27. **SEAL implementation, version 2.10.0; unpublished to the store.** This file is the store metadata source of truth, not authorization to submit or release. Current verification is tracked below; historical test counts do not establish acceptance of this candidate.
 
 ## Store Listing
 
@@ -15,7 +15,7 @@ Turn 1688 purchases and supplier spreadsheets into accurate container packing li
 
 Import selected 1688 orders or a marked supplier workbook. Add purchases from other sources manually or from JSON. Keep original product descriptions, quantities, prices and photos together in a local order library.
 
-If a complete order's total balances but its discount allocation is ambiguous, compare the valid treatments and confirm before saving. Reuse that confirmed treatment only while the same order's financial evidence is unchanged. Select products in Orders, review their proposed barcodes together and confirm once. Complete-order context determines groups and variant endings while only selected products receive assignments; existing codes remain intact.
+Explicit separate seller reductions import automatically when the complete row discounts match the other displayed discounts and the payable reconciles. The reduction stays at order level while source product prices/discounts remain unchanged. If the remaining evidence is genuinely ambiguous, compare the valid treatments and confirm before saving. Reuse existing human-confirmed treatments only while the same order's financial evidence is unchanged. Select products in Orders, review their proposed barcodes together and confirm once. Complete-order context determines groups and variant endings while only selected products receive assignments; existing codes remain intact.
 
 Supplier workbooks can update one existing same-store purchase after a visual current-versus-updated review. Unit-price changes are distinguished from quantity-driven totals; matched codes and custom product details survive, while imported rows and unsealed carton facts use the new workbook as authority. Sealed history and other dependencies remain protected. New-purchase import remains available for separate repeat orders.
 
@@ -128,6 +128,20 @@ Visibility/regions are unselected. Repository rename, local implementation or Gi
 Earlier release and verification chronology remains in Git history. It is not current-candidate acceptance.
 
 ## Review Notes
+
+### Large single-label PDFs and separate-code sheets — local candidate, 2026-10-27
+
+The label print dialog adds **Export 1-label PDF**, producing one enlarged, proportional label per distinct product code with each PDF page trimmed exactly to the label dimensions. The default design exports as 200 × 100 mm without surrounding A4 whitespace; its internal spacing and barcode quiet zones remain intact. It renders large artwork at 300 DPI, ignores quantities and sheet settings, and retains the existing source guards, cancellable export, companion summary and recent-job identity. **Repeat code per page** keeps each code on separate standard sheets, with existing blank-spare and extra-copy limits. Both controls support English, Spanish and Chinese; carton marks keep their existing output. No permissions, external services or database migration are added.
+
+Initial verification passed all **1,619 unit tests** and **25 distinct targeted Chromium tests** (15 existing preview/control cases, five output/cancellation/source-guard cases, and five workspace/printing cases). New coverage includes all languages at 390 px width, actual PDF geometry and artwork resolution, companion counts, persisted settings, retry, duplicate clicks and changed source during rendering. The page-trimming correction then passed **37 focused layout/PDF unit tests** and **7 Chromium tests**, asserting the custom page bounds, full-page artwork placement and unchanged standard A4 output. The corrected exported PDF was rasterized and visually inspected. Source syntax, documentation, changed-file formatting and diff checks passed. The development build and repository trial verified all **30 manifest resources**. Trial status is `loaded:false`, `staged:false`, `verified:false`, `reason:no-local-trial-target`; installed-extension acceptance, hardware scanning and physical printing remain unverified. The full unit suite was not repeated after the page-trimming correction; full `npm run verify` and the complete Chromium sweep were not run for this local batch. Existing discount work and owner data remain intact; no push, merge or publication is included.
+
+### Separate footer seller reductions — local candidate, 2026-10-27
+
+The candidate removes the unnecessary discount-review blocker for the complete signed-footer pattern: row discounts already matching the displayed PLUS/shop/promotion breakdown leave an additional signed seller reduction at order level. The footer label or position alone does not authorize this rule; the full row, gross and payable evidence must reconcile to one supported additional-reduction interpretation. Source prices/discounts remain unchanged, `allocatedDiscount` is zero for that reduction, `orderAdjustment` retains its displayed amount and additive `orderLevelAdjustment` identifies its order-level treatment. It is not described as already included in product rows or moved into another promotion's discount.
+
+The existing reconciliation evidence field adds version-2 automatic resolution metadata; compatible version-1 human choices remain valid and are reused unchanged for matching evidence. Loading/restore do not recost saved purchases. Genuine ambiguity still uses the existing explicit review, while incomplete rows, unknown adjustments and inconsistent totals remain blocked. No new permissions, remote service or IndexedDB migration is introduced. Private source captures remain outside tracked assets.
+
+Verification passed all **1,616 unit tests**, **21 affected discount/import/storage Chromium cases** and **20 general import/refresh Chromium cases**, including one/two/eleven-order refresh. Source syntax, documentation, changed-file formatting and diff checks passed. A focused independent financial review found no actionable issue. The supplied HTML was parsed read-only and reconciled automatically with unchanged source discounts and payable. Synthetic review screenshots were regenerated/inspected; the genuine-review image remained unchanged. The explicit development build and trial verified **30 manifest resources**; the trial returned `loaded:false`, `staged:false`, `verified:false`, `reason:no-local-trial-target`. Installed acceptance, native Excel and physical printing remain unverified. The complete Chromium sweep was not repeated for this correction; earlier full-suite results below retain their original scope. No owner-library mutation, push, merge or store publication is included.
 
 ### Authoritative spreadsheet purchase updates — local candidate, 2026-10-26
 

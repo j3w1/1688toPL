@@ -14,6 +14,10 @@ Carton marks occupy two A4 halves with a middle cut guide. Artwork scales propor
 
 ## Preview and download
 
+Enable **Repeat code per page** under **Sheet** to keep each product code on its own A4 sheets. A product needing more than one sheet continues on subsequent pages; the next product always starts a fresh page. Spare places are filled with that same code according to **Advanced**, including blank spaces and extra-copy caps. This setting updates the preview and **Export PDF** and is remembered for later label jobs.
+
+<a href="../screenshots/print-labels.png"><img src="../screenshots/print-labels.png" alt="Synthetic Print labels dialog with Export 1-label PDF and Repeat code per page" width="800" /></a>
+
 Margins, offsets, guides, numbering and advanced layout update while editing. Dashed safe areas are preview aids and never print. Small margin changes may retain the same centered grid until fewer labels fit. While artwork updates, the last complete preview remains visible.
 
 Review every page with Previous/Next. Scroll around the pointer to zoom, drag to pan, or use **− / + / Fit page**. Focused preview arrows pan, **+/−** zoom and **0** fits. Preview zoom does not change PDF dimensions.
@@ -21,6 +25,8 @@ Review every page with Previous/Next. Scroll around the pointer to zoom, drag to
 **Export PDF** downloads locally with a companion JSON summary. Popup **EN / ES / 中文** controls captions, numbering, calibration instructions and filename prefixes while preserving codes, source wording and authored label names. English names resemble `CE-labels-2026-10-23-153012-3-products.pdf`; JSON uses the same stem. PDF image resources are reused without repeating the complete image table per page.
 
 Print at **100% / Actual size**. Barcode bars use Code 128 with quiet zones; overly dense codes or text that cannot fit report an error. Hardware scanner use and physical printing require their own acceptance checks.
+
+**Export 1-label PDF** downloads one large label per distinct product code. Each PDF page fits the label exactly, preserving its proportions without surrounding A4 whitespace or added margins. The default 40 × 20 mm design exports as a 200 × 100 mm page; custom proportions retain the enlarged scale within 200 × 287 mm. The label's own internal spacing and barcode quiet zones remain intact. It includes every printable code in the dialog, including rows with zero requested quantity. Quantities, spare labels, offsets, cut guides and other sheet settings do not apply. Artwork is rendered afresh at 300 DPI at the enlarged size; the PDF contains no sheet annotations. The filename ends in `-1-label.pdf`, with a matching JSON summary showing one label per page. Recent jobs identify this format; use **Export 1-label PDF** again when regenerating it. The on-screen preview continues to show the standard sheet output.
 
 <a href="../screenshots/label-editor.png"><img src="../screenshots/label-editor.png" alt="Synthetic editable barcode label with Spanish name and separate variant and size fields" width="520" /></a>
 
