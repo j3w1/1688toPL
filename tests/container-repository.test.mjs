@@ -728,9 +728,23 @@ test('native base identity remains stable while unresolved variant sizes stay wa
           plan: review.plan,
           expectedRevisions: review.expectedRevisions,
         })
+        // Existing unresolved preparations remain valid after automatic new-source
+        // suggestions stop requiring size review. Simulate that retained legacy
+        // state explicitly rather than expecting new imports to recreate it.
+        if (orderId === '1002') {
+          const legacy = await db.getPreparation(orderId)
+          for (const variant of legacy.groups[0].variants) {
+            variant.sizeSuffix = ''
+            variant.needsSizeMapping = true
+          }
+          await db.savePreparations([legacy], {
+            expectedRevisions: [legacy.revision],
+            preserveNaming: true,
+          })
+        }
         results.push({
           orderId,
-          review,
+          review: await db.reviewPurchaseCodes({ orderRefs: [{ orderId }] }),
           saved: await db.getPreparation(orderId),
         })
       }
@@ -2965,10 +2979,8 @@ test('native v5 scoped backups close physical and financial dependencies, retain
         cartonBatches: [syntheticBatch()],
         packingPreferences: null,
       })
-      const a = syntheticManifest().orders[0].preparation,
-        b = structuredClone(a)
-      a.groups[0].variants[0].entryIds.push('2002')
-      b.orderId = '1003'
+      const a = syntheticManifest(target).orders[0].preparation,
+        b = syntheticManifest(unrelated).orders[0].preparation
       b.groups[0].baseCode = 'CE26090102'
       await db.savePreparations([a, b], {
         expectedRevisions: [0, 0],
@@ -3067,11 +3079,13 @@ test('native confirmed capacity and facts predating preparation freeze valid sam
           fixture: { syntheticOrder, syntheticBatch, syntheticManifest },
         } = modules,
         db = await openDatabase({ name: 'synthetic-canonical-default-mark' })
+      const first = syntheticOrder('1001', '60'),
+        second = syntheticOrder('1002', '20')
       await db.restoreBackup({
         format: '1688-order-library',
         version: 4,
         exportedAt: new Date().toISOString(),
-        orders: [syntheticOrder('1001', '60'), syntheticOrder('1002', '20')],
+        orders: [first, second],
         history: [],
         images: [],
         preparations: [],
@@ -3080,9 +3094,8 @@ test('native confirmed capacity and facts predating preparation freeze valid sam
         cartonBatches: [syntheticBatch('1002', 2, '20')],
         packingPreferences: null,
       })
-      const a = syntheticManifest().orders[0].preparation,
-        b = structuredClone(a)
-      b.orderId = '1002'
+      const a = syntheticManifest(first).orders[0].preparation,
+        b = syntheticManifest(second).orders[0].preparation
       b.groups[0].baseCode = 'CE26090102'
       await db.savePreparations([a, b], {
         expectedRevisions: [0, 0],

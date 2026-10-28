@@ -29,6 +29,8 @@ Inside the native modal, `data-discount-choice` identifies each semantic treatme
 
 Progress distinguishes discount reviews from genuine failures and offers **Review discounts** on the source order list as well as Activity. Reports retain legacy `counts.failed` for terminal failed attempts, and add `counts.reviewRequired`, `counts.failures` and an explicit per-order `reviewRequired` boolean. A review-required order does not enter hydration retries; confirmation uses the existing expected-row and durable checkpoint path.
 
+Save-time financial failures retain optional bounded diagnostics: processing `stage`, normalized `snapshotTotals`, product-row aggregates and `failure` with `field`, `comparison`, `expected`, `actual` and optional `row`. `ORDER_AMOUNT_MISMATCH` identifies a rejected financial equality. These additions preserve existing report fields and contain no page HTML, product descriptions/photos or session data. The six-row pattern ¥10,654.00 − ¥532.70 − ¥66.30 + ¥600.00 = ¥10,655.00 follows normal automatic import, not discount review.
+
 ## Store spreadsheet import
 
 Open **Import spreadsheet** after the Orders readiness control is enabled. Upload through the labeled Workbook field, select the sheet, confirm the purchase date and supplier, resolve review/quantity items, and check the final photos/totals confirmation. Then use `review-import-codes`; this creates no purchase or code reservation.
@@ -167,11 +169,6 @@ Click/Enter inspects an item; native checkboxes select. Source text and IDs rema
 | `edit-order-product`                 | Open contextual product authoring in Orders.                                                                                              |
 | `review-purchase-codes`              | Prepare products...; review captured selected rows by purchase/family, with codes and suggested product details. Review reserves nothing. |
 | `assign-purchase-codes`              | Confirm preparation; atomically commit reviewed details and complete barcodes for the selected products.                                  |
-| `review-product-families`            | Open the unsaved grouping review with complete-order context and selected-only family/style/size edits.                                   |
-| `product-family-review`              | Native modal containing bounded source evidence and family choices.                                                                       |
-| `choose-product-family`              | Choose one family or separate products for an uncertain cohort; no source selection changes.                                              |
-| `apply-family-choices`               | Apply grouping choices to the review draft and regenerate proposals without reserving codes.                                              |
-| `review-family-mode`                 | Choose automatic, no endings, variants, sizes or combined coding for a proposed family.                                                   |
 | `reset-preparation-code-suggestions` | Reset custom code edits while preserving authored product details and reviewed grouping.                                                  |
 | `back-to-product-selection`          | Close the code review and return focus to Orders without changing selection or reserving codes.                                           |
 | `resolve-code-sizes`                 | Open an unsaved size-ending review for unresolved selected identities.                                                                    |
@@ -214,7 +211,7 @@ Scroll `#order-list`, `.table-scroll` and `.smart-grid-scroll` to logical rows. 
 
 For supplier purchases, retain the [marker guide](store-spreadsheets.md) and existing import review. Check all acknowledges eligible items and never bypasses financial/photo/structural validation. Report intake into an existing 1688 purchase is separate; it does not change China markers or create another purchase.
 
-The preparation family dialog exposes `review-family-family`, `review-family-style` and `review-family-size` for selected unprepared source rows. Unselected context and existing saved families are read-only; saved grouping corrections use **Edit product** in Orders. Proposed code fields use `data-review-code="baseCode"`, `variantSuffix` or `sizeSuffix`, identified by account/order/entry attributes. Wait for `aria-busy="false"` and enabled confirmation after asynchronous validation. Resetting suggestions preserves authored details and reviewed families.
+Preparation groups new 1688 rows automatically by source title; there is no routine family-identifier form. Read-only `data-family-context` details and `data-context-entry` rows expose unselected siblings without extending the selection; context renders at most 30 rows at a time, with Previous/Next context products controls. `data-family-size-fallback` explains resolved complete-option letters when inferred size alternatives cannot be mapped reliably. Saved grouping corrections use **Edit product** in Orders. Proposed code fields use `data-review-code="baseCode"`, `variantSuffix` or `sizeSuffix`, identified by account/order/entry attributes. Wait for `aria-busy="false"` and enabled confirmation after asynchronous validation. Resetting suggestions preserves authored details and saved membership.
 
 ## Workspace: Packing list
 

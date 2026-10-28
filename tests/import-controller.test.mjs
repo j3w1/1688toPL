@@ -897,6 +897,71 @@ test('database errors are failed saves, never counted as completed orders', asyn
   assert.match(s.jobs.get(job.id).orders[0].error, /Disk is full/)
 })
 
+test('save validation failures retain normalized financial evidence and survive report export and successful retry', async () => {
+  const s = setup()
+  const value = reviewedSnapshot()
+  s.browser.readDetail = async () => value
+  const save = s.repository.saveSnapshot
+  s.repository.saveSnapshot = async () => {
+    throw Object.assign(
+      new Error('Product amounts do not reconcile with the order totals'),
+      {
+        code: 'ORDER_AMOUNT_MISMATCH',
+        diagnostics: {
+          version: 1,
+          stage: 'validation',
+          failure: {
+            code: 'ORDER_AMOUNT_MISMATCH',
+            field: 'payable',
+            comparison: 'equal',
+            expected: '70.51',
+            actual: '70.50',
+          },
+          html: '<html>must not persist</html>',
+        },
+      }
+    )
+  }
+  const job = await s.controller.start({
+    scope: 'selected',
+    source,
+    orderIds: ['10001'],
+  })
+  for (let i = 0; i < 5 && s.jobs.get(job.id).state === 'running'; i++)
+    await s.controller.tick()
+  const report = createImportReport(s.jobs.get(job.id), 'test')
+  const failure = report.orders[0].lastFailure
+  assert.equal(report.counts.saved, 0)
+  assert.equal(report.counts.failures, 1)
+  assert.equal(report.counts.reviewRequired, 0)
+  assert.equal(failure.diagnostics.stage, 'validation')
+  assert.deepEqual(failure.diagnostics.failure, {
+    code: 'ORDER_AMOUNT_MISMATCH',
+    field: 'payable',
+    comparison: 'equal',
+    expected: '70.51',
+    actual: '70.50',
+  })
+  assert.equal(failure.diagnostics.snapshotTotals.payable, '70.50')
+  assert.equal(failure.diagnostics.products.count, 2)
+  assert.equal(failure.diagnostics.products.gross, '100.00')
+  assert.equal(failure.diagnostics.products.discount, '25.00')
+  assert.doesNotMatch(
+    JSON.stringify(failure),
+    /must not persist|html|entryId|sourceUrl/
+  )
+  s.repository.saveSnapshot = save
+  await s.controller.resume(job.id)
+  for (let i = 0; i < 5 && s.jobs.get(job.id).state === 'running'; i++)
+    await s.controller.tick()
+  assert.equal(s.saved.size, 1)
+  assert.equal(s.jobs.get(job.id).completed, 1)
+  assert.deepEqual(
+    createImportReport(s.jobs.get(job.id), 'test').orders[0].lastFailure,
+    failure
+  )
+})
+
 test('last financial failure survives retry and successful save in the local import report', async () => {
   const s = setup()
   s.browser.readDetail = async () => {

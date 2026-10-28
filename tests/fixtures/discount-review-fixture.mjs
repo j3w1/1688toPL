@@ -1,8 +1,17 @@
 import { buildOrderFixture } from './order-fixture.mjs'
 
+export const sixRowDiscountPattern = [
+  ['30.20', '80', '120.80'],
+  ['11.40', '80', '45.60'],
+  ['37.20', '60', '111.60'],
+  ['37.20', '60', '111.60'],
+  ['15.50', '60', '46.50'],
+  ['32.20', '60', '96.60'],
+]
+
 /** Synthetic ambiguous evidence uses an unsigned seller change; signed reductions can resolve automatically. */
 export function buildDiscountReviewFixture(document, orderId, options = {}) {
-  const pattern = [
+  const pattern = options.pattern ?? [
     ['5.10', '60', '15.55'],
     ['4.60', '60', '14.02'],
     ['9.20', '60', '28.04'],
@@ -19,7 +28,7 @@ export function buildDiscountReviewFixture(document, orderId, options = {}) {
     ['6.80', '60', '20.73'],
     ['9.00', '60', '27.43'],
   ]
-  const rowCount = options.rowCount ?? 15
+  const rowCount = options.rowCount ?? pattern.length
   const cents = (value) => BigInt(String(value).replace('.', ''))
   const money = (value) =>
     `${value / 100n}.${String(value % 100n).padStart(2, '0')}`

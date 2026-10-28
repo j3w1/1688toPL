@@ -2965,7 +2965,7 @@ test('preparation code edits update every shared preview, validate after editing
   review.close()
 })
 
-test('family review exposes full order context while only selected membership and identities are editable', async (context) => {
+test('automatic title family review shows unselected siblings as bounded read-only context', async (context) => {
   const { document } = authoringEnvironment(context),
     record = syntheticOrder('1001'),
     calls = []
@@ -2999,36 +2999,84 @@ test('family review exposes full order context while only selected membership an
     { accountId: 'local', orderId: '1001', entryId: '2001' },
   ])
   const review = document.querySelector('[data-action="purchase-code-review"]')
-  review.querySelector('[data-action="review-product-families"]').click()
-  const family = document.querySelector(
-      '[data-action="product-family-review"]'
-    ),
-    rows = [...family.querySelectorAll('[data-family-entry]')]
-  assert.equal(rows.length, 2)
   assert.equal(
-    rows[0].querySelector('[data-action="review-family-family"]').disabled,
+    review.querySelector('[data-action="review-product-families"]'),
+    null
+  )
+  const family = review.querySelector('[data-family-context]')
+  assert.ok(family)
+  family.open = true
+  family.ontoggle()
+  const rows = [...family.querySelectorAll('[data-context-entry]')]
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0].dataset.contextEntry, '2002')
+  assert.match(rows[0].textContent, /Not selected/)
+  assert.equal(family.querySelector('input'), null)
+  assert.equal(
+    review.querySelector('[data-review-details="edit-order-details"]').disabled,
     false
   )
-  assert.equal(
-    rows[1].querySelector('[data-action="review-family-family"]').disabled,
-    true
-  )
-  assert.equal(
-    rows[0].querySelector('[data-action="review-family-style"]').disabled,
-    false
-  )
-  assert.equal(
-    rows[1].querySelector('[data-action="review-family-style"]').disabled,
-    true
-  )
-  assert.match(rows[1].textContent, /Not selected/)
-  assert.equal(family.querySelector('input[type="checkbox"]'), null)
-  family.close()
   assert.equal(calls.length, 1)
   review.close()
 })
 
-test('saved family membership stays read-only even when every product is selected and directs corrections to Orders', async (context) => {
+test('large unselected family context pages remain bounded and expose no assignment controls', async (context) => {
+  const { document } = authoringEnvironment(context),
+    record = syntheticOrder('1001')
+  for (let index = 1; index < 67; index++)
+    record.snapshot.items.push({
+      ...structuredClone(record.snapshot.items[0]),
+      entryId: String(2001 + index),
+    })
+  Object.assign(record.snapshot.totals, {
+    goodsGross: '67000.00',
+    goodsNet: '67000.00',
+    payable: '67000.00',
+  })
+  const authoring = await createProductAuthoring({
+    getRecords: () => [record],
+    repository: {
+      listPreparations: async () => [],
+      getPackingPreferences: async () => validatePackingPreferences({}),
+      reviewPurchaseCodes: async (selection) =>
+        planPurchaseCodeReview(
+          { records: [record], preparations: [] },
+          selection
+        ),
+    },
+  })
+  context.after(() => authoring.dispose())
+  await authoring.reviewCodes([
+    { accountId: 'local', orderId: '1001', entryId: '2001' },
+  ])
+  const review = document.querySelector('[data-action="purchase-code-review"]'),
+    family = review.querySelector('[data-family-context]')
+  family.open = true
+  family.ontoggle()
+  assert.equal(family.querySelectorAll('[data-context-entry]').length, 30)
+  assert.equal(
+    family.querySelector('[data-context-entry]').dataset.contextEntry,
+    '2002'
+  )
+  family.querySelectorAll('button')[1].onclick()
+  assert.equal(family.querySelectorAll('[data-context-entry]').length, 30)
+  assert.equal(
+    family.querySelector('[data-context-entry]').dataset.contextEntry,
+    '2032'
+  )
+  family.querySelectorAll('button')[1].onclick()
+  assert.equal(family.querySelectorAll('[data-context-entry]').length, 6)
+  assert.equal(
+    family.querySelector('[data-context-entry]').dataset.contextEntry,
+    '2062'
+  )
+  assert.equal(family.querySelectorAll('button')[1].disabled, true)
+  assert.equal(family.querySelector('input'), null)
+  assert.equal(review.querySelectorAll('article[data-entry-id]').length, 1)
+  review.close()
+})
+
+test('saved family membership stays unchanged without routine regrouping setup', async (context) => {
   const { document } = authoringEnvironment(context),
     { record, preparation } = syntheticManifest().orders[0],
     before = structuredClone(preparation),
@@ -3053,12 +3101,11 @@ test('saved family membership stays read-only even when every product is selecte
     }))
   )
   const review = document.querySelector('[data-action="purchase-code-review"]')
-  review.querySelector('[data-action="review-product-families"]').click()
-  const family = document.querySelector('[data-action="product-family-review"]')
-  for (const control of family.querySelectorAll('[data-family-field]'))
-    assert.equal(control.disabled, true)
-  assert.match(family.textContent, /Use Edit product in Orders/)
-  family.close()
+  assert.equal(
+    review.querySelector('[data-action="review-product-families"]'),
+    null
+  )
+  assert.match(review.textContent, /Existing prepared family/)
   assert.equal(
     review.querySelector('[data-review-code="baseCode"]').disabled,
     false

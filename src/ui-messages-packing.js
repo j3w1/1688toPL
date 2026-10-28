@@ -6,31 +6,6 @@ export const PACKING_MESSAGES = {
     },
 
   'Prepare products': { zh: '准备商品', es: 'Preparar productos' },
-  'Review product families': {
-    zh: '核对商品系列',
-    es: 'Revisar familias de productos',
-  },
-  'Choose which source products share one product family. Only the products selected in Orders will be prepared.':
-    {
-      zh: '选择哪些原始商品属于同一商品系列。仅准备在订单中选中的商品。',
-      es: 'Elige qué productos de origen comparten una familia. Solo se prepararán los productos seleccionados en Pedidos.',
-    },
-  'Use one product family': {
-    zh: '归入同一商品系列',
-    es: 'Usar una sola familia',
-  },
-  'Keep products separate': {
-    zh: '保持商品独立',
-    es: 'Mantener los productos separados',
-  },
-  'Apply family choices': {
-    zh: '应用系列选择',
-    es: 'Aplicar decisiones de familia',
-  },
-  'Choose a family treatment for every listed group.': {
-    zh: '请为列出的每组选择商品系列处理方式。',
-    es: 'Elige cómo tratar la familia de cada grupo de la lista.',
-  },
   'Product family': { zh: '商品系列', es: 'Familia de productos' },
   'Product family: {family}': {
     zh: '商品系列：{family}',
@@ -39,10 +14,6 @@ export const PACKING_MESSAGES = {
   'Article: {article}': {
     zh: '原始货号：{article}',
     es: 'Artículo: {article}',
-  },
-  'Article family: {article}': {
-    zh: '货号系列：{article}',
-    es: 'Familia de artículos: {article}',
   },
   'Existing prepared family': {
     zh: '现有已准备系列',

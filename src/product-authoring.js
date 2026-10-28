@@ -971,7 +971,8 @@ export async function createProductAuthoring({
     }
   }
   let codeReviewGeneration = 0,
-    activeCodeReview
+    activeCodeReview,
+    retainedCodeReview
   async function reviewCodes(rows = getSelectedRows()) {
     const request = ++codeReviewGeneration,
       opener = document.activeElement,
@@ -1125,6 +1126,9 @@ export async function createProductAuthoring({
         }
       }),
       byEntry = new Map(candidateRows.map((row) => [entryKey(row), row])),
+      draftKey = JSON.stringify(refs.map(entryKey).sort()),
+      resumedDraft =
+        retainedCodeReview?.key === draftKey ? retainedCodeReview : null,
       modal = el('dialog', undefined, 'packing-review purchase-code-review'),
       content = el('div', undefined, 'purchase-code-review-content'),
       items = el('div', undefined, 'purchase-code-review-items'),
@@ -1132,7 +1136,6 @@ export async function createProductAuthoring({
       issues = el('div'),
       codeNotice = el('p'),
       resolveSizes = el('button', uiMessage('Resolve size endings')),
-      resolveFamilies = el('button', uiMessage('Review product families')),
       resetCodes = el('button', uiMessage('Reset code suggestions')),
       actions = el('div', undefined, 'dialog-actions'),
       back = el('button', uiMessage('Back')),
@@ -1173,8 +1176,9 @@ export async function createProductAuthoring({
         )
       )
     )
-    let review,
-      proposed = new Map(),
+    retainedCodeReview = null
+    let review = resumedDraft?.review,
+      proposed = new Map(resumedDraft?.proposed || []),
       pending = false,
       assigning = false,
       closed = false,
@@ -1182,21 +1186,18 @@ export async function createProductAuthoring({
       intentId = crypto.randomUUID(),
       reviewList,
       sizeDialog,
-      familyDialog,
       detailDialog,
       detailOpen = false,
       reviewError = false,
-      sourceEvidence,
+      sourceEvidence = resumedDraft?.sourceEvidence,
       staleReview = false,
       codePending = false,
       codeInvalid = false,
       codeGeneration = 0,
       codeTimer
-    const sizeChoices = new Map(),
-      detailChoices = new Map(),
-      codeChoices = new Map(),
-      familyChoices = [],
-      familyCohorts = new Map(),
+    const sizeChoices = new Map(resumedDraft?.sizeChoices || []),
+      detailChoices = new Map(resumedDraft?.detailChoices || []),
+      codeChoices = new Map(resumedDraft?.codeChoices || []),
       selectedKeys = new Set(refs.map(entryKey))
     codeNotice.id = `preparation-code-error-${crypto.randomUUID()}`
     codeNotice.setAttribute('aria-live', 'polite')
@@ -1242,6 +1243,9 @@ export async function createProductAuthoring({
       const control = el('button', uiMessage(title))
       control.type = 'button'
       control.dataset.reviewDetails = title.toLowerCase().replaceAll(' ', '-')
+      control.dataset.orderId = ref.orderId
+      control.dataset.accountId = ref.accountId
+      control.dataset.entryId = ref.entryId
       control.addEventListener(
         'click',
         () =>
@@ -1542,11 +1546,13 @@ export async function createProductAuthoring({
               })
             )
           )
-        for (const [field, label] of [
-          ['spanishName', 'Spanish name'],
-          ['category', 'Chinese category'],
-          ['material', 'Material'],
-        ]) {
+        for (const [field, label] of match.variant
+          ? [
+              ['spanishName', 'Spanish name'],
+              ['category', 'Chinese category'],
+              ['material', 'Material'],
+            ]
+          : []) {
           const line = el('p'),
             before = el('span', beforeDetails[field] || '—'),
             after = el('strong', afterDetails[field] || '—')
@@ -1577,12 +1583,35 @@ export async function createProductAuthoring({
           el(
             'p',
             uiMessage(
-              change?.before && change.after === change.before
-                ? 'Already assigned — unchanged'
-                : 'New assignment'
+              !match.variant
+                ? 'Preparation is unavailable. Resolve the issue below.'
+                : change?.before && change.after === change.before
+                  ? 'Already assigned — unchanged'
+                  : 'New assignment'
             )
           )
         )
+        const family = review?.familyReview
+            ?.find((value) => orderKey(value) === orderKey(row))
+            ?.families.find((value) => value.entryIds.includes(row.entryId)),
+          identity = family?.identities?.find(
+            (value) => value.entryId === row.entryId
+          )
+        if (identity)
+          evidence.append(
+            el(
+              'p',
+              uiMessage('Style: {style}', {
+                style: identity.style || uiMessage('None'),
+              })
+            ),
+            el(
+              'p',
+              uiMessage('Source size: {size}', {
+                size: identity.size || uiMessage('None'),
+              })
+            )
+          )
         if (change && !change.after)
           evidence.append(
             el('p', uiMessage('Map this variant size before generating labels'))
@@ -1614,7 +1643,6 @@ export async function createProductAuthoring({
         codePending ||
         codeInvalid ||
         detailOpen ||
-        familyDialog?.open ||
         sizeDialog?.open ||
         refs.some((ref) => !proposed.get(entryKey(ref))?.after) ||
         (review.issues || []).some((issue) => issue.severity === 'error')
@@ -1623,15 +1651,13 @@ export async function createProductAuthoring({
         !review?.plan?.preparations ||
         ![...proposed.values()].some((change) => !change.after)
       resolveSizes.disabled = assigning || pending || staleReview
-      resolveFamilies.hidden = !(review?.familyReview || []).length
-      resolveFamilies.disabled = assigning || pending || staleReview
       resetCodes.disabled = assigning || pending || staleReview || !review
       for (const control of modal.querySelectorAll('[data-review-details]'))
         control.disabled =
           assigning ||
           pending ||
           staleReview ||
-          !review?.plan?.preparations?.length
+          !matchPrepared(review, control.dataset).variant
       back.disabled = cancel.disabled = assigning
       modal.setAttribute('aria-busy', String(pending || assigning))
     }
@@ -1677,21 +1703,12 @@ export async function createProductAuthoring({
           const host = el('section'),
             body = el('div'),
             label =
+              family.evidence?.title ||
               family.match.group?.title ||
-              family.evidence?.articleFamily ||
-              family.evidence?.label ||
+              family.rows[0].photo.title ||
               uiMessage('Product family')
           host.dataset.productFamily = key
           host.append(el('h4', label))
-          if (family.evidence?.articleFamily)
-            host.append(
-              el(
-                'p',
-                uiMessage('Article family: {article}', {
-                  article: family.evidence.articleFamily,
-                })
-              )
-            )
           if (family.evidence?.provenance)
             host.append(
               el(
@@ -1701,7 +1718,9 @@ export async function createProductAuthoring({
                     ? 'Existing prepared family'
                     : family.evidence.provenance === 'reviewed'
                       ? 'Reviewed family'
-                      : 'Suggested source family'
+                      : family.evidence.provenance === 'title'
+                        ? 'Grouped by source title'
+                        : 'Suggested source family'
                 )
               )
             )
@@ -1717,6 +1736,90 @@ export async function createProductAuthoring({
               })
             )
           )
+          if (family.evidence?.sizeFallback) {
+            const explanation = el(
+              'p',
+              uiMessage(
+                'These size options cannot be mapped reliably. Variant letters distinguish the products; their original measurements are preserved.'
+              )
+            )
+            explanation.dataset.familySizeFallback = 'true'
+            host.append(explanation)
+          }
+          const unselected = (family.evidence?.entryIds || [])
+            .filter(
+              (entryId) => !selectedKeys.has(entryKey({ ...ref, entryId }))
+            )
+            .map((entryId) =>
+              reviewRecord(ref)?.snapshot.items.find(
+                (item) => item.entryId === entryId
+              )
+            )
+            .filter(Boolean)
+          if (unselected.length) {
+            const context = el('details'),
+              contextBody = el('div', undefined, 'purchase-family-context')
+            context.dataset.familyContext = 'true'
+            context.append(
+              el(
+                'summary',
+                uiMessage('Unselected products: {count} · Context only', {
+                  count: unselected.length,
+                })
+              ),
+              contextBody
+            )
+            let offset = 0
+            function renderContext() {
+              contextBody.replaceChildren()
+              for (const item of unselected.slice(offset, offset + 30)) {
+                const row = el('div', undefined, 'purchase-family-context-row')
+                row.dataset.contextEntry = item.entryId
+                row.append(
+                  el('p', item.description || item.title),
+                  el(
+                    'p',
+                    uiMessage('Article: {article}', {
+                      article: productArticleIdentity(item) || '—',
+                    })
+                  ),
+                  el(
+                    'p',
+                    uiMessage('Quantity: {quantity}', {
+                      quantity: item.quantity,
+                    })
+                  ),
+                  el('small', uiMessage('Not selected — context only'))
+                )
+                contextBody.append(row)
+              }
+              if (unselected.length > 30) {
+                const previous = el(
+                    'button',
+                    uiMessage('Previous context products')
+                  ),
+                  next = el('button', uiMessage('Next context products'))
+                previous.type = next.type = 'button'
+                previous.disabled = offset === 0
+                next.disabled = offset + 30 >= unselected.length
+                previous.onclick = () => {
+                  offset = Math.max(0, offset - 30)
+                  renderContext()
+                }
+                next.onclick = () => {
+                  offset += 30
+                  renderContext()
+                }
+                contextBody.append(previous, next)
+              }
+              contextBody.scrollTop = 0
+            }
+            context.ontoggle = () => {
+              if (context.open) renderContext()
+              else contextBody.replaceChildren()
+            }
+            host.append(context)
+          }
           if (family.match.group)
             host.append(
               codeField('Product base code', family.rows[0], 'baseCode', true)
@@ -1752,10 +1855,6 @@ export async function createProductAuthoring({
     resolveSizes.dataset.action = 'resolve-code-sizes'
     resolveSizes.hidden = true
     resolveSizes.onclick = () => void openSizeResolution()
-    resolveFamilies.type = 'button'
-    resolveFamilies.dataset.action = 'review-product-families'
-    resolveFamilies.hidden = true
-    resolveFamilies.onclick = () => void openFamilyReview()
     resetCodes.type = 'button'
     resetCodes.dataset.action = 'reset-preparation-code-suggestions'
     resetCodes.onclick = () => {
@@ -1767,14 +1866,7 @@ export async function createProductAuthoring({
       bindText(codeNotice, '')
       void replan()
     }
-    content.append(
-      items,
-      issues,
-      codeNotice,
-      resolveFamilies,
-      resolveSizes,
-      resetCodes
-    )
+    content.append(items, issues, codeNotice, resolveSizes, resetCodes)
     function detailProjection(preparation) {
       const projected = structuredClone(preparation)
       projected.groups = projected.groups
@@ -1953,413 +2045,6 @@ export async function createProductAuthoring({
         if (alive()) paintCards()
         restoreReviewFocus(opener)
       }
-    }
-    async function openFamilyReview() {
-      if (!alive() || pending || assigning || staleReview || familyDialog?.open)
-        return
-      const dialog = el(
-          'dialog',
-          undefined,
-          'packing-review purchase-code-review'
-        ),
-        body = el('div', undefined, 'purchase-code-review-items'),
-        notice = el('p'),
-        footer = el('div', undefined, 'dialog-actions'),
-        cancel = el('button', uiMessage('Cancel')),
-        apply = el('button', uiMessage('Apply family choices'), 'primary'),
-        choices = new Map(
-          familyChoices.map((choice) => [
-            JSON.stringify([
-              choice.accountId,
-              choice.orderId,
-              ...choice.entryIds,
-            ]),
-            choice.kind,
-          ])
-        ),
-        cohorts = [...familyCohorts.entries()],
-        sourceRows = [],
-        rowChoices = new Map(),
-        classifier = createSizeClassifier(preferences.sizeVocabulary)
-      for (const ref of scope) {
-        const record = reviewRecord(ref),
-          plan = review.familyReview?.find(
-            (value) => orderKey(value) === orderKey(ref)
-          ),
-          previous = preparations.get(orderKey(ref))
-        for (const item of record.snapshot.items) {
-          const family = plan?.families.find((value) =>
-              value.entryIds.includes(item.entryId)
-            ),
-            index = plan?.families.indexOf(family) ?? -1,
-            identity = family?.identities?.find(
-              (value) => value.entryId === item.entryId
-            ),
-            extracted = classifier.extract(item),
-            existing = previous?.groups.find((group) =>
-              group.variants.some((variant) =>
-                variant.entryIds.includes(item.entryId)
-              )
-            ),
-            editable =
-              selectedKeys.has(entryKey({ ...ref, entryId: item.entryId })) &&
-              !existing,
-            row = {
-              ...ref,
-              entryId: item.entryId,
-              item,
-              editable,
-              saved: !!existing,
-              family: `G${index >= 0 ? index + 1 : sourceRows.length + 1}`,
-              mode: existing ? groupCodeMode(existing) : family?.mode || '',
-              style: identity?.style ?? extracted.variant,
-              size: identity?.size ?? extracted.size,
-              identityEdited: false,
-            }
-          sourceRows.push(row)
-          rowChoices.set(entryKey(row), row)
-        }
-      }
-      let disposed = false,
-        validating = false,
-        list
-      const current = () => !disposed && dialog.open && alive()
-      dialog.dataset.action = 'product-family-review'
-      bindAttribute(dialog, 'aria-label', uiMessage('Review product families'))
-      dialog.append(
-        el('h2', uiMessage('Review product families')),
-        el(
-          'p',
-          uiMessage(
-            'Choose which source products share one product family. Only the products selected in Orders will be prepared.'
-          )
-        )
-      )
-      notice.setAttribute('role', 'status')
-      notice.id = `family-error-${crypto.randomUUID()}`
-      function paintFamilyRows() {
-        for (const section of body.querySelectorAll('[data-family-entry]')) {
-          const row = rowChoices.get(section.dataset.familyEntry)
-          for (const control of section.querySelectorAll(
-            '[data-family-field]'
-          )) {
-            const field = control.dataset.familyField
-            if (document.activeElement !== control) control.value = row[field]
-          }
-          const siblings = sourceRows.filter(
-              (value) =>
-                orderKey(value) === orderKey(row) && value.family === row.family
-            ),
-            first = siblings.find((value) => value.editable) || siblings[0]
-          section.querySelector('[data-family-mode-control]').hidden =
-            first !== row
-          section.querySelector('[data-family-field="mode"]').disabled =
-            validating || !row.editable || siblings.some((value) => value.saved)
-        }
-      }
-      function reviewedRow(row) {
-        const section = el('section'),
-          key = entryKey(row)
-        section.classList.add('preparation-family-source')
-        section.dataset.familyEntry = key
-        section.dataset.orderId = row.orderId
-        section.dataset.accountId = row.accountId
-        section.dataset.entryId = row.entryId
-        section.append(
-          media.photo(row.item),
-          el(
-            'p',
-            [
-              productArticleIdentity(row.item),
-              row.item.title,
-              row.item.description,
-            ]
-              .filter(Boolean)
-              .join(' · ')
-          ),
-          el(
-            'p',
-            (row.item.skuProperties || [])
-              .map((property) => `${property.label}: ${property.value}`)
-              .join(' · ')
-          ),
-          el(
-            'p',
-            uiMessage('Quantity: {quantity}', { quantity: row.item.quantity })
-          )
-        )
-        if (!selectedKeys.has(key))
-          section.append(el('small', uiMessage('Not selected — context only')))
-        if (row.saved)
-          section.append(
-            el(
-              'small',
-              uiMessage(
-                'This product keeps its saved family. Use Edit product in Orders to review grouping or code corrections.'
-              )
-            )
-          )
-        for (const [name, title] of [
-          ['family', 'Family identifier'],
-          ['style', 'Style identity'],
-          ['size', 'Source size'],
-        ]) {
-          const label = el('label', uiMessage(title)),
-            input = el('input')
-          input.type = 'text'
-          input.id = `family-${name}-${crypto.randomUUID()}`
-          input.value = row[name]
-          input.dataset.familyField = name
-          input.dataset.action = `review-family-${name}`
-          input.setAttribute('aria-describedby', notice.id)
-          input.disabled = !row.editable
-          input.maxLength = name === 'family' ? 80 : 500
-          label.htmlFor = input.id
-          input.oninput = () => {
-            row[name] = input.value.trim()
-            if (name !== 'family') row.identityEdited = true
-            for (const [cohortKey, cohort] of cohorts)
-              if (
-                orderKey(cohort) === orderKey(row) &&
-                cohort.entryIds.includes(row.entryId)
-              )
-                choices.set(cohortKey, 'custom')
-            input.removeAttribute('aria-invalid')
-            bindText(notice, '')
-            paintFamilyRows()
-          }
-          label.append(input)
-          section.append(label)
-        }
-        const modeLabel = el('label', uiMessage('Coding mode')),
-          select = el('select')
-        modeLabel.dataset.familyModeControl = 'true'
-        select.id = `family-mode-${crypto.randomUUID()}`
-        select.dataset.action = 'review-family-mode'
-        select.dataset.familyField = 'mode'
-        select.disabled = !row.editable
-        select.setAttribute('aria-describedby', notice.id)
-        modeLabel.htmlFor = select.id
-        for (const [value, label] of [
-          ['', 'Automatic'],
-          ...Object.entries(modeLabels),
-        ]) {
-          const option = el('option', uiMessage(label))
-          option.value = value
-          select.append(option)
-        }
-        select.value = row.mode
-        select.onchange = () => {
-          for (const sibling of sourceRows)
-            if (
-              orderKey(sibling) === orderKey(row) &&
-              sibling.family === row.family
-            )
-              sibling.mode = select.value
-          bindText(notice, '')
-          paintFamilyRows()
-        }
-        modeLabel.append(select)
-        section.append(modeLabel)
-        return section
-      }
-      function card([key, cohort]) {
-        const section = el('section'),
-          fieldset = el('fieldset'),
-          legend = el(
-            'legend',
-            uiMessage('Order {orderId}', { orderId: cohort.orderId })
-          ),
-          record = reviewRecord(cohort)
-        fieldset.append(legend)
-        for (const [kind, title] of [
-          ['family', 'Use one product family'],
-          ['standalone', 'Keep products separate'],
-        ]) {
-          const label = el('label', uiMessage(title)),
-            input = el('input')
-          input.type = 'radio'
-          input.name = `family-${key}`
-          input.value = kind
-          input.checked = choices.get(key) === kind
-          const savedRows = cohort.entryIds
-              .map((entryId) =>
-                rowChoices.get(entryKey({ ...cohort, entryId }))
-              )
-              .filter((row) => row?.saved),
-            locked =
-              kind === 'family' &&
-              new Set(savedRows.map((row) => row.family)).size > 1
-          input.dataset.locked = String(locked)
-          input.disabled = validating || locked
-          input.setAttribute('aria-describedby', notice.id)
-          input.dataset.action = 'choose-product-family'
-          input.onchange = () => {
-            choices.set(key, kind)
-            for (const entryId of cohort.entryIds) {
-              const row = rowChoices.get(entryKey({ ...cohort, entryId }))
-              if (row && !row.saved)
-                row.family =
-                  kind === 'family'
-                    ? savedRows[0]?.family || `review-${cohort.entryIds[0]}`
-                    : `source-${entryId}`
-            }
-            bindText(notice, '')
-            paintFamilyRows()
-          }
-          label.prepend(input)
-          fieldset.append(label)
-        }
-        section.append(fieldset)
-        return section
-      }
-      cancel.type = apply.type = 'button'
-      cancel.onclick = () => {
-        if (!validating) dialog.close()
-      }
-      apply.dataset.action = 'apply-family-choices'
-      apply.onclick = () =>
-        void (async () => {
-          if (!current() || validating) return
-          const missing = cohorts.find(([key]) => !choices.has(key))
-          if (missing) {
-            bindText(
-              notice,
-              uiMessage('Choose a family treatment for every listed group.')
-            )
-            list
-              .ensureVisible(`decision:${missing[0]}`)
-              ?.querySelector('input')
-              ?.focus()
-            return
-          }
-          const blank = sourceRows.find((row) => !row.family)
-          if (blank) {
-            bindText(
-              notice,
-              uiMessage('Enter a family identifier for every product.')
-            )
-            const input = list
-              .ensureVisible(entryKey(blank))
-              ?.querySelector('[data-family-field="family"]')
-            input?.setAttribute('aria-invalid', 'true')
-            input?.focus()
-            return
-          }
-          validating = true
-          apply.disabled = cancel.disabled = true
-          dialog.setAttribute('aria-busy', 'true')
-          try {
-            const grouped = new Map()
-            for (const row of sourceRows) {
-              const key = JSON.stringify([orderKey(row), row.family])
-              if (!grouped.has(key)) grouped.set(key, [])
-              grouped.get(key).push(row)
-            }
-            const nextChoices = [...grouped.values()].map((rows) => {
-              const first = rows[0],
-                modes = new Set(rows.map((row) => row.mode).filter(Boolean))
-              if (modes.size > 1)
-                throw new Error(
-                  'Products in one family need the same coding mode.'
-                )
-              return {
-                accountId: first.accountId,
-                orderId: first.orderId,
-                entryIds: rows.map((row) => row.entryId),
-                kind: rows.length > 1 ? 'family' : 'standalone',
-                ...(modes.size ? { mode: [...modes][0] } : {}),
-                ...(rows.some((row) => row.identityEdited)
-                  ? {
-                      identities: rows.map(({ entryId, style, size }) => ({
-                        entryId,
-                        style,
-                        size,
-                      })),
-                    }
-                  : {}),
-              }
-            })
-            familyChoices.splice(0, familyChoices.length, ...nextChoices)
-            await replan()
-            if (current()) dialog.close('applied')
-          } catch (error) {
-            if (current()) bindText(notice, uiMessage(error.message))
-          } finally {
-            validating = false
-            if (current()) {
-              apply.disabled = cancel.disabled = false
-              for (const input of body.querySelectorAll('input,select'))
-                input.disabled = input.closest('[data-family-entry]')
-                  ? !rowChoices.get(
-                      input.closest('[data-family-entry]').dataset.familyEntry
-                    ).editable
-                  : input.dataset.locked === 'true'
-              paintFamilyRows()
-              dialog.setAttribute('aria-busy', 'false')
-            }
-          }
-        })()
-      footer.append(cancel, apply)
-      dialog.append(body, notice, footer)
-      dialog.oncancel = (event) => {
-        if (validating) event.preventDefault()
-      }
-      dialog.onclose = () => {
-        disposed = true
-        list?.destroy()
-        media.forget(dialog)
-        dialog.remove()
-        if (familyDialog === dialog) familyDialog = null
-        if (alive()) {
-          paintCards()
-          restoreReviewFocus(resolveFamilies)
-        }
-      }
-      document.body.append(dialog)
-      familyDialog = dialog
-      dialog.showModal()
-      paintCards()
-      const sections = scope.map((ref) => {
-        const host = el('section')
-        body.append(host)
-        return {
-          element: host,
-          entries: [
-            { key: `order:${orderKey(ref)}`, orderHeading: ref, heading: true },
-            ...cohorts
-              .filter(([, cohort]) => orderKey(cohort) === orderKey(ref))
-              .map(([key, cohort]) => ({
-                key: `decision:${key}`,
-                heading: true,
-                cohortKey: key,
-                cohort,
-              })),
-            ...sourceRows
-              .filter((row) => orderKey(row) === orderKey(ref))
-              .map((row) => ({ key: entryKey(row), row })),
-          ],
-        }
-      })
-      list = createVirtualList({
-        scroller: body,
-        sections,
-        limit: 30,
-        render: (entry) => {
-          if (entry.orderHeading)
-            return el(
-              'h3',
-              uiMessage('Order {orderId}', {
-                orderId: entry.orderHeading.orderId,
-              })
-            )
-          if (entry.heading) return card([entry.cohortKey, entry.cohort])
-          return reviewedRow(entry.row)
-        },
-        remove: (node) => media.forget(node),
-        paint: paintFamilyRows,
-      })
-      list.update()
     }
     function choiceEvidence(result, preparation) {
       const index = result.plan.preparations.findIndex(
@@ -2724,9 +2409,6 @@ export async function createProductAuthoring({
         let result = await repository.reviewPurchaseCodes({
           orderRefs: scope,
           entryRefs: refs,
-          ...(familyChoices.length
-            ? { familyChoices: structuredClone(familyChoices) }
-            : {}),
         })
         if (!alive() || version !== generation) return
         if (
@@ -2756,24 +2438,6 @@ export async function createProductAuthoring({
           )
         }
         sourceEvidence = evidence
-        familyCohorts.clear()
-        for (const family of result.familyReview || [])
-          for (const issue of family.issues || []) {
-            if (issue.code === 'PRODUCT_FAMILY_REVIEW_REQUIRED')
-              familyCohorts.set(
-                JSON.stringify([
-                  family.accountId,
-                  family.orderId,
-                  ...issue.entryIds,
-                ]),
-                {
-                  ...structuredClone(issue),
-                  accountId: family.accountId,
-                  orderId: family.orderId,
-                  sourceKey: family.sourceKey,
-                }
-              )
-          }
         if (sizeChoices.size) result = sizedReview(result, sizeChoices)
         if (detailChoices.size) result = detailedReview(result, detailChoices)
         if (codeChoices.size) result = codedReview(result)
@@ -2858,9 +2522,22 @@ export async function createProductAuthoring({
     back.dataset.action = 'back-to-product-selection'
     commit.dataset.action = 'assign-purchase-codes'
     commit.disabled = true
-    back.onclick = cancel.onclick = () => {
-      if (!assigning && !detailOpen && !familyDialog?.open && !sizeDialog?.open)
-        modal.close()
+    back.onclick = () => {
+      if (!assigning && !detailOpen && !sizeDialog?.open) {
+        retainedCodeReview = structuredClone({
+          key: draftKey,
+          review,
+          proposed: [...proposed],
+          sourceEvidence,
+          sizeChoices: [...sizeChoices],
+          detailChoices: [...detailChoices],
+          codeChoices: [...codeChoices],
+        })
+        modal.close('back')
+      }
+    }
+    cancel.onclick = () => {
+      if (!assigning && !detailOpen && !sizeDialog?.open) modal.close('cancel')
     }
     commit.onclick = () =>
       void (async () => {
@@ -2896,7 +2573,6 @@ export async function createProductAuthoring({
     modal.onclose = () => {
       closed = true
       sizeDialog?.close()
-      familyDialog?.close()
       detailDialog?.close()
       generation++
       codeGeneration++
@@ -5364,6 +5040,8 @@ export async function createProductAuthoring({
     historyState: () => history().state(),
     dispose() {
       generation++
+      retainedCodeReview = null
+      activeCodeReview?.close()
       for (const session of sessions.values()) clearTimeout(session.timer)
       editor?.destroy()
       media.destroy()

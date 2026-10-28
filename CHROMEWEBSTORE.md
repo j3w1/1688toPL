@@ -1,6 +1,6 @@
 # Chrome Web Store Listing — 1688toPL
 
-Last updated: 2026-10-27. **SEAL implementation, version 2.10.0; unpublished to the store.** This file is the store metadata source of truth, not authorization to submit or release. Current verification is tracked below; historical test counts do not establish acceptance of this candidate.
+Last updated: 2026-10-29. **SEAL implementation, version 2.10.0; unpublished to the store.** This file is the store metadata source of truth, not authorization to submit or release. Current verification is tracked below; historical test counts do not establish acceptance of this candidate.
 
 ## Store Listing
 
@@ -21,7 +21,7 @@ Supplier workbooks can update one existing same-store purchase after a visual cu
 
 Supplier workbook import includes an editable product-code review. Check one base per source group, adjust variant and size endings, and see the full barcodes before saving. Invalid codes, unresolved sizes and ownership conflicts stay visible until resolved; the final import saves the reviewed purchase and its codes together.
 
-Prepare products in Orders with CE codes, Spanish names and Chinese categories using editable local rules. New codes use the original purchase calendar month. Review size/material suggestions, paste a 1688 supplier packing report or enter Pcs/box once, then review carton/remainder proposals. Preserve actual uneven cartons and honest unknown contents or measurements. Eligible repeat purchases can share reviewed codes while retaining separate purchase values; shipped code lineages cannot accept new members.
+Prepare selected products in Orders with CE codes, Spanish names, Chinese categories and materials using editable local rules. Repeated source titles establish families within each 1688 purchase; colours, styles and reliable sizes determine endings. Distinct options receive letters when sizes cannot be mapped reliably, with original dimensions retained. Edit order, group or variant details before confirming once. Existing saved codes remain intact and new codes use the original purchase calendar month. Paste a 1688 supplier packing report or enter Pcs/box once, then review carton/remainder proposals. Preserve actual uneven cartons and honest unknown contents or measurements. Eligible repeat purchases can share reviewed codes while retaining separate purchase values; shipped code lineages cannot accept new members.
 
 Packing selects whole orders into a named container. Confirm loaded/left-behind cartons, inspect the derived read-only packing list and seal a versioned manifest. Global Backlog updates automatically; historical Se quedó remains reproducible. Reviewed amendments preserve prior revisions and protect cartons committed elsewhere.
 
@@ -119,6 +119,7 @@ Visibility/regions are unselected. Repository rename, local implementation or Gi
 
 | Version | Date       | Changes                                                                                                                                                                                                             | Status                                                                                                      |
 | ------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| 2.10.0  | 2026-10-29 | Automatic source-title families, reliable code endings, retained preparation drafts and structured financial import-failure evidence.                                                                               | Local verification passed; installed acceptance unverified. No publication or store submission.             |
 | 2.10.0  | 2026-10-26 | Explicit ambiguous-discount review with reusable financial receipts; order-scoped product selection and one confirmed code assignment.                                                                              | Local integration candidate; verification recorded below. No publication or store submission.               |
 | 2.10.0  | 2026-10-24 | Unified selected-product Excel image/workbook preview with linked carton measurements; removed unused recovery and legacy carton-editor workflows while preserving backup/history compatibility.                    | Local verification completed; installed acceptance pending. No publication or store submission.             |
 | 2.10.0  | 2026-10-22 | Orders smart carton reconciliation, purchase-calendar codes, container loading/seal/amendments, immutable three-sheet output and compatible shipment/report backups.                                                | Local implementation; unpublished. No store submission.                                                     |
@@ -128,6 +129,14 @@ Visibility/regions are unselected. Repository rename, local implementation or Gi
 Earlier release and verification chronology remains in Git history. It is not current-candidate acceptance.
 
 ## Review Notes
+
+### Title families and financial failure evidence — local candidate, 2026-10-29
+
+New 1688 preparation uses normalized repeated source titles within each purchase to establish families before deriving endings. Article/model values describe options and no longer split title families or require routine family-identifier setup. Reliable styles/sizes retain their actual combinations; uncertain inferred size alternatives use complete-option letters and a visible nonblocking explanation. Order/group/variant detail editors remain part of the unsaved review. Existing saved membership, manual values, intentional blanks, shipment protections, spreadsheet declarations and selected-only writes remain authoritative. This supersedes the earlier article-based horse/elephant proposal for new preparation only; saved purchases are not automatically recoded.
+
+The complete six-row financial pattern ¥10,654.00 − ¥532.70 − ¥66.30 + ¥600.00 = ¥10,655.00 already reconciles automatically with the signed seller reduction at order level. This candidate preserves that calculation and adds bounded stage/expected-versus-actual evidence for rejected final financial checks. Reports exclude HTML, descriptions/photos and session data. No permissions, remote service or IndexedDB migration are added.
+
+Final `npm run verify` passed source syntax, documentation checks, all **1,639 unit tests** and all **677 Chromium tests** against the corrected candidate. Synthetic cases cover 65 source rows and 25 title families; read-only replay of the supplied export independently produced family counts 2/1/3/15/4 and the expected endings without pending sizes. Packaged financial coverage verifies the six-product PLUS/seller-reduction pattern through Save order, bulk import, refresh, duplicate handling and restore without review. Focused review corrections protect variants-only complete options and ambiguous saved mappings; existing saved assignments remain unchanged. Synthetic screenshots were refreshed and the preparation review was visually inspected. Changed-file formatting and diff checks passed. The explicit development build and repository trial verified **30 manifest resources**; trial status is `loaded:false`, `staged:false`, `verified:false`, `reason:no-local-trial-target`. Installed-extension acceptance remains unverified; prior live page inspection was blocked by browser site policy. Native Excel, hardware scanning and physical printing were not run for this batch. No owner-library mutation, push, merge or store publication is included.
 
 ### Large single-label PDFs and separate-code sheets — local candidate, 2026-10-27
 

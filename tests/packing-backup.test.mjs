@@ -1016,6 +1016,51 @@ test('reverse same-time scope composition accepts the unchanged complete orderin
   }
 })
 
+test('same-time family evidence compares membership and mappings independently of array order', () => {
+  const { preparation } = fixture(),
+    incoming = structuredClone(preparation),
+    ids = ['1', '2', '3']
+  incoming.productFamilies.families.reverse()
+  for (const family of incoming.productFamilies.families) {
+    family.entryIds.reverse()
+    family.identities.reverse()
+  }
+  const before = structuredClone(preparation),
+    received = structuredClone(incoming)
+  assert.equal(mergePackingPreparation(preparation, incoming, ids), preparation)
+  assert.equal(
+    isPackingPreparationSubset(
+      selectPackingPreparation(preparation, ['2']),
+      incoming
+    ),
+    true
+  )
+  assert.deepEqual(preparation, before)
+  assert.deepEqual(incoming, received)
+  for (const change of [
+    (family) => {
+      family.mode = 'none'
+    },
+    (family) => {
+      family.identities[0].variantSuffix = 'Z'
+    },
+    (family) => {
+      family.identities[0].sizeSuffix = 'L'
+    },
+  ]) {
+    const conflicting = structuredClone(incoming)
+    change(
+      conflicting.productFamilies.families.find((family) =>
+        family.entryIds.includes('1')
+      )
+    )
+    assert.throws(
+      () => mergePackingPreparation(preparation, conflicting, ids),
+      /same timestamp/
+    )
+  }
+})
+
 test('same-time composition preserves known overlapping group, variant and source-row order', () => {
   const { preparation } = fixture()
   const checkpoints = (value) => [

@@ -1,6 +1,9 @@
 import { test, expect } from './extension-fixture.mjs'
 import { buildOrderFixture } from '../fixtures/order-fixture.mjs'
-import { buildDiscountReviewFixture } from '../fixtures/discount-review-fixture.mjs'
+import {
+  buildDiscountReviewFixture,
+  sixRowDiscountPattern,
+} from '../fixtures/discount-review-fixture.mjs'
 import { libraryBackup } from './smart-workspace-helpers.mjs'
 
 test.use({ importFlow: true })
@@ -18,8 +21,8 @@ async function pages(extension, options = {}) {
     const id = url.searchParams.get('orderId')
     if (!isList) visits.push(id)
     const body = isList
-      ? `<order-app><q-pagination data-tracker="pagination-order-list" current="1" pagesize="10" total="2"></q-pagination>${ids.map((id) => `<order-item data-tracker-args="orderId=${id}"><a class="order-detail-action" href="${detail(id)}">Detail</a><q-checkbox data-tracker="checkbox-order-item" checked></q-checkbox>${'<div class="order-item-entry"></div>'.repeat(15)}</order-item>`).join('')}</order-app>`
-      : `<script>${buildOrderFixture.toString()}\n${buildDiscountReviewFixture.toString()}\nwindow.discountFixture=buildDiscountReviewFixture(document,${JSON.stringify(id)},{ambiguous:${id !== ids[1] && live.ambiguous},signedAdjustment:${live.signedAdjustment}});</script>`
+      ? `<order-app><q-pagination data-tracker="pagination-order-list" current="1" pagesize="10" total="2"></q-pagination>${ids.map((id) => `<order-item data-tracker-args="orderId=${id}"><a class="order-detail-action" href="${detail(id)}">Detail</a><q-checkbox data-tracker="checkbox-order-item" checked></q-checkbox>${'<div class="order-item-entry"></div>'.repeat(live.pattern?.length ?? 15)}</order-item>`).join('')}</order-app>`
+      : `<script>${buildOrderFixture.toString()}\n${buildDiscountReviewFixture.toString()}\nwindow.discountFixture=buildDiscountReviewFixture(document,${JSON.stringify(id)},${JSON.stringify({ ...live, ambiguous: id !== ids[1] && live.ambiguous })});</script>`
     await route.fulfill({
       contentType: 'text/html; charset=utf-8',
       body: `<!doctype html><html lang="en"><title>Synthetic discount import</title><body>${body}</body></html>`,
@@ -32,6 +35,103 @@ async function pages(extension, options = {}) {
   await library.goto(`${extension.extensionBaseUrl}/library.html`)
   return { library, visits, live }
 }
+
+test('six-product PLUS and seller reductions pass packaged Save order, bulk import, refresh and restore without review', async ({
+  extension,
+}) => {
+  const { library } = await pages(extension, {
+    pattern: sixRowDiscountPattern,
+    signedAdjustment: true,
+    amounts: {
+      adjustment: '66.30',
+      shop: '0.00',
+      shipping: '600.00',
+      redPacket: '0.00',
+    },
+  })
+  const order = await extension.context.newPage()
+  await order.goto(detail(ids[0]))
+  await order.getByRole('button', { name: 'Save order', exact: true }).click()
+  await expect(order.locator('aside[aria-label="1688toPL"]')).toContainText(
+    '6 products saved'
+  )
+  await expect(
+    order.getByRole('dialog', { name: 'Review discounts', exact: true })
+  ).toHaveCount(0)
+  await order.getByRole('button', { name: 'Save order', exact: true }).click()
+  const list = await extension.context.newPage()
+  await list.goto(
+    `${origin}/app/ctf-page/trade-order-list/buyer-order-list.html`
+  )
+  await list
+    .getByRole('button', { name: 'Import selected', exact: true })
+    .click()
+  await list
+    .getByRole('button', { name: 'Import 2 selected orders', exact: true })
+    .click()
+  await library.getByRole('button', { name: /^Activity/ }).click()
+  await expect(library.locator('#jobs')).toContainText('Collection completed', {
+    timeout: 15000,
+  })
+  await expect(library.locator('#order-count')).toHaveText('2')
+  const before = await libraryBackup(extension)
+  for (const record of before.orders) {
+    expect(record.snapshot.items).toHaveLength(6)
+    expect(record.snapshot.totals).toMatchObject({
+      goodsGross: '10654.00',
+      sourceDiscount: '532.70',
+      orderAdjustment: '66.30',
+      orderLevelAdjustment: '66.30',
+      goodsNet: '10055.00',
+      shipping: '600.00',
+      payable: '10655.00',
+    })
+    expect(
+      record.snapshot.items.every(
+        (item) =>
+          item.allocatedDiscount === '0.00' &&
+          item.discount === item.sourceDiscount
+      )
+    ).toBe(true)
+    expect(record.snapshot.reconciliationReview.mode).toBe('automatic')
+  }
+  await expect(
+    library.locator('[data-action="review-order-discounts"]')
+  ).toHaveCount(0)
+  const refresh = await extension.inspector.evaluate(
+    (orderIds) =>
+      chrome.runtime.sendMessage({ type: 'REFRESH_ORDERS', orderIds }),
+    ids
+  )
+  expect(refresh.ok, refresh.error).toBe(true)
+  await expect
+    .poll(
+      async () => {
+        const result = await extension.inspector.evaluate(() =>
+          chrome.runtime.sendMessage({ type: 'JOBS_QUERY' })
+        )
+        return result.data.jobs.every((job) => job.state === 'completed')
+      },
+      { timeout: 15000 }
+    )
+    .toBe(true)
+  const after = await libraryBackup(extension)
+  expect(after.orders.map((record) => record.revision)).toEqual(
+    before.orders.map((record) => record.revision)
+  )
+  expect(
+    after.orders.map((record) => record.snapshot.reconciliationReview)
+  ).toEqual(before.orders.map((record) => record.snapshot.reconciliationReview))
+  const restored = await extension.inspector.evaluate(
+    (backup) => chrome.runtime.sendMessage({ type: 'BACKUP_RESTORE', backup }),
+    after
+  )
+  expect(restored.ok, restored.error).toBe(true)
+  const roundTrip = await libraryBackup(extension)
+  expect(roundTrip.orders.map((record) => record.snapshot.totals)).toEqual(
+    after.orders.map((record) => record.snapshot.totals)
+  )
+})
 
 for (const [language, label] of [
   ['en', 'Seller reduction (order level)'],

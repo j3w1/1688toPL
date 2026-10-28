@@ -222,6 +222,7 @@ export function createPreparation(
           planProductFamilies(snapshot, {
             choices: familyChoices,
             preparation,
+            sizeVocabulary,
           })),
     familyByEntry = new Map(
       (families?.families ?? []).flatMap((family) =>
@@ -316,7 +317,9 @@ export function createPreparation(
       ? [['variant', declaration.variantSuffix]]
       : reviewedIdentity &&
           !reviewedIdentity.suggested &&
-          ['reviewed', 'historical', 'existing'].includes(family.provenance)
+          ['title', 'reviewed', 'historical', 'existing'].includes(
+            family.provenance
+          )
         ? [
             ['style', reviewedIdentity.style],
             ...(reviewedIdentity.variantSuffix !== undefined
@@ -333,7 +336,9 @@ export function createPreparation(
     const effectiveSize =
         reviewedIdentity &&
         !reviewedIdentity.suggested &&
-        ['reviewed', 'historical', 'existing'].includes(family.provenance)
+        ['title', 'reviewed', 'historical', 'existing'].includes(
+          family.provenance
+        )
           ? reviewedIdentity.size
           : size,
       sizeInfo = sizeClassifier.extract({

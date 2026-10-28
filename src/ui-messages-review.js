@@ -1,4 +1,42 @@
 export const REVIEW_MESSAGES = {
+  'The source product title is missing. Refresh the order before preparing products.':
+    {
+      zh: '缺少原始商品标题。请刷新订单后再准备商品。',
+      es: 'Falta el título original del producto. Actualiza el pedido antes de preparar los productos.',
+    },
+  'Grouped by source title': {
+    zh: '按原始商品标题自动分组',
+    es: 'Agrupados por el título original',
+  },
+  'These size options cannot be mapped reliably. Variant letters distinguish the products; their original measurements are preserved.':
+    {
+      zh: '这些尺寸选项无法可靠地对应尺码尾码。将使用款式字母区分商品，并保留原始尺寸。',
+      es: 'Estas medidas no se pueden asignar a tallas con certeza. Las letras de variante distinguen los productos y se conservan sus medidas originales.',
+    },
+  'Preparation is unavailable. Resolve the issue below.': {
+    zh: '暂时无法准备商品。请解决下方问题。',
+    es: 'La preparación no está disponible. Resuelve el problema indicado abajo.',
+  },
+  'Unselected products: {count} · Context only': {
+    zh: '未选商品：{count} · 仅供参考',
+    es: 'Productos sin seleccionar: {count} · Solo como referencia',
+  },
+  'Previous context products': {
+    zh: '上一页参考商品',
+    es: 'Productos de referencia anteriores',
+  },
+  'Next context products': {
+    zh: '下一页参考商品',
+    es: 'Siguientes productos de referencia',
+  },
+  'Style: {style}': {
+    zh: '款式：{style}',
+    es: 'Variante: {style}',
+  },
+  'Source size: {size}': {
+    zh: '原始尺寸：{size}',
+    es: 'Medida original: {size}',
+  },
   'Previous product families disagree. Review the family membership and endings.':
     {
       zh: '以往商品分组存在冲突。请检查组内商品及后缀。',
@@ -26,8 +64,6 @@ export const REVIEW_MESSAGES = {
     zh: '编码方式：{mode}',
     es: 'Modo de codificación: {mode}',
   },
-  'Family identifier': { zh: '商品组标识', es: 'Identificador de familia' },
-  'Style identity': { zh: '款式标识', es: 'Identidad de variante' },
   'Not selected — context only': {
     zh: '未选择，仅供参考',
     es: 'Sin seleccionar; solo como referencia',
@@ -54,14 +90,6 @@ export const REVIEW_MESSAGES = {
   'Source rows sharing one barcode identity need the same endings.': {
     zh: '共用一个条码标识的原始行必须使用相同后缀。',
     es: 'Las filas que comparten un código deben tener las mismas terminaciones.',
-  },
-  'Enter a family identifier for every product.': {
-    zh: '请为每个商品填写商品组标识。',
-    es: 'Escribe un identificador de familia para cada producto.',
-  },
-  'Products in one family need the same coding mode.': {
-    zh: '同一商品组必须使用相同的编码方式。',
-    es: 'Los productos de una familia deben usar el mismo modo de codificación.',
   },
   "Edit either product's codes. Apply saves both corrections together.": {
     zh: '可修改任一商品的货号。点击应用后将一并保存双方的修正。',

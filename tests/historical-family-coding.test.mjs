@@ -1,7 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createPreparation, allocatePreparation } from '../src/packing-model.js'
-import { planProductFamilies } from '../src/product-families.js'
+import {
+  planProductFamilies,
+  productFamilySourceKey,
+} from '../src/product-families.js'
 import { planPurchaseCodeReview } from '../src/purchase-codes.js'
 
 function source(orderId, colors = ['red', 'blue']) {
@@ -51,88 +54,74 @@ function review(state, orderId, entryId) {
   )
 }
 
-test('historical reviewed endings use their retained observation and skip unverifiable refreshed source', () => {
+test('new title families do not inherit prior custom endings or depend on retained historical titles', () => {
   const original = source('101'),
     prior = prepared(original),
     refreshed = source('101', ['green', 'yellow']),
-    current = source('201'),
-    input = { records: [{ snapshot: refreshed }], preparations: [prior] }
-  const missing = planProductFamilies(current, input)
-  assert.ok(
-    missing.families.every((family) => family.provenance !== 'historical')
-  )
-  const retained = planProductFamilies(current, {
-    ...input,
-    history: [{ snapshot: original }],
-  })
-  assert.deepEqual(retained.issues, [])
-  assert.equal(retained.families[0].provenance, 'historical')
-  assert.deepEqual(
-    retained.families[0].identities.map((identity) => identity.variantSuffix),
-    ['A', 'B']
-  )
-  const changed = planProductFamilies(source('202', ['green', 'yellow']), {
-    ...input,
-    history: [{ snapshot: original }],
-  })
-  assert.ok(
-    changed.families[0].identities.every(
-      (identity) => identity.variantSuffix === undefined
+    current = source('201')
+  prior.groups[0].variants[0].variantSuffix = 'X'
+  prior.groups[0].variants[1].variantSuffix = 'Y'
+  const before = structuredClone(prior)
+  const input = { records: [{ snapshot: refreshed }], preparations: [prior] }
+  for (const state of [
+    input,
+    { ...input, history: [{ snapshot: original }] },
+  ]) {
+    const plan = planProductFamilies(current, state)
+    assert.deepEqual(plan.issues, [])
+    assert.equal(plan.families.length, 1)
+    assert.equal(plan.families[0].provenance, 'title')
+    assert.deepEqual(
+      plan.families[0].identities.map(({ variantSuffix }) => variantSuffix),
+      ['A', 'B']
     )
-  )
+  }
+  assert.deepEqual(prior, before)
 })
 
-test('description-derived history matches complete attributes and older portable keys cannot authorize reuse', () => {
+test('description-only observations recover the title line and interpret their own attributes', () => {
   const descriptionSource = (orderId, colors) => {
     const snapshot = source(orderId, colors)
     for (const item of snapshot.items) {
       item.description = `${item.title}\n颜色:${item.skuProperties[0].value}`
+      delete item.title
       delete item.skuProperties
     }
     return snapshot
   }
   const original = descriptionSource('101', ['red', 'blue']),
     prior = prepared(original),
-    current = descriptionSource('201', ['red', 'blue']),
-    state = { records: [original], preparations: [prior] },
-    matched = planProductFamilies(current, state)
-  assert.deepEqual(matched.issues, [])
-  assert.deepEqual(
-    matched.families[0].identities.map((identity) => identity.variantSuffix),
-    ['A', 'B']
-  )
-  const changed = planProductFamilies(
-    descriptionSource('202', ['green', 'yellow']),
-    state
-  )
-  assert.ok(
-    changed.families[0].identities.every(
-      (identity) => identity.variantSuffix === undefined
-    )
-  )
-  assert.deepEqual(
-    changed.families[0].identities.map((identity) => identity.style),
-    ['green', 'yellow']
-  )
-  const legacy = structuredClone(prior),
-    key = JSON.parse(legacy.productFamilies.sourceKey)
-  key[3].forEach((row) => {
-    row[3] = []
-  })
-  legacy.productFamilies.sourceKey = JSON.stringify(key)
-  assert.ok(
-    planProductFamilies(current, {
+    current = descriptionSource('201', ['green', 'yellow']),
+    plan = planProductFamilies(current, {
       records: [original],
       history: [original],
-      preparations: [legacy],
-    }).families.every((family) => family.provenance !== 'historical')
+      preparations: [prior],
+    })
+  assert.deepEqual(plan.issues, [])
+  assert.equal(plan.families.length, 1)
+  assert.deepEqual(
+    plan.families[0].identities.map(({ style, variantSuffix }) => ({
+      style,
+      variantSuffix,
+    })),
+    [
+      { style: 'green', variantSuffix: 'A' },
+      { style: 'yellow', variantSuffix: 'B' },
+    ]
+  )
+  const changed = structuredClone(current)
+  changed.items[0].description += '\n款式: striped'
+  assert.notEqual(
+    productFamilySourceKey(changed),
+    productFamilySourceKey(current)
   )
 })
 
-test('historical reviewed identity equivalence retains a shared barcode and a fresh purchase base', () => {
+test('a prior shared identity cannot merge different titles in a new purchase or reuse its CE base', () => {
   const original = source('101'),
-    current = source('201'),
-    identical = {
+    current = source('201')
+  const prior = prepared(original, [
+    {
       ...choice,
       mode: 'none',
       identities: choice.identities.map((identity) => ({
@@ -140,76 +129,67 @@ test('historical reviewed identity equivalence retains a shared barcode and a fr
         style: 'same product',
       })),
     },
-    prior = prepared(original, [identical]),
-    result = review(
-      {
-        records: [original, current].map((snapshot) => ({ snapshot })),
-        preparations: [prior],
-      },
-      '201'
-    )
+  ])
+  current.items[1].title = 'Different synthetic listing'
+  const before = structuredClone(prior)
+  const result = review(
+    {
+      records: [original, current].map((snapshot) => ({ snapshot })),
+      preparations: [prior],
+    },
+    '201'
+  )
   assert.deepEqual(result.issues, [])
-  const group = result.plan.preparations[0].groups[0]
-  assert.deepEqual(
-    group.variants.map((variant) => variant.entryIds),
-    [['1', '2']]
-  )
-  assert.notEqual(group.baseCode, prior.groups[0].baseCode)
-  assert.equal(
-    group.variants[0].variantSuffix + group.variants[0].sizeSuffix,
-    ''
-  )
+  const groups = result.plan.preparations[0].groups
+  assert.equal(groups.length, 2)
+  assert.equal(new Set(groups.map(({ baseCode }) => baseCode)).size, 2)
+  for (const group of groups) {
+    assert.notEqual(group.baseCode, prior.groups[0].baseCode)
+    assert.equal(group.variants.length, 1)
+    assert.equal(
+      group.variants[0].variantSuffix + group.variants[0].sizeSuffix,
+      ''
+    )
+  }
+  assert.deepEqual(prior, before)
 })
 
-test('consistent complete and selected-only historical assignments share family context', () => {
-  const original = source('101'),
-    second = source('102'),
-    current = source('201'),
-    prior = prepared(original),
-    records = [original, second, current].map((snapshot) => ({ snapshot })),
-    selected = review({ records, preparations: [prior] }, '102', '1')
-  assert.deepEqual(selected.issues, [])
-  const partial = selected.plan.preparations[0]
-  assert.deepEqual(
-    partial.groups[0].variants.flatMap((variant) => variant.entryIds),
-    ['1']
-  )
+test('selected-only preparation retains title context and later siblings reuse the same saved base', () => {
+  const current = source('201'),
+    records = [{ snapshot: current }]
+  const first = review({ records }, '201', '2')
+  assert.deepEqual(first.issues, [])
+  const partial = first.plan.preparations[0],
+    assigned = partial.groups[0].variants[0]
+  assert.deepEqual(assigned.entryIds, ['2'])
+  assert.equal(assigned.variantSuffix, 'B')
   assert.deepEqual(partial.productFamilies.families[0].entryIds, ['1', '2'])
-  const combined = review({ records, preparations: [prior, partial] }, '201')
-  assert.deepEqual(combined.issues, [])
-  assert.equal(combined.plan.preparations[0].groups.length, 1)
-  assert.deepEqual(
-    combined.plan.preparations[0].groups[0].variants.map(
-      (variant) => variant.variantSuffix
-    ),
-    ['A', 'B']
+  const before = structuredClone(partial)
+  const second = review({ records, preparations: [partial] }, '201', '1')
+  assert.deepEqual(second.issues, [])
+  const combined = second.plan.preparations[0]
+  assert.equal(combined.groups.length, 1)
+  assert.equal(combined.groups[0].id, partial.groups[0].id)
+  assert.equal(combined.groups[0].baseCode, partial.groups[0].baseCode)
+  const byEntry = new Map(
+    combined.groups[0].variants.flatMap((variant) =>
+      variant.entryIds.map((id) => [id, variant])
+    )
   )
+  assert.equal(byEntry.get('1').variantSuffix, 'A')
+  assert.deepEqual(byEntry.get('2'), assigned)
+  assert.deepEqual(partial, before)
 })
 
-test('consistent partial legacy references merge but conflicting endings and group separation still require review', () => {
+test('conflicting other-purchase conventions do not block current title families', () => {
   const original = source('101'),
-    second = source('102'),
     current = source('201'),
-    prior = prepared(original, []),
-    partial = structuredClone(prior),
-    records = [original, second]
-  partial.orderId = '102'
-  partial.groups[0].variants = partial.groups[0].variants.slice(0, 1)
-  assert.deepEqual(
-    planProductFamilies(current, { records, preparations: [prior, partial] })
-      .issues,
-    []
-  )
-  const conflicting = structuredClone(partial)
+    prior = prepared(original)
+  const conflicting = structuredClone(prior)
+  conflicting.orderId = '102'
   conflicting.groups[0].variants[0].variantSuffix = 'Z'
-  assert.ok(
-    planProductFamilies(current, {
-      records,
-      preparations: [prior, conflicting],
-    }).issues.some((issue) => /disagree/.test(issue.message))
-  )
   const separated = structuredClone(prior)
-  separated.orderId = '102'
+  separated.orderId = '103'
   separated.groups = separated.groups.flatMap((group) =>
     group.variants.map((variant) => ({
       ...group,
@@ -217,17 +197,62 @@ test('consistent partial legacy references merge but conflicting endings and gro
       variants: [variant],
     }))
   )
-  assert.ok(
-    planProductFamilies(current, {
-      records,
-      preparations: [prior, separated],
-    }).issues.some((issue) => /disagree/.test(issue.message))
+  const state = {
+    records: [original, source('102'), source('103')],
+    preparations: [prior, conflicting, separated],
+  }
+  const before = structuredClone(state)
+  const plan = planProductFamilies(current, state)
+  assert.deepEqual(plan.issues, [])
+  assert.deepEqual(
+    plan.families.map(({ entryIds }) => entryIds),
+    [['1', '2']]
+  )
+  assert.deepEqual(
+    plan.families[0].identities.map(({ variantSuffix }) => variantSuffix),
+    ['A', 'B']
+  )
+  assert.deepEqual(state, before)
+})
+
+test('account and purchase scope family evidence; supplier changes do not borrow a saved base', () => {
+  const original = source('101'),
+    prior = prepared(original),
+    current = source('201')
+  const foreign = { ...source('101'), accountId: 'foreign' }
+  assert.notEqual(
+    productFamilySourceKey(foreign),
+    productFamilySourceKey(original)
+  )
+  assert.notEqual(
+    productFamilySourceKey(current),
+    productFamilySourceKey(original)
+  )
+  const foreignPreparation = { ...structuredClone(prior), accountId: 'foreign' }
+  const plan = planProductFamilies(current, {
+    records: [foreign],
+    preparations: [foreignPreparation],
+  })
+  assert.deepEqual(plan.issues, [])
+  assert.equal(plan.families[0].provenance, 'title')
+  current.sellerName = 'Other synthetic supplier'
+  current.sellerMemberLogin = 'other-synthetic-supplier'
+  const result = review(
+    {
+      records: [original, current].map((snapshot) => ({ snapshot })),
+      preparations: [prior],
+    },
+    '201'
+  )
+  assert.deepEqual(result.issues, [])
+  assert.notEqual(
+    result.plan.preparations[0].groups[0].baseCode,
+    prior.groups[0].baseCode
   )
 })
 
-test('historical saved variants preserve reviewed physical sizes instead of replacing them with endings', () => {
+test('current saved membership and custom endings remain authoritative after source titles diverge', () => {
   const original = source('101', ['55cm', '65cm']),
-    current = source('201', ['55cm', '65cm']),
     prior = prepared(original, [
       {
         ...choice,
@@ -237,17 +262,26 @@ test('historical saved variants preserve reviewed physical sizes instead of repl
           { entryId: '2', style: '', size: '65cm' },
         ],
       },
-    ]),
-    result = review(
-      {
-        records: [original, current].map((snapshot) => ({ snapshot })),
-        preparations: [prior],
-      },
-      '201',
-      '2'
-    )
-  assert.deepEqual(result.issues, [])
-  const variant = result.plan.preparations[0].groups[0].variants[0]
-  assert.equal(variant.size, '65cm')
-  assert.equal(variant.sizeSuffix, 'L')
+    ])
+  prior.groups[0].variants[0].sizeSuffix = 'M'
+  prior.groups[0].variants[1].sizeSuffix = 'XL'
+  const refreshed = structuredClone(original)
+  refreshed.items[1].title = 'Changed synthetic listing title'
+  const before = structuredClone(prior)
+  const plan = planProductFamilies(refreshed, { preparation: prior })
+  assert.deepEqual(plan.issues, [])
+  assert.equal(plan.families.length, 1)
+  assert.equal(plan.families[0].provenance, 'existing')
+  assert.deepEqual(plan.families[0].entryIds, ['1', '2'])
+  assert.deepEqual(
+    plan.families[0].identities.map(({ size, sizeSuffix }) => ({
+      size,
+      sizeSuffix,
+    })),
+    [
+      { size: '55cm', sizeSuffix: 'M' },
+      { size: '65cm', sizeSuffix: 'XL' },
+    ]
+  )
+  assert.deepEqual(prior, before)
 })

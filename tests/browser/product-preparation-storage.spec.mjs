@@ -1,7 +1,7 @@
 import { test, expect } from './extension-fixture.mjs'
 import { createDemoRecords } from '../../preview/library-fixture.js'
 
-test('reviewed family context and details survive atomic assignment, history, reopening and full/scoped restore', async ({
+test('automatic title-family context and details survive atomic assignment, history, reopening and full/scoped restore', async ({
   extension,
 }) => {
   const [record] = await extension.inspector.evaluate(
@@ -36,11 +36,8 @@ test('reviewed family context and details survive atomic assignment, history, re
     let repository = await openDatabase({ name })
     try {
       await repository.saveSnapshot(record.snapshot)
-      const blocked = await repository.reviewPurchaseCodes(selection)
-      const review = await repository.reviewPurchaseCodes({
-        ...selection,
-        familyChoices: [{ ...ref, entryIds: ids, kind: 'family' }],
-      })
+      const review = await repository.reviewPurchaseCodes(selection)
+      const automaticIssues = review.issues.map((issue) => issue.code)
       review.plan.preparations[0] = applyProductDetails(
         review.plan.preparations[0],
         {
@@ -144,7 +141,7 @@ test('reviewed family context and details survive atomic assignment, history, re
           staleRejected = true
         }
         return {
-          blocked: blocked.issues.map((issue) => issue.code),
+          automaticIssues,
           rejected,
           aborted,
           rollback: [
@@ -179,7 +176,7 @@ test('reviewed family context and details survive atomic assignment, history, re
       repository.close()
     }
   }, record)
-  expect(result.blocked).toContain('PRODUCT_FAMILY_REVIEW_REQUIRED')
+  expect(result.automaticIssues).toEqual([])
   expect(result.aborted && result.rejected && result.rollback).toBe(true)
   expect(result.assigned.groups).toHaveLength(1)
   expect(result.assigned.groups[0].spanishName).toBe('FIGURA SINTÉTICA')

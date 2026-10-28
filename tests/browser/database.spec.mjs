@@ -2757,24 +2757,40 @@ test('restore rolls back authoring whose members disappear in tied source or his
         })
       const backup = await incoming.exportBackup()
       incoming.close()
-      let error
-      try {
-        await library.restoreBackup(backup)
-      } catch (failure) {
-        error = failure.message
+      // Cover both automatic family evidence and historical preparations that
+      // predate it. Either guard must roll back the entire tied-source restore.
+      const legacy = structuredClone(backup)
+      for (const preparation of legacy.preparations)
+        delete preparation.productFamilies
+      for (const [evidence, candidate] of [
+        ['automatic', backup],
+        ['legacy', legacy],
+      ]) {
+        let error
+        try {
+          await library.restoreBackup(candidate)
+        } catch (failure) {
+          error = failure.message
+        }
+        const after = await library.exportBackup()
+        output.push({
+          kind,
+          evidence,
+          error,
+          before: { ...before, exportedAt: '' },
+          after: { ...after, exportedAt: '' },
+        })
       }
-      const after = await library.exportBackup()
-      output.push({
-        kind,
-        error,
-        before: { ...before, exportedAt: '' },
-        after: { ...after, exportedAt: '' },
-      })
     }
     return output
   }, codeSnapshot('2026-06'))
   for (const result of results) {
-    expect(result.error).toContain('entry missing from its order and history')
+    if (result.evidence === 'automatic')
+      expect(result.error).toBe(
+        'Reviewed product families contain an unknown source entry.'
+      )
+    else
+      expect(result.error).toContain('entry missing from its order and history')
     expect(result.after).toEqual(result.before)
   }
 })

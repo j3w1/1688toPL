@@ -891,12 +891,18 @@ test('new memberships save without creating retired recovery checkpoints', async
   const page = await openTestDatabase(extension)
   const result = await page.evaluate(async (source) => {
     await saveSyntheticSource(source)
-    const first = await library.savePreparation(
-      packingModel.createPreparation(
-        { ...source, items: [source.items[0]] },
-        '2026-10'
-      )
-    )
+    // Plan from the complete source, then select the assigned memberships.
+    // The retained family evidence still includes the unselected sibling.
+    const initial = packingModel.createPreparation(source, '2026-10')
+    initial.groups = initial.groups
+      .map((group) => ({
+        ...group,
+        variants: group.variants.filter((variant) =>
+          variant.entryIds.includes('1')
+        ),
+      }))
+      .filter((group) => group.variants.length)
+    const [first] = await library.savePreparations([initial])
     const manual = structuredClone(first)
     manual.groups[0].baseCode = 'CE26100102'
     const edited = await library.savePreparation(manual)
@@ -905,7 +911,7 @@ test('new memberships save without creating retired recovery checkpoints', async
       id: crypto.randomUUID(),
       entryIds: ['2'],
       variant: 'blue',
-      variantSuffix: 'A',
+      variantSuffix: 'B',
     })
     const extended = await library.savePreparation(edited)
     const plan = packingModel.planSelectedPreparations(

@@ -1545,7 +1545,8 @@ export function planPurchaseCodeReview(
         familyReview.push({ ...familyPlan, issues: familyIssues })
         for (const issue of familyIssues)
           problem(issue.code, issue.message, issue)
-        if (familyPlan.evidence) draft.productFamilies = familyPlan.evidence
+        if (familyPlan.evidence && missing.length)
+          draft.productFamilies = familyPlan.evidence
       }
       sourceGroupPositions.set(
         order,

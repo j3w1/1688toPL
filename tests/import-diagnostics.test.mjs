@@ -5,7 +5,71 @@ import { buildOrderFixture } from './fixtures/order-fixture.mjs'
 import {
   collectFinancialDiagnostics,
   financialDiagnostics,
+  snapshotFinancialDiagnostics,
 } from '../src/import-diagnostics.js'
+
+test('save diagnostics allow only numeric snapshot totals and stable financial failures', () => {
+  const snapshot = {
+    sellerName: 'private supplier',
+    description: 'private product',
+    items: Array.from({ length: 40 }, () => ({
+      price: '1.25',
+      quantity: '2',
+      sourceDiscount: '0.10',
+      thumbnail: 'private image',
+    })),
+    totals: {
+      goodsGross: '100.00',
+      sourceDiscount: '4.00',
+      payable: '96.00',
+      orderLevelAdjustment: '0.00',
+      unknown: 'private text',
+    },
+  }
+  const safe = snapshotFinancialDiagnostics(snapshot, {
+    stage: 'validation',
+    failure: {
+      code: 'ORDER_AMOUNT_MISMATCH',
+      field: 'payable',
+      comparison: 'equal',
+      expected: '96',
+      actual: '96.01',
+      html: 'private page',
+    },
+  })
+  assert.equal(safe.products.count, 40)
+  assert.equal(safe.products.gross, '100.00')
+  assert.equal(safe.products.discount, '4.00')
+  assert.equal(safe.products.sample.length, 25)
+  assert.equal(safe.products.omittedRows, 15)
+  assert.deepEqual(safe.snapshotTotals, {
+    goodsGross: '100.00',
+    sourceDiscount: '4.00',
+    payable: '96.00',
+    orderLevelAdjustment: '0.00',
+  })
+  assert.deepEqual(safe.failure, {
+    code: 'ORDER_AMOUNT_MISMATCH',
+    field: 'payable',
+    comparison: 'equal',
+    expected: '96.00',
+    actual: '96.01',
+  })
+  assert.doesNotMatch(
+    JSON.stringify(safe),
+    /private|thumbnail|unknown|sellerName|description|html/
+  )
+  assert.deepEqual(financialDiagnostics(safe), safe)
+  const hostile = financialDiagnostics({
+    version: 1,
+    stage: 'private page',
+    snapshotTotals: { payable: 'private page' },
+    failure: { ...safe.failure, field: 'private page' },
+  })
+  assert.equal(hostile.stage, undefined)
+  assert.equal(hostile.failure, undefined)
+  assert.equal(hostile.snapshotTotals, undefined)
+})
 
 test('failed-read evidence captures financial breakdown and aggregates, excluding unrelated page contents', () => {
   const { document } = parseHTML(
@@ -29,6 +93,7 @@ test('failed-read evidence captures financial breakdown and aggregates, excludin
     'https://air.1688.com/app/ctf-page/trade-order-detail/index.html?orderId=10001',
     'synthetic-version'
   )
+  assert.equal(result.stage, 'reading')
   assert.equal(result.totalSections, 1)
   assert.deepEqual(result.fields, [
     { label: '红包', value: '减 ¥1.25' },

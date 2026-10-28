@@ -818,7 +818,16 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       )
         void pump()
     } catch (error) {
-      respond({ ok: false, error: error.message })
+      respond({
+        ok: false,
+        error: error.message,
+        ...(error.code === 'ORDER_AMOUNT_MISMATCH'
+          ? {
+              code: error.code,
+              diagnostics: financialDiagnostics(error.diagnostics),
+            }
+          : {}),
+      })
     }
   })()
   return true

@@ -12,6 +12,7 @@ import { planStoreOrderUpdate } from './store-order-update.js'
 import { parseStoreFilename } from './store-workbook-model.js'
 import { planOrderRemoval } from './order-removal.js'
 import { validateReconciliationReview } from './order-reconciliation.js'
+import { snapshotFinancialDiagnostics } from './import-diagnostics.js'
 import { createLibraryChanges } from './library-changes.js'
 import { createMaterialSuggester } from './material-vocabulary.js'
 import {
@@ -226,23 +227,49 @@ function detailUrl(value, orderId) {
 }
 
 function validateAmounts(items, totals) {
+  function check(actual, expected, field, comparison = 'equal', row) {
+    const valid =
+      comparison === 'at-least'
+        ? actual >= expected
+        : comparison === 'at-most'
+          ? actual <= expected
+          : actual === expected
+    if (valid) return
+    const failure = {
+      code: 'ORDER_AMOUNT_MISMATCH',
+      field,
+      comparison,
+      expected: centsToMoney(expected),
+      actual: centsToMoney(actual),
+      ...(row ? { row } : {}),
+    }
+    throw Object.assign(
+      new Error(
+        row
+          ? 'Product discounts do not reconcile with their row values'
+          : 'Product amounts do not reconcile with the order totals'
+      ),
+      {
+        code: failure.code,
+        diagnostics: snapshotFinancialDiagnostics(
+          { items, totals },
+          { stage: 'validation', failure }
+        ),
+      }
+    )
+  }
   let goodsGross = 0n
   let sourceDiscount = 0n
   let orderAdjustment = 0n
-  for (const item of items) {
+  for (const [index, item] of items.entries()) {
     const gross = lineGrossCents(item.price, item.quantity)
     const source = moneyToCents(item.sourceDiscount)
     const allocated = moneyToCents(item.allocatedDiscount)
     const discount = moneyToCents(item.discount)
-    if (
-      source < 0n ||
-      source > gross ||
-      discount !== source + allocated ||
-      discount > gross
-    )
-      throw new Error(
-        'Product discounts do not reconcile with their row values'
-      )
+    check(source, 0n, 'sourceDiscount', 'at-least', index + 1)
+    check(source, gross, 'sourceDiscount', 'at-most', index + 1)
+    check(discount, source + allocated, 'discount', 'equal', index + 1)
+    check(discount, gross, 'discount', 'at-most', index + 1)
     goodsGross += gross
     sourceDiscount += source
     orderAdjustment += allocated
@@ -263,35 +290,58 @@ function validateAmounts(items, totals) {
   const customizationService = amounts.customizationService ?? 0n
   const grossIncludedCustomization = amounts.grossIncludedCustomization ?? 0n
   const redPacketDiscount = amounts.redPacketDiscount ?? 0n
-  if (
-    goodsGross + priceIncludedDiscount + grossIncludedCustomization !==
-      amounts.goodsGross ||
-    sourceDiscount !== amounts.sourceDiscount ||
-    orderAdjustment + rowIncludedAdjustment + orderLevelAdjustment !==
-      amounts.orderAdjustment ||
-    priceIncludedDiscount < 0n ||
-    rowIncludedAdjustment < 0n ||
-    rowIncludedAdjustment > sourceDiscount ||
-    orderLevelAdjustment < 0n ||
-    (orderLevelAdjustment !== 0n &&
-      orderLevelAdjustment !== amounts.orderAdjustment) ||
-    (orderLevelAdjustment !== 0n && rowIncludedAdjustment !== 0n) ||
-    (rowIncludedAdjustment !== 0n &&
-      rowIncludedAdjustment !== amounts.orderAdjustment) ||
-    goodsNet !== amounts.goodsNet ||
-    goodsNet < 0n ||
-    orderDiscount < 0n ||
-    amounts.shipping < 0n ||
-    customizationService < 0n ||
-    grossIncludedCustomization < 0n ||
-    (grossIncludedCustomization !== 0n &&
-      grossIncludedCustomization !== customizationService) ||
-    redPacketDiscount < 0n ||
-    amounts.payable < 0n ||
-    goodsNet + amounts.shipping + customizationService - redPacketDiscount !==
-      amounts.payable
+  check(
+    goodsGross + priceIncludedDiscount + grossIncludedCustomization,
+    amounts.goodsGross,
+    'goodsGross'
   )
-    throw new Error('Product amounts do not reconcile with the order totals')
+  check(sourceDiscount, amounts.sourceDiscount, 'sourceDiscount')
+  check(
+    orderAdjustment + rowIncludedAdjustment + orderLevelAdjustment,
+    amounts.orderAdjustment,
+    'orderAdjustment'
+  )
+  check(priceIncludedDiscount, 0n, 'priceIncludedDiscount', 'at-least')
+  check(rowIncludedAdjustment, 0n, 'rowIncludedAdjustment', 'at-least')
+  check(
+    rowIncludedAdjustment,
+    sourceDiscount,
+    'rowIncludedAdjustment',
+    'at-most'
+  )
+  check(orderLevelAdjustment, 0n, 'orderLevelAdjustment', 'at-least')
+  if (orderLevelAdjustment !== 0n) {
+    check(orderLevelAdjustment, amounts.orderAdjustment, 'orderLevelAdjustment')
+    check(rowIncludedAdjustment, 0n, 'rowIncludedAdjustment')
+  }
+  if (rowIncludedAdjustment !== 0n)
+    check(
+      rowIncludedAdjustment,
+      amounts.orderAdjustment,
+      'rowIncludedAdjustment'
+    )
+  check(goodsNet, amounts.goodsNet, 'goodsNet')
+  for (const [field, value] of Object.entries({
+    goodsNet,
+    orderDiscount,
+    shipping: amounts.shipping,
+    customizationService,
+    grossIncludedCustomization,
+    redPacketDiscount,
+    payable: amounts.payable,
+  }))
+    check(value, 0n, field, 'at-least')
+  if (grossIncludedCustomization !== 0n)
+    check(
+      grossIncludedCustomization,
+      customizationService,
+      'grossIncludedCustomization'
+    )
+  check(
+    goodsNet + amounts.shipping + customizationService - redPacketDiscount,
+    amounts.payable,
+    'payable'
+  )
 }
 
 function validateSnapshot(input) {
@@ -4479,7 +4529,7 @@ import {
   renameTagData,
 } from './order-tags.js'
 import { upgradeWorkspaceColors } from './appearance.js'
-import { lineGrossCents, moneyToCents } from './money.js'
+import { centsToMoney, lineGrossCents, moneyToCents } from './money.js'
 import { purchaseTimestamp } from './order-date.js'
 import { normalizeUnitsPerCarton } from './carton-packing.js'
 import {

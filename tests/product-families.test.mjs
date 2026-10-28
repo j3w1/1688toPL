@@ -29,24 +29,25 @@ const choice = (entryIds, kind = 'family') => ({
   kind,
 })
 
-test('a single horse article stays independent from a reliable sibling elephant family despite one generic title', () => {
+test('source title groups the horse and elephant articles into one new family', () => {
   const source = snapshot(),
     before = structuredClone(source),
     plan = planProductFamilies(source)
   assert.deepEqual(plan.issues, [])
   assert.deepEqual(
     plan.families.map(({ entryIds, kind }) => ({ entryIds, kind })),
-    [
-      { entryIds: ['1'], kind: 'standalone' },
-      { entryIds: ['2', '3'], kind: 'family' },
-    ]
+    [{ entryIds: ['1', '2', '3'], kind: 'family' }]
   )
-  assert.equal(plan.families[1].articleFamily, '7128K')
-  assert.equal(plan.evidence, null)
+  assert.equal(plan.families[0].provenance, 'title')
+  assert.deepEqual(
+    plan.families[0].identities.map((i) => i.variantSuffix),
+    ['A', 'B', 'C']
+  )
+  assert.equal(plan.evidence.version, 2)
   assert.deepEqual(source, before)
 })
 
-test('arbitrary numeric IDs and unproven suffix stripping do not establish families', () => {
+test('numeric and unrelated model articles are options within a title, not family keys', () => {
   for (const articles of [
     ['100-01', '100-02'],
     ['SKU-01', 'SKU-02'],
@@ -55,11 +56,10 @@ test('arbitrary numeric IDs and unproven suffix stripping do not establish famil
   ]) {
     const plan = planProductFamilies(snapshot(articles))
     assert.deepEqual(
-      plan.families.map((family) => family.entryIds),
-      [['1'], ['2']]
+      plan.families.map((f) => f.entryIds),
+      [['1', '2']]
     )
-    if (articles[0] === '7128F-02') assert.deepEqual(plan.issues, [])
-    else assert.equal(plan.issues[0].code, 'PRODUCT_FAMILY_REVIEW_REQUIRED')
+    assert.deepEqual(plan.issues, [])
   }
 })
 
@@ -79,15 +79,14 @@ test('exact repeated articles or explicit model attributes supply family evidenc
   )
 })
 
-test('title-only cohorts require an explicit family or standalone review, including indistinguishable source rows', () => {
+test('title cohorts are automatic while portable explicit membership remains readable', () => {
   const source = snapshot(['', '']),
     unresolved = planProductFamilies(source)
   assert.deepEqual(
     unresolved.families.map((family) => family.entryIds),
-    [['1'], ['2']]
+    [['1', '2']]
   )
-  assert.equal(unresolved.issues[0].code, 'PRODUCT_FAMILY_REVIEW_REQUIRED')
-  assert.deepEqual(unresolved.issues[0].entryIds, ['1', '2'])
+  assert.deepEqual(unresolved.issues, [])
   const joined = planProductFamilies(source, { choices: [choice(['1', '2'])] }),
     separate = planProductFamilies(source, {
       choices: [choice(['1', '2'], 'standalone')],
@@ -124,9 +123,15 @@ test('reviewed membership is reused only for exact source evidence while unrelat
     value: 'Different source style',
   })
   assert.notEqual(productFamilySourceKey(changedIdentity), reviewed.sourceKey)
-  assert.equal(
-    planProductFamilies(changedIdentity, { preparation }).issues[0].code,
-    'PRODUCT_FAMILY_REVIEW_REQUIRED'
+  assert.deepEqual(
+    planProductFamilies(changedIdentity, { preparation }).issues,
+    []
+  )
+  assert.deepEqual(
+    planProductFamilies(changedIdentity, {
+      preparation,
+    }).families[0].identities.map((i) => i.variantSuffix),
+    ['A', 'B']
   )
 })
 
@@ -149,10 +154,11 @@ test('existing prepared membership wins over reviewed source separation and prev
 test('review choices are account/order scoped and reject unknown or overlapping source membership', () => {
   const source = snapshot(['', ''])
   for (const patch of [{ accountId: 'foreign' }, { orderId: '102' }])
-    assert.ok(
+    assert.deepEqual(
       planProductFamilies(source, {
-        choices: [{ ...choice(['1', '2']), ...patch }],
-      }).issues.length
+        choices: [{ ...choice(['1', '2'], 'standalone'), ...patch }],
+      }).families.map((f) => f.entryIds),
+      [['1', '2']]
     )
   assert.throws(
     () => planProductFamilies(source, { choices: [choice(['1', '9'])] }),

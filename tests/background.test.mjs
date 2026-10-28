@@ -37,6 +37,7 @@ function setup({
   orderIds = ['10001'],
   rejectInactive = false,
   registrationWait,
+  saveFailure,
 } = {}) {
   const jobs = new Map(),
     tabs = new Map([[7, { id: 7, url: listUrl, status: 'complete' }]]),
@@ -63,6 +64,7 @@ function setup({
       return saved.get(id)
     },
     async saveSnapshot(snapshot) {
+      if (saveFailure) throw saveFailure
       const value = { snapshot }
       saved.set(snapshot.orderId, value)
       return value
@@ -217,6 +219,52 @@ const settle = async () => {
   for (let i = 0; i < 20; i++)
     await new Promise((resolve) => setImmediate(resolve))
 }
+
+test('detail saves return only bounded structured amount failure evidence across messaging', async () => {
+  const s = setup({
+    saveFailure: Object.assign(
+      new Error('Product amounts do not reconcile with the order totals'),
+      {
+        code: 'ORDER_AMOUNT_MISMATCH',
+        diagnostics: {
+          version: 1,
+          stage: 'validation',
+          snapshotTotals: {
+            goodsGross: '100.00',
+            payable: '90.01',
+            private: 'private value',
+          },
+          failure: {
+            code: 'ORDER_AMOUNT_MISMATCH',
+            field: 'payable',
+            comparison: 'equal',
+            expected: '90.01',
+            actual: '90.00',
+          },
+          products: { count: 1, gross: '100.00', discount: '10.00' },
+          html: 'private page',
+        },
+      }
+    ),
+  })
+  const response = await s.send(
+    {
+      type: 'SNAPSHOT_READY',
+      save: true,
+      snapshot: { accountId: 'local', orderId: '10001' },
+    },
+    { id: 'synthetic', url: url('10001'), tab: { id: 42 }, frameId: 0 }
+  )
+  assert.equal(response.ok, false)
+  assert.equal(response.code, 'ORDER_AMOUNT_MISMATCH')
+  assert.equal(response.diagnostics.stage, 'validation')
+  assert.equal(response.diagnostics.failure.field, 'payable')
+  assert.equal(response.diagnostics.failure.expected, '90.01')
+  assert.equal(response.diagnostics.failure.actual, '90.00')
+  assert.equal(response.diagnostics.products.gross, '100.00')
+  assert.doesNotMatch(JSON.stringify(response), /private|html/)
+  assert.equal(s.saved.size, 0)
+})
 
 function reviewed(orderId = '10001') {
   const plan = planOrderReconciliation(
