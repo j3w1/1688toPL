@@ -4,7 +4,117 @@ import {
   storeUpdateRowsForFilter,
   storeUpdatePriceDifference,
   storeUpdatePhysicalFields,
+  storeUpdateCartonChanges,
+  storeUpdateReviewIssues,
+  storeUpdateIssueContext,
 } from '../src/store-import-update-review.js'
+
+test('carton changes count stable identities, additions and retirements for each matched row', () => {
+  const row = { before: { entryIds: ['1'] }, after: { entryIds: ['1'] } },
+    review = {
+      cartonBatchChanges: [
+        {
+          before: {
+            count: 3,
+            entitlementIndices: [2, 5, 8],
+            contents: [{ entryId: '1' }],
+          },
+          after: {
+            count: 2,
+            entitlementIndices: [2, 5],
+            contents: [{ entryId: '1' }],
+          },
+        },
+        {
+          before: { count: 1, contents: [{ entryId: '2' }] },
+          after: {
+            count: 3,
+            entitlementIndices: [0, 6, 7],
+            contents: [{ entryId: '2' }],
+          },
+        },
+      ],
+    }
+  assert.deepEqual(storeUpdateCartonChanges(review, row), [
+    { before: 3, after: 2, added: 0, retired: 1 },
+  ])
+  assert.deepEqual(storeUpdateCartonChanges(review), [
+    { before: 3, after: 2, added: 0, retired: 1 },
+    { before: 1, after: 3, added: 2, retired: 0 },
+  ])
+})
+
+test('repeated blockers collapse without hiding other rows or batches, and resolve the source group', () => {
+  const issue = {
+      code: 'STORE_UPDATE_CARTON_CONFLICT',
+      message: 'Review received cartons.',
+      severity: 'error',
+      incomingRow: 12,
+      batchId: 'batch-a',
+    },
+    review = {
+      issues: [
+        issue,
+        { ...issue },
+        { ...issue, incomingRow: 13, batchId: 'batch-b' },
+      ],
+      rowChanges: [
+        { incomingRow: 12, after: { group: '42', entryIds: ['1'] } },
+        { incomingRow: 13, after: { group: '46', entryIds: ['2'] } },
+      ],
+      preparation: {
+        groups: [
+          { id: 'group-a', variants: [{ entryIds: ['1'] }] },
+          { id: 'group-b', variants: [{ entryIds: ['2'] }] },
+        ],
+      },
+    }
+  const result = storeUpdateReviewIssues(review)
+  assert.equal(result.length, 2)
+  assert.deepEqual(
+    result.map(({ sourceGroup, groupId }) => ({ sourceGroup, groupId })),
+    [
+      { sourceGroup: '42', groupId: 'group-a' },
+      { sourceGroup: '46', groupId: 'group-b' },
+    ]
+  )
+  assert.equal(issue.sourceGroup, undefined)
+})
+
+test('a blocked row removal retains its source context even when no batch replacement is allowed', () => {
+  const review = {
+    issues: [
+      {
+        code: 'STORE_UPDATE_CARTON_DECISIONS',
+        message: 'Review receiving decisions.',
+        batchId: 'removed',
+        entryIds: ['2'],
+        severity: 'error',
+      },
+    ],
+    cartonBatchChanges: [],
+    rowChanges: [
+      {
+        incomingRow: 12,
+        previousRow: 4,
+        after: { group: '1', entryIds: ['1'] },
+      },
+      {
+        incomingRow: null,
+        previousRow: 5,
+        before: { group: '2', entryIds: ['2'] },
+      },
+    ],
+  }
+  const [issue] = storeUpdateReviewIssues(review)
+  assert.equal(issue.sourceGroup, '2')
+  assert.equal(issue.previousRow, 5)
+  assert.equal(issue.incomingRow, null)
+  assert.equal(
+    String(storeUpdateIssueContext(issue)),
+    ' · Group 2 · Saved row 5'
+  )
+})
 
 test('price deltas retain exact fractional cents and sign without binary rounding', () => {
   assert.equal(storeUpdatePriceDifference('1.10', '2.80'), '+1.70')

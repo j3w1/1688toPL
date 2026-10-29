@@ -408,10 +408,10 @@ try {
         [
           '',
           'Serving tray · natural',
-          updated ? 2 : 1,
+          updated ? 2 : 3,
           12,
           5,
-          updated ? 120 : 60,
+          updated ? 120 : 180,
           'Trays',
           '',
           updated ? 7.2 : '',
@@ -429,7 +429,7 @@ try {
           updated ? 4.5 : '',
           updated ? 0.025 : '',
         ],
-        ['total', updated ? 296 : 172, 'total'],
+        ['total', updated ? 296 : 292, 'total'],
       ],
       photoBytes: Buffer.from(importPhoto, 'base64'),
       photoSpans: [{ from: 1, to: 4 }],
@@ -470,10 +470,16 @@ try {
   await expect(
     updateDialog.locator('[data-action="review-update-codes"]')
   ).toBeEnabled()
+  await updateDialog
+    .getByText('Cartons reduced: 3 → 2', { exact: true })
+    .scrollIntoViewIfNeeded()
   await updateDialog.screenshot({
     path: 'screenshots/store-spreadsheet-update.png',
   })
   await updatePage.setViewportSize({ width: 390, height: 740 })
+  await updateDialog
+    .getByText('Cartons reduced: 3 → 2', { exact: true })
+    .scrollIntoViewIfNeeded()
   await updateDialog.screenshot({
     path: 'work/store-spreadsheet-update-narrow.png',
   })

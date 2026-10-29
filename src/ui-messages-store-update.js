@@ -1,4 +1,38 @@
 export const STORE_UPDATE_MESSAGES = {
+  ' · Group {group} · Saved row {row}': {
+    zh: ' · 商品组 {group} · 原记录第 {row} 行',
+    es: ' · Grupo {group} · Fila guardada {row}',
+  },
+  'No unused carton identities remain in this batch.': {
+    zh: '此批次已无可用的新箱子编号。请先审核箱子记录，再重试更新。',
+    es: 'No quedan identificadores nuevos de caja en este lote. Revisa los registros de cajas antes de volver a actualizar.',
+  },
+  ' · Received: {received} · Loaded: {loaded} · Updated cartons: {count}': {
+    zh: ' · 已收货：{received} · 已装柜：{loaded} · 更新箱数：{count}',
+    es: ' · Recibidas: {received} · Cargadas: {loaded} · Cajas actualizadas: {count}',
+  },
+  'Cartons reduced: {before} → {after}': {
+    zh: '箱数减少：{before} → {after}',
+    es: 'Cajas reducidas: {before} → {after}',
+  },
+  'Cartons increased: {before} → {after}': {
+    zh: '箱数增加：{before} → {after}',
+    es: 'Cajas aumentadas: {before} → {after}',
+  },
+  '{added} cartons added · {retired} cartons retired': {
+    zh: '新增 {added} 箱 · 移除 {retired} 箱',
+    es: '{added} cajas añadidas · {retired} cajas retiradas',
+  },
+  ' · Group {group} · Excel row {row}': {
+    zh: ' · 商品组 {group} · Excel 第 {row} 行',
+    es: ' · Grupo {group} · Fila de Excel {row}',
+  },
+  ' · Group {0}': { zh: ' · 商品组 {0}', es: ' · Grupo {0}' },
+  ' · Excel row {0}': { zh: ' · Excel 第 {0} 行', es: ' · Fila de Excel {0}' },
+  'Resolve these issues before updating the purchase.': {
+    zh: '更新采购前请解决以下问题。',
+    es: 'Resuelve estos problemas antes de actualizar la compra.',
+  },
   'Enter the base code without surrounding spaces.': {
     zh: '基础货号前后不能有空格。',
     es: 'Escribe el código base sin espacios al principio ni al final.',

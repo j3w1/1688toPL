@@ -163,6 +163,177 @@ async function changes(dialog) {
   return review
 }
 
+test('carton reductions and additions review in every language and update the same batches once', async ({
+  extension,
+}) => {
+  test.setTimeout(60000)
+  const old = originalRows.map((row, index) => ({
+      ...row,
+      boxes: [6, 5, 1][index],
+    })),
+    updated = old.map((row, index) => ({
+      ...row,
+      boxes: [4, 4, 3][index],
+      kg: 2.5,
+      cbm: 0.04,
+    }))
+  await seed(extension, old)
+  await extension.inspector.evaluate(async () => {
+    const db = await window.testRepository,
+      backup = await db.exportBackup({})
+    for (const batch of backup.cartonBatches)
+      await db.saveCartonBatch({
+        ...batch,
+        entitlementIndices: Array.from(
+          { length: batch.count },
+          (_, i) => 2 + i * 3
+        ),
+        unitLabels: { 2: 'Supplier first carton' },
+      })
+  })
+  const before = await state(extension),
+    { page, dialog } = await open(extension, workbook(updated)),
+    review = await changes(dialog)
+  await expect(review).toContainText('All 3 unit prices unchanged')
+  await expect(review).toContainText('3 rows gain weight/volume data')
+  await page.setViewportSize({ width: 390, height: 740 })
+  for (const [language, reduced, increased, retired] of [
+    [
+      'es',
+      'Cajas reducidas: 6 → 4',
+      'Cajas aumentadas: 1 → 3',
+      '0 cajas añadidas · 2 cajas retiradas',
+    ],
+    ['zh', '箱数减少：6 → 4', '箱数增加：1 → 3', '新增 0 箱 · 移除 2 箱'],
+    [
+      'en',
+      'Cartons reduced: 6 → 4',
+      'Cartons increased: 1 → 3',
+      '0 cartons added · 2 cartons retired',
+    ],
+  ]) {
+    await dialog
+      .locator(`.popup-language-toggle [data-language="${language}"]`)
+      .click()
+    await expect(
+      review.locator('[data-incoming-row="2"] .store-update-cartons')
+    ).toContainText(reduced)
+    await expect(
+      review.locator('[data-incoming-row="2"] .store-update-cartons')
+    ).toContainText(retired)
+    await expect(
+      review.locator('[data-incoming-row="4"] .store-update-cartons')
+    ).toContainText(increased)
+    expect(
+      await dialog.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)
+    ).toBe(true)
+  }
+  await expect(
+    review.locator('[data-incoming-row="3"] .store-update-cartons')
+  ).toContainText('Cartons reduced: 5 → 4')
+  await dialog.locator('[data-action="review-update-codes"]').click()
+  await expect(
+    dialog.locator('[data-action="update-store-purchase"]')
+  ).toBeEnabled()
+  await dialog.locator('[data-action="back-import-workbook"]').click()
+  await expect(review).toBeVisible()
+  await expect(review).toContainText('Cartons reduced: 6 → 4')
+  expect(await state(extension)).toEqual(before)
+  await dialog.locator('[data-action="review-update-codes"]').click()
+  await dialog
+    .locator('[data-action="update-store-purchase"]')
+    .evaluate((node) => {
+      node.click()
+      node.click()
+    })
+  await expect(dialog).toHaveCount(0)
+  const after = await state(extension)
+  expect(after.orders).toHaveLength(1)
+  expect(after.history).toHaveLength(before.history.length + 1)
+  expect(after.cartonBatches).toHaveLength(3)
+  expect(after.preparations[0].groups.map((group) => group.baseCode)).toEqual(
+    before.preparations[0].groups.map((group) => group.baseCode)
+  )
+  for (const [index, previous] of before.cartonBatches.entries()) {
+    const next = after.cartonBatches.find((batch) => batch.id === previous.id)
+    expect(next.count).toBe([4, 4, 3][index])
+    expect(next.entitlementIndices).toEqual(
+      index === 2 ? [2, 3, 4] : [2, 5, 8, 11]
+    )
+    expect(next.unitLabels).toEqual({ 2: 'Supplier first carton' })
+    expect(next.weight).toBe('2.5')
+  }
+  expect(after.orders[0].snapshot.totals.payable).toBe('330.00')
+  const reopened = await open(extension, workbook(updated))
+  const noChange = await changes(reopened.dialog)
+  await expect(noChange).toContainText('No changes to apply')
+  await reopened.dialog
+    .getByRole('button', { name: 'Cancel', exact: true })
+    .click()
+})
+
+test('a received-carton conflict names its product row and count while preserving the unsaved update', async ({
+  extension,
+}) => {
+  const old = originalRows.map((row) => ({ ...row, boxes: 5 }))
+  await seed(extension, old)
+  await extension.inspector.evaluate(async () => {
+    const db = await window.testRepository,
+      backup = await db.exportBackup({}),
+      batch = backup.cartonBatches[0]
+    await db.saveCartonBatch({ ...batch, received: 5 })
+  })
+  const before = await state(extension),
+    updated = old.map((row, index) => ({ ...row, boxes: index === 0 ? 4 : 5 })),
+    { dialog } = await open(extension, workbook(updated)),
+    review = await changes(dialog)
+  const issue = review.locator('.store-update-issues [data-blocking="true"]')
+  await expect(issue).toHaveCount(1)
+  await expect(issue).toContainText('Group 1 · Excel row 2')
+  await expect(issue).toContainText('Received: 5')
+  await expect(issue).toContainText('Updated cartons: 4')
+  await issue.click()
+  await expect(review.locator('[data-incoming-row="2"]')).toBeFocused()
+  await dialog.locator('[data-action="review-update-codes"]').click()
+  const errors = dialog.locator('[data-action="store-import-code-errors"]')
+  await expect(errors).toContainText(
+    'Resolve these issues before updating the purchase.'
+  )
+  await expect(errors.locator('li')).toHaveCount(1)
+  await expect(errors).toContainText('Group 1 · Excel row 2')
+  await expect(
+    dialog.locator('[data-action="update-store-purchase"]')
+  ).toBeDisabled()
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+  expect(await state(extension)).toEqual(before)
+
+  const removal = await open(extension, workbook(old.slice(1)), 2),
+    removalReview = await changes(removal.dialog),
+    removalIssue = removalReview.locator(
+      '.store-update-issues [data-blocking="true"]'
+    )
+  await expect(removalIssue).toHaveCount(1)
+  await expect(removalIssue).toContainText('Group 1 · Saved row 2')
+  await removalIssue.click()
+  await expect(removalReview.locator('[data-previous-row="2"]')).toBeFocused()
+  await removal.dialog.locator('[data-action="review-update-codes"]').click()
+  await expect(
+    removal.dialog.locator('[data-action="store-import-code-errors"]')
+  ).toContainText('Group 1 · Saved row 2')
+  const removedProductError = removal.dialog.locator(
+    '[data-action="store-import-code-errors"] li button'
+  )
+  await removedProductError.click()
+  await expect(removedProductError).toBeFocused()
+  await expect(
+    removal.dialog.locator('[data-action="update-store-purchase"]')
+  ).toBeDisabled()
+  await removal.dialog
+    .getByRole('button', { name: 'Cancel', exact: true })
+    .click()
+  expect(await state(extension)).toEqual(before)
+})
+
 test('update review separates price and quantity changes and atomically preserves matched identities, codes and authored details', async ({
   extension,
 }) => {

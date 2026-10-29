@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { databaseBrowser } from './fixtures/database-browser.mjs'
 import { SYNTHETIC_PHOTO } from './fixtures/container-fixture.mjs'
+import { storeCartonCountUpdate } from './fixtures/store-carton-update.mjs'
 
 const fixture = (count = 20) => {
   const groups = [3, 3, 1, 1, 6, 1, 2, 2, 1, 5]
@@ -388,6 +389,420 @@ test('a shipment sealed after review blocks replacement and names the historical
         result.before[key],
         `sealed protection ${key}`
       )
+  } finally {
+    await browser.close()
+  }
+})
+
+test('52-row supplier revision resizes existing cartons atomically with exact totals and unchanged codes', async () => {
+  const browser = await databaseBrowser()
+  try {
+    const result = await browser.page.evaluate(
+      async ({ old, updated }) => {
+        const name = 'store-update-counts-52'
+        const db = await modules.openDatabase({ name })
+        const initial = await db.reviewStoreOrderImport(old)
+        for (const group of initial.preparation.groups) {
+          group.spanishName = ''
+          group.category = '器皿'
+          group.naming = {
+            spanishName: { source: 'manual', value: '' },
+            category: { source: 'manual', value: '器皿' },
+          }
+          for (const variant of group.variants) {
+            variant.material = ''
+            variant.materialSource = 'manual'
+          }
+        }
+        const saved = await db.importStoreOrder({
+          ...initial,
+          intentId: 'count-seed',
+        })
+        const target = { accountId: 'local', orderId: saved.snapshot.orderId }
+        const batches = await db.listCartonBatches({})
+        await db.saveCartonBatches(
+          batches.map((batch) => ({
+            after: {
+              ...batch,
+              entitlementIndices: Array.from(
+                { length: batch.count },
+                (_, index) => index
+              ),
+            },
+            expectedRevision: batch.revision,
+          }))
+        )
+        await db.setNotes(target.orderId, {
+          notes: 'Keep supplier revision notes',
+          tags: ['Retain'],
+        })
+        const before = await db.exportBackup({})
+        const review = await db.reviewStoreOrderUpdate({ ...updated, target })
+        const afterReview = await db.exportBackup({})
+        const request = { ...review, intentId: 'count-update' }
+        const put = IDBObjectStore.prototype.put
+        IDBObjectStore.prototype.put = function (...args) {
+          if (this.name === 'preparations')
+            throw new Error('Synthetic count rollback')
+          return put.apply(this, args)
+        }
+        let failure
+        try {
+          await db.updateStoreOrder(request)
+        } catch (error) {
+          failure = error.message
+        } finally {
+          IDBObjectStore.prototype.put = put
+        }
+        const afterFailure = await db.exportBackup({})
+        const changed = await db.updateStoreOrder(request)
+        const duplicate = await db.updateStoreOrder(request)
+        const after = await db.exportBackup({})
+        let stale
+        try {
+          await db.updateStoreOrder({ ...request, intentId: 'count-stale' })
+        } catch (error) {
+          stale = error.code
+        }
+        const noChange = await db.reviewStoreOrderUpdate({ ...updated, target })
+        const noOp = await db.updateStoreOrder({
+          ...noChange,
+          intentId: 'count-noop',
+        })
+        const afterNoOp = await db.exportBackup({})
+        db.close()
+        const reopened = await modules.openDatabase({ name })
+        const reopenedBackup = await reopened.exportBackup({})
+        reopened.close()
+        const restored = await modules.openDatabase({
+          name: 'store-update-counts-restored',
+        })
+        await restored.restoreBackup(JSON.parse(JSON.stringify(after)))
+        const restoredBackup = await restored.exportBackup({})
+        restored.close()
+        return {
+          before,
+          review,
+          afterReview,
+          failure,
+          afterFailure,
+          changed,
+          duplicate,
+          after,
+          stale,
+          noChange,
+          noOp,
+          afterNoOp,
+          reopenedBackup,
+          restoredBackup,
+        }
+      },
+      { old: storeCartonCountUpdate(), updated: storeCartonCountUpdate(true) }
+    )
+    const { before, after, review } = result
+    assert.deepEqual(review.issues, [])
+    assert.deepEqual(review.summary.before, {
+      products: 52,
+      groups: 52,
+      pieces: '5539',
+      cartons: 222,
+      total: '22301.80',
+    })
+    assert.deepEqual(review.summary.after, {
+      products: 52,
+      groups: 52,
+      pieces: '5451',
+      cartons: 219,
+      total: '21881.80',
+    })
+    assert.equal(review.summary.unchangedPrices, 52)
+    assert.equal(review.summary.priceChanges, 0)
+    assert.equal(review.summary.measurementsAdded, 52)
+    assert.equal(review.summary.added, 0)
+    assert.equal(review.summary.removed, 0)
+    assert.equal(review.cartonBatchChanges.length, 52)
+    const keys = [
+      'orders',
+      'preparations',
+      'cartonBatches',
+      'history',
+      'images',
+      'issuedCodes',
+      'operationIntents',
+    ]
+    for (const key of keys) {
+      assert.deepEqual(
+        result.afterReview[key],
+        before[key],
+        `read-only review ${key}`
+      )
+      assert.deepEqual(
+        result.afterFailure[key],
+        before[key],
+        `count rollback ${key}`
+      )
+    }
+    assert.match(result.failure, /Synthetic count rollback/)
+    assert.equal(result.stale, 'ORDER_REVISION_CONFLICT')
+    assert.deepEqual(result.duplicate, result.changed)
+    assert.equal(after.orders.length, 1)
+    assert.equal(after.cartonBatches.length, 52)
+    assert.equal(new Set(after.cartonBatches.map((batch) => batch.id)).size, 52)
+    assert.equal(
+      after.cartonBatches.reduce((sum, batch) => sum + batch.count, 0),
+      219
+    )
+    for (const batch of after.cartonBatches) {
+      const prior = before.cartonBatches.find((value) => value.id === batch.id)
+      assert.ok(prior)
+      assert.equal(batch.entitlementIndices.length, batch.count)
+      assert.deepEqual(
+        batch.entitlementIndices,
+        prior.entitlementIndices.slice(0, batch.count)
+      )
+      assert.equal(batch.weight, '13.87')
+      assert.equal(batch.suppliedCbm, '0.0271728')
+      assert.equal(batch.len, '37')
+      assert.equal(batch.wid, '27')
+      assert.equal(batch.ht, '27.2')
+      assert.ok(
+        batch.cartonHistory.some(
+          (snapshot) =>
+            snapshot.count === prior.count &&
+            JSON.stringify(snapshot.entitlementIndices) ===
+              JSON.stringify(prior.entitlementIndices)
+        )
+      )
+    }
+    const changedCounts = after.cartonBatches.filter(
+      (batch) =>
+        before.cartonBatches.find((prior) => prior.id === batch.id).count !==
+        batch.count
+    )
+    assert.deepEqual(
+      changedCounts
+        .map((batch) => [
+          before.cartonBatches.find((prior) => prior.id === batch.id).count,
+          batch.count,
+        ])
+        .sort((a, b) => a[0] - b[0]),
+      [
+        [5, 4],
+        [6, 4],
+      ]
+    )
+    const sourceBefore = before.orders[0],
+      sourceAfter = after.orders[0]
+    assert.equal(sourceAfter.snapshot.orderId, sourceBefore.snapshot.orderId)
+    assert.equal(
+      sourceAfter.snapshot.purchasedAt,
+      sourceBefore.snapshot.purchasedAt
+    )
+    assert.deepEqual(
+      sourceAfter.snapshot.items.map((item) => item.entryId),
+      sourceBefore.snapshot.items.map((item) => item.entryId)
+    )
+    assert.deepEqual(
+      sourceAfter.snapshot.items.map((item) => item.price),
+      sourceBefore.snapshot.items.map((item) => item.price)
+    )
+    assert.equal(
+      sourceAfter.snapshot.items.reduce(
+        (sum, item) => sum + Number(item.quantity),
+        0
+      ),
+      5451
+    )
+    assert.equal(sourceAfter.snapshot.spreadsheet.total, '21881.80')
+    assert.deepEqual(
+      after.preparations[0].groups,
+      before.preparations[0].groups
+    )
+    assert.equal(sourceAfter.notes, 'Keep supplier revision notes')
+    assert.deepEqual(sourceAfter.tags, ['Retain'])
+    assert.equal(result.noChange.summary.hasChanges, false)
+    assert.deepEqual(result.noOp, result.changed)
+    // A successful no-op may retain its own retry receipt; material records do
+    // not change, and restore need not recreate completed operation receipts.
+    for (const key of keys.filter((key) => key !== 'operationIntents')) {
+      assert.deepEqual(result.afterNoOp[key], after[key], `no-op ${key}`)
+      assert.deepEqual(
+        result.reopenedBackup[key],
+        after[key],
+        `reopened ${key}`
+      )
+      assert.deepEqual(
+        result.restoredBackup[key],
+        after[key],
+        `restored ${key}`
+      )
+    }
+  } finally {
+    await browser.close()
+  }
+})
+
+test('shrink then grow preserves retained labels and never reuses historical carton indices after restore', async () => {
+  const browser = await databaseBrowser()
+  try {
+    const raw = fixture(1)
+    raw.rows[0].boxes = 3
+    raw.rows[0].quantity = 30
+    raw.rows[0].amount = raw.total = '60.00'
+    const result = await browser.page.evaluate(async (raw) => {
+      const db = await modules.openDatabase({
+        name: 'store-update-count-identity',
+      })
+      const initial = await db.reviewStoreOrderImport(raw)
+      const saved = await db.importStoreOrder({
+        ...initial,
+        intentId: 'identity-seed',
+      })
+      const target = { accountId: 'local', orderId: saved.snapshot.orderId }
+      const [batch] = await db.listCartonBatches({})
+      await db.saveCartonBatch({
+        ...batch,
+        entitlementIndices: [3, 5, 9],
+        unitLabels: { 3: 'Carton A', 5: 'Carton B', 9: 'Carton C' },
+        unitMeasurements: { 9: { weight: '5' } },
+      })
+      const smaller = structuredClone(raw)
+      smaller.rows[0].boxes = 1
+      smaller.rows[0].quantity = 10
+      smaller.rows[0].amount = smaller.total = '20.00'
+      const shrinkReview = await db.reviewStoreOrderUpdate({
+        ...smaller,
+        target,
+      })
+      await db.updateStoreOrder({
+        ...shrinkReview,
+        intentId: 'identity-shrink',
+      })
+      const shrunk = await db.exportBackup({})
+      db.close()
+      const restored = await modules.openDatabase({
+        name: 'store-update-count-identity-restored',
+      })
+      await restored.restoreBackup(JSON.parse(JSON.stringify(shrunk)))
+      const growReview = await restored.reviewStoreOrderUpdate({
+        ...raw,
+        target,
+      })
+      await restored.updateStoreOrder({
+        ...growReview,
+        intentId: 'identity-grow',
+      })
+      const grown = await restored.exportBackup({})
+      const noOp = await restored.reviewStoreOrderUpdate({ ...raw, target })
+      restored.close()
+      return { batch, shrinkReview, shrunk, growReview, grown, noOp }
+    }, raw)
+    assert.deepEqual(result.shrinkReview.issues, [])
+    assert.deepEqual(result.growReview.issues, [])
+    const shrunk = result.shrunk.cartonBatches[0],
+      grown = result.grown.cartonBatches[0]
+    assert.equal(shrunk.id, result.batch.id)
+    assert.equal(grown.id, result.batch.id)
+    assert.deepEqual(shrunk.entitlementIndices, [3])
+    assert.deepEqual(grown.entitlementIndices, [3, 10, 11])
+    assert.deepEqual(shrunk.unitLabels, { 3: 'Carton A' })
+    assert.deepEqual(grown.unitLabels, { 3: 'Carton A' })
+    assert.equal(shrunk.unitMeasurements, undefined)
+    assert.equal(grown.unitMeasurements, undefined)
+    assert.ok(
+      grown.cartonHistory.some(
+        (snapshot) => JSON.stringify(snapshot.entitlementIndices) === '[3,5,9]'
+      )
+    )
+    assert.ok(
+      grown.cartonHistory.some(
+        (snapshot) => snapshot.unitLabels?.[9] === 'Carton C'
+      )
+    )
+    assert.equal(result.grown.orders.length, 1)
+    assert.equal(result.grown.cartonBatches.length, 1)
+    assert.equal(result.noOp.hasChanges, false)
+  } finally {
+    await browser.close()
+  }
+})
+
+test('count reduction cannot discard existing received or loading decisions and failed confirmation writes nothing', async () => {
+  const browser = await databaseBrowser()
+  try {
+    const raw = fixture(1)
+    raw.rows[0].boxes = 3
+    raw.rows[0].quantity = 30
+    raw.rows[0].amount = raw.total = '60.00'
+    const results = await browser.page.evaluate(async (raw) => {
+      const results = []
+      for (const decision of ['received', 'loaded']) {
+        const db = await modules.openDatabase({
+          name: `store-update-decision-${decision}`,
+        })
+        const initial = await db.reviewStoreOrderImport(raw)
+        const saved = await db.importStoreOrder({
+          ...initial,
+          intentId: `${decision}-seed`,
+        })
+        const target = { accountId: 'local', orderId: saved.snapshot.orderId }
+        const [batch] = await db.listCartonBatches({})
+        await db.saveCartonBatch({ ...batch, [decision]: 3 })
+        const before = await db.exportBackup({})
+        const smaller = structuredClone(raw)
+        smaller.rows[0].boxes = 1
+        smaller.rows[0].quantity = 10
+        smaller.rows[0].amount = smaller.total = '20.00'
+        const review = await db.reviewStoreOrderUpdate({ ...smaller, target })
+        let failure
+        try {
+          await db.updateStoreOrder({
+            ...review,
+            intentId: `${decision}-blocked`,
+          })
+        } catch (error) {
+          failure = {
+            code: error.code,
+            message: error.message,
+            detail: error.detail,
+          }
+        }
+        const after = await db.exportBackup({})
+        db.close()
+        results.push({ decision, before, review, failure, after })
+      }
+      return results
+    }, raw)
+    for (const result of results) {
+      const conflict = result.review.issues.find(
+        (issue) => issue.code === 'STORE_UPDATE_CARTON_CONFLICT'
+      )
+      assert.ok(conflict)
+      assert.equal(conflict[result.decision], 3)
+      assert.equal(conflict.beforeCount, 3)
+      assert.equal(conflict.afterCount, 1)
+      assert.equal(conflict.group, '1')
+      assert.equal(result.failure.code, 'STORE_UPDATE_CARTON_CONFLICT')
+      assert.match(result.failure.message, /received|loaded|loading/)
+      assert.equal(
+        result.failure.detail.batchId,
+        result.before.cartonBatches[0].id
+      )
+      for (const key of [
+        'orders',
+        'preparations',
+        'cartonBatches',
+        'history',
+        'images',
+        'issuedCodes',
+        'operationIntents',
+      ])
+        assert.deepEqual(
+          result.after[key],
+          result.before[key],
+          `${result.decision} decision blocker ${key}`
+        )
+    }
   } finally {
     await browser.close()
   }

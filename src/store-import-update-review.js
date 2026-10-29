@@ -14,6 +14,126 @@ export function storeUpdatePriceDifference(before, after) {
   return `${difference < 0n ? '-' : difference > 0n ? '+' : ''}${value.slice(0, -digits)}.${value.slice(-digits)}`
 }
 
+/** Display the same blocker once, retaining each affected row/batch context. */
+export function storeUpdateReviewIssues(review) {
+  const unique = new Map()
+  for (const issue of review.issues || []) {
+    const batchId = issue.batchId || issue.detail?.batchId,
+      batch = review.cartonBatchChanges?.find(
+        (change) => (change.before || change.after)?.id === batchId
+      ),
+      affected = new Set(
+        issue.entryIds ||
+          batch?.before?.contents?.map((item) => item.entryId) ||
+          []
+      ),
+      row = review.rowChanges?.find((change) =>
+        (issue.incomingRow ?? issue.row) != null
+          ? change.incomingRow === (issue.incomingRow ?? issue.row)
+          : change.before?.entryIds.some((id) => affected.has(id))
+      ),
+      entries = new Set(row?.after?.entryIds || row?.before?.entryIds || []),
+      group = review.preparation?.groups.find((value) =>
+        value.variants.some((variant) =>
+          variant.entryIds.some((id) => entries.has(id))
+        )
+      ),
+      contextual = {
+        ...issue,
+        ...(row
+          ? {
+              incomingRow: row.incomingRow,
+              previousRow: row.previousRow,
+              sourceGroup: (row.after || row.before)?.group,
+              ...(group && !issue.groupId ? { groupId: group.id } : {}),
+            }
+          : {}),
+      },
+      key = JSON.stringify([
+        contextual.code,
+        contextual.message,
+        contextual.severity,
+        contextual.incomingRow ?? contextual.row,
+        contextual.previousRow,
+        batchId,
+        contextual.groupId,
+        contextual.variantId,
+        contextual.field,
+        contextual.params,
+        contextual.values,
+        contextual.conflict,
+        contextual.containerIds,
+        contextual.containerNames,
+        contextual.detail,
+        contextual.beforeCount,
+        contextual.afterCount,
+        contextual.received,
+        contextual.loaded,
+      ])
+    if (!unique.has(key)) unique.set(key, contextual)
+  }
+  return [...unique.values()]
+}
+
+export function storeUpdateIssueContext(issue) {
+  if (issue.sourceGroup && issue.incomingRow != null)
+    return m(' · Group {group} · Excel row {row}', {
+      group: issue.sourceGroup,
+      row: issue.incomingRow,
+    })
+  if (issue.sourceGroup && issue.previousRow != null)
+    return m(' · Group {group} · Saved row {row}', {
+      group: issue.sourceGroup,
+      row: issue.previousRow,
+    })
+  if (issue.sourceGroup) return m(' · Group {0}', { 0: issue.sourceGroup })
+  if ((issue.incomingRow ?? issue.row) != null)
+    return m(' · Excel row {0}', { 0: issue.incomingRow ?? issue.row })
+  return ''
+}
+
+export function storeUpdateOperationalContext(issue) {
+  if (issue.afterCount == null) return ''
+  return m(
+    ' · Received: {received} · Loaded: {loaded} · Updated cartons: {count}',
+    {
+      received: issue.received ?? m('Not supplied'),
+      loaded: issue.loaded ?? m('Not supplied'),
+      count: issue.afterCount,
+    }
+  )
+}
+
+/** Count physical identities rather than inferring additions from quantities. */
+export function storeUpdateCartonChanges(review, row) {
+  const ids =
+    row &&
+    new Set([...(row.before?.entryIds || []), ...(row.after?.entryIds || [])])
+  return (review.cartonBatchChanges || []).flatMap(({ before, after }) => {
+    if (
+      ids &&
+      ![...(before?.contents || []), ...(after?.contents || [])].some((item) =>
+        ids.has(item.entryId)
+      )
+    )
+      return []
+    const indices = (batch) =>
+        !batch || batch.deletedAt
+          ? []
+          : batch.entitlementIndices ||
+            Array.from({ length: batch.count || 0 }, (_, index) => index),
+      previous = indices(before),
+      next = indices(after),
+      previousSet = new Set(previous),
+      nextSet = new Set(next),
+      retired = previous.filter((index) => !nextSet.has(index)).length,
+      added = next.filter((index) => !previousSet.has(index)).length
+    return added || retired
+      ? [{ before: previous.length, after: next.length, added, retired }]
+      : []
+  })
+}
+
 const fieldLabels = {
   group: 'Group',
   description: 'Description',
@@ -335,6 +455,28 @@ export function mountStoreImportUpdateReview(
       )
     }
     content.append(price)
+    for (const cartons of storeUpdateCartonChanges(review, change)) {
+      const note = el('p', undefined, 'store-update-cartons')
+      if (cartons.before !== cartons.after)
+        note.append(
+          el(
+            'strong',
+            m(
+              cartons.after < cartons.before
+                ? 'Cartons reduced: {before} → {after}'
+                : 'Cartons increased: {before} → {after}',
+              cartons
+            )
+          )
+        )
+      note.append(
+        el(
+          'small',
+          m('{added} cartons added · {retired} cartons retired', cartons)
+        )
+      )
+      content.append(note)
+    }
     if (change.status === 'unresolved') {
       const label = el('label', m('Match this Excel row to')),
         select = el('select'),
@@ -618,7 +760,7 @@ export function mountStoreImportUpdateReview(
       highlights.append(label)
     }
     issues.replaceChildren()
-    const problems = [...(review.issues || [])]
+    const problems = storeUpdateReviewIssues(review)
       .filter((issue) => ['error', 'warning'].includes(issue.severity))
       .sort(
         (a, b) =>
@@ -627,6 +769,8 @@ export function mountStoreImportUpdateReview(
     issues.hidden = !problems.length
     for (const issue of problems) {
       const button = el('button', m(issue.message, issue.params))
+      button.append(el('span', storeUpdateIssueContext(issue)))
+      button.append(el('small', storeUpdateOperationalContext(issue)))
       button.classList.toggle('is-warning', issue.severity === 'warning')
       button.dataset.blocking = String(issue.severity === 'error')
       if (issue.code === 'STORE_UPDATE_PAYMENT_REVIEW') {
@@ -674,8 +818,10 @@ export function mountStoreImportUpdateReview(
         }
         filter = 'all'
         paintRows()
-        const index = (review.rowChanges || []).findIndex(
-          (row) => row.incomingRow === (issue.incomingRow ?? issue.row)
+        const index = (review.rowChanges || []).findIndex((row) =>
+          (issue.incomingRow ?? issue.row) != null
+            ? row.incomingRow === (issue.incomingRow ?? issue.row)
+            : issue.previousRow != null && row.previousRow === issue.previousRow
         )
         const change = review.rowChanges?.[index]
         const node =

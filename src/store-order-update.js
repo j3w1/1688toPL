@@ -1078,6 +1078,30 @@ export function planStoreOrderUpdate(
   }
 }
 
+function resizedCartonIndices(batch, count) {
+  const retained = (
+    batch.entitlementIndices ||
+    Array.from({ length: batch.count || 0 }, (_, index) => index)
+  ).slice(0, count)
+  let highest = -1
+  // History reserves retired units too: shrinking and later growing a batch
+  // must not make an old physical identity refer to a different carton.
+  for (const evidence of [batch, ...(batch.cartonHistory || [])]) {
+    for (const facts of [evidence, evidence.sourceFacts]) {
+      if (!facts) continue
+      highest = Math.max(highest, (facts.count || 0) - 1)
+      for (const index of facts.entitlementIndices || [])
+        highest = Math.max(highest, index)
+    }
+  }
+  while (retained.length < count) {
+    if (!Number.isSafeInteger(++highest))
+      throw new Error('No unused carton identities remain in this batch.')
+    retained.push(highest)
+  }
+  return retained
+}
+
 function planBatches(state, candidate, afterRows, matches, issues) {
   const snapshot = candidate.snapshot,
     batches = (state.batches || []).filter(
@@ -1164,6 +1188,26 @@ function planBatches(state, candidate, afterRows, matches, issues) {
     }
     for (const field of ['unitContents', 'unitMeasurements']) delete raw[field]
     try {
+      if (oldBatch && oldBatch.count !== physical.count) {
+        raw.entitlementIndices = resizedCartonIndices(oldBatch, physical.count)
+        // A single reported carton may become the first unit of a larger set;
+        // its number must not be copied onto every newly added carton.
+        if (raw.cartonNumber && physical.count > 1) {
+          if (oldBatch.labelOrigin !== 'internal')
+            raw.unitLabels = {
+              ...raw.unitLabels,
+              [raw.entitlementIndices[0]]:
+                raw.unitLabels?.[raw.entitlementIndices[0]] || raw.cartonNumber,
+            }
+          delete raw.cartonNumber
+        }
+        if (raw.unitLabels)
+          raw.unitLabels = Object.fromEntries(
+            Object.entries(raw.unitLabels).filter(([index]) =>
+              raw.entitlementIndices.includes(Number(index))
+            )
+          )
+      }
       const after = validateCartonBatch(raw)
       if (
         (after.received ?? 0) > after.count ||
@@ -1185,18 +1229,33 @@ function planBatches(state, candidate, afterRows, matches, issues) {
         row: row.row,
         incomingRow: row.row,
         batchId: id,
+        group: row.group,
+        beforeCount: oldBatch?.count ?? null,
+        afterCount: physical.count,
+        received: oldBatch?.received ?? null,
+        loaded: oldBatch?.loaded ?? null,
       })
     }
   }
   for (const batch of batches)
     if (!used.has(batch.id)) {
+      const context = {
+        batchId: batch.id,
+        entryIds: batch.contents
+          .filter((item) => item.orderId === snapshot.orderId)
+          .map((item) => item.entryId),
+        beforeCount: batch.count,
+        afterCount: 0,
+        received: batch.received ?? null,
+        loaded: batch.loaded ?? null,
+      }
       if (batch.contents.some((item) => item.orderId !== snapshot.orderId)) {
         issues.push({
           severity: 'error',
           code: 'STORE_UPDATE_CARTON_OWNERSHIP',
           message:
             'These cartons also reference another purchase. Review their ownership before updating.',
-          batchId: batch.id,
+          ...context,
         })
         continue
       }
@@ -1206,7 +1265,7 @@ function planBatches(state, candidate, afterRows, matches, issues) {
           code: 'STORE_UPDATE_CARTON_DECISIONS',
           message:
             'These cartons have received or loading decisions that cannot be carried to the updated workbook. Review those decisions before updating.',
-          batchId: batch.id,
+          ...context,
         })
         continue
       }

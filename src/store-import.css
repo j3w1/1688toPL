@@ -167,6 +167,13 @@
 .store-update-price small {
   flex-basis: 100%;
 }
+.store-update-cartons {
+  display: grid;
+  gap: 4px;
+}
+.store-update-cartons small {
+  color: var(--muted);
+}
 .store-update-price.is-increased {
   color: var(--danger-text, #cf4b50);
 }

@@ -4,10 +4,12 @@ import { createStoreOrder } from '../src/store-order.js'
 import { reviewStoreImportCodes } from '../src/store-import-codes.js'
 import { planStoreOrderUpdate } from '../src/store-order-update.js'
 import { barcodeValue } from '../src/packing-model.js'
+import { physicalUnits } from '../src/inventory-model.js'
 import { validateCartonBatch } from '../src/carton-batches.js'
 import { lineGrossCents, centsToMoney } from '../src/money.js'
 import { SYNTHETIC_PHOTO } from './fixtures/container-fixture.mjs'
 import { consumptionLocksForManifest } from '../src/purchase-codes.js'
+import { storeCartonCountUpdate } from './fixtures/store-carton-update.mjs'
 
 const target = { accountId: 'local', orderId: '1001' }
 const codes = (preparation) =>
@@ -167,6 +169,68 @@ test('25 saved rows gain 24 measurement sets without changed prices, codes, orig
   )
   assert.deepEqual(state, before)
   assert.equal(result.hasChanges, true)
+})
+
+test('52 matched products replace 222 cartons with 219 and gain measurements without price or code changes', async () => {
+  const old = storeCartonCountUpdate(),
+    updated = storeCartonCountUpdate(true),
+    state = await saved(old.rows),
+    before = structuredClone(state)
+  for (const batch of state.batches)
+    batch.entitlementIndices = Array.from(
+      { length: batch.count },
+      (_, index) => index
+    )
+  const result = planStoreOrderUpdate(state, {
+    target,
+    candidate: await candidate(updated.rows),
+  })
+  assert.deepEqual(result.issues, [])
+  assert.deepEqual(result.summary.before, {
+    products: 52,
+    groups: 52,
+    pieces: '5539',
+    cartons: 222,
+    total: '22301.80',
+  })
+  assert.deepEqual(result.summary.after, {
+    products: 52,
+    groups: 52,
+    pieces: '5451',
+    cartons: 219,
+    total: '21881.80',
+  })
+  assert.equal(result.summary.unchangedPrices, 52)
+  assert.equal(result.summary.priceChanges, 0)
+  assert.equal(result.summary.measurementsAdded, 52)
+  assert.equal(result.summary.added, 0)
+  assert.equal(result.summary.removed, 0)
+  assert.equal(result.cartonBatchChanges.length, 52)
+  assert.equal(
+    new Set(result.cartonBatchChanges.map((change) => change.after.id)).size,
+    52
+  )
+  assert.deepEqual(codes(result.preparation), codes(before.preparations[0]))
+  assert.deepEqual(
+    result.candidate.snapshot.items.map((item) => item.entryId),
+    before.records[0].snapshot.items.map((item) => item.entryId)
+  )
+  for (const change of result.cartonBatchChanges) {
+    const after = validateCartonBatch(change.after)
+    assert.equal(after.id, change.before.id)
+    assert.equal(after.entitlementIndices.length, after.count)
+    assert.equal(after.weight, '13.87')
+    assert.equal(after.suppliedCbm, '0.0271728')
+  }
+  assert.deepEqual(
+    result.cartonBatchChanges
+      .filter((change) => change.after.count !== change.before.count)
+      .map((change) => [change.before.count, change.after.count]),
+    [
+      [6, 4],
+      [5, 4],
+    ]
+  )
 })
 
 test('20 to 25 rows replaces four quantities without reporting price changes or duplicating matched cartons', async () => {
@@ -577,7 +641,7 @@ test('reset code suggestions retains scoped draft details and matched manually a
   assert.equal(reset.preparation.groups[0].variants[0].materialSource, 'manual')
 })
 
-test('carton labels and entitlement identities survive measurements replacement and incompatible counts block', async () => {
+test('carton labels and identities survive measurements replacement and shrink with the count', async () => {
   const r = rows(1),
     state = await saved(r)
   state.batches[0].entitlementIndices = [3, 5]
@@ -596,15 +660,144 @@ test('carton labels and entitlement identities survive measurements replacement 
     result.cartonBatchChanges[0].after.unitLabels,
     state.batches[0].unitLabels
   )
-  const incompatible = planStoreOrderUpdate(state, {
+  const smaller = planStoreOrderUpdate(state, {
     target,
     candidate: await candidate([{ ...r[0], boxes: 1, perbox: 10 }]),
   })
-  assert.ok(
-    incompatible.issues.some(
-      (issue) => issue.code === 'STORE_UPDATE_CARTON_CONFLICT'
-    )
+  assert.deepEqual(smaller.issues, [])
+  const after = smaller.cartonBatchChanges[0].after
+  assert.equal(after.id, state.batches[0].id)
+  assert.equal(after.count, 1)
+  assert.deepEqual(after.entitlementIndices, [3])
+  assert.deepEqual(after.unitLabels, { 3: 'Supplier carton 3' })
+  assert.deepEqual(codes(smaller.preparation), codes(state.preparations[0]))
+  assert.deepEqual(state.batches[0].entitlementIndices, [3, 5])
+})
+
+test('implicit carton identities resize without duplicating or sorting retained units', async () => {
+  const r = rows(1),
+    state = await saved(r)
+  for (const [count, indices] of [
+    [1, [0]],
+    [4, [0, 1, 2, 3]],
+  ]) {
+    const result = planStoreOrderUpdate(state, {
+      target,
+      candidate: await candidate([
+        { ...r[0], boxes: count, quantity: count * 5 },
+      ]),
+    })
+    assert.deepEqual(result.issues, [])
+    assert.equal(result.cartonBatchChanges.length, 1)
+    const after = result.cartonBatchChanges[0].after
+    assert.equal(after.id, state.batches[0].id)
+    assert.deepEqual(after.entitlementIndices, indices)
+    assert.equal(validateCartonBatch(after).count, count)
+  }
+  state.batches[0].entitlementIndices = [9, 3]
+  state.batches[0].unitLabels = {
+    9: 'First physical carton',
+    3: 'Second physical carton',
+  }
+  const smaller = planStoreOrderUpdate(state, {
+    target,
+    candidate: await candidate([{ ...r[0], boxes: 1, quantity: 5 }]),
+  })
+  assert.deepEqual(smaller.issues, [])
+  assert.deepEqual(smaller.cartonBatchChanges[0].after.entitlementIndices, [9])
+  assert.deepEqual(smaller.cartonBatchChanges[0].after.unitLabels, {
+    9: 'First physical carton',
+  })
+})
+
+test('added cartons never reuse retired history or source-fact identities and get no copied labels', async () => {
+  const r = rows(1),
+    state = await saved(r),
+    batch = state.batches[0]
+  batch.entitlementIndices = [9, 3]
+  batch.unitLabels = { 9: 'Carton nine', 3: 'Carton three' }
+  batch.cartonHistory = [
+    { ...structuredClone(batch), count: 4, entitlementIndices: [9, 3, 17, 22] },
+    { count: 25 },
+    { sourceFacts: { count: 2, entitlementIndices: [30, 32] } },
+  ]
+  const result = planStoreOrderUpdate(state, {
+    target,
+    candidate: await candidate([{ ...r[0], boxes: 4, quantity: 20 }]),
+  })
+  assert.deepEqual(result.issues, [])
+  const after = result.cartonBatchChanges[0].after
+  assert.deepEqual(after.entitlementIndices, [9, 3, 33, 34])
+  assert.deepEqual(after.unitLabels, { 9: 'Carton nine', 3: 'Carton three' })
+  assert.deepEqual(after.cartonHistory, batch.cartonHistory)
+})
+
+test('a numbered single carton can grow without copying its reported number onto new cartons', async () => {
+  const r = [{ ...rows(1)[0], boxes: 1, perbox: 10 }],
+    state = await saved(r),
+    batch = state.batches[0]
+  batch.cartonNumber = 'Supplier carton 7'
+  batch.labelOrigin = 'reported'
+  batch.entitlementIndices = [7]
+  const result = planStoreOrderUpdate(state, {
+    target,
+    candidate: await candidate([{ ...r[0], boxes: 3, quantity: 30 }]),
+  })
+  assert.deepEqual(result.issues, [])
+  const after = result.cartonBatchChanges[0].after,
+    units = physicalUnits(after)
+  assert.equal(after.cartonNumber, undefined)
+  assert.deepEqual(after.entitlementIndices, [7, 8, 9])
+  assert.deepEqual(after.unitLabels, { 7: 'Supplier carton 7' })
+  assert.equal(units[0].reference, 'Supplier carton 7')
+  assert.deepEqual(
+    units.map((unit) => unit.labelOrigin),
+    ['reported', 'internal', 'internal']
   )
+  assert.equal(new Set(units.map((unit) => unit.reference)).size, 3)
+})
+
+test('authoritative count replacement clears individual facts but preserves compatible operational decisions', async () => {
+  const r = rows(1),
+    state = await saved(r),
+    batch = state.batches[0]
+  batch.entitlementIndices = [3, 5]
+  batch.unitContents = {
+    3: [
+      {
+        orderId: target.orderId,
+        entryId: batch.contents[0].entryId,
+        quantity: '4',
+      },
+    ],
+  }
+  batch.unitMeasurements = { 5: { weight: '10' } }
+  batch.received = 1
+  batch.loaded = 1
+  const input = {
+      target,
+      candidate: await candidate([{ ...r[0], boxes: 1, perbox: 10, kg: '5' }]),
+    },
+    result = planStoreOrderUpdate(state, input)
+  assert.deepEqual(result.issues, [])
+  const after = result.cartonBatchChanges[0].after
+  assert.equal(after.unitContents, undefined)
+  assert.equal(after.unitMeasurements, undefined)
+  assert.equal(after.weight, '5')
+  assert.equal(after.received, 1)
+  assert.equal(after.loaded, 1)
+  for (const field of ['received', 'loaded']) {
+    const blockedState = structuredClone(state)
+    blockedState.batches[0][field] = 2
+    const blocked = planStoreOrderUpdate(blockedState, input)
+    assert.deepEqual(
+      blocked.issues.map((issue) => issue.code),
+      ['STORE_UPDATE_CARTON_CONFLICT']
+    )
+    assert.equal(blocked.issues[0][field], 2)
+    assert.equal(blocked.issues[0].afterCount, 1)
+    assert.equal(blocked.cartonBatchChanges.length, 0)
+  }
 })
 
 test('account/store isolation and invalid preparations fail closed', async () => {

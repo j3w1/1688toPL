@@ -7,6 +7,11 @@ import { productDetailsSummary } from './product-detail-edits.js'
 import { spreadsheetDeclaration } from './spreadsheet-properties.js'
 import { setGroupSizeMode } from './packing-model.js'
 import { reviewPackingChanges } from './packing-review.js'
+import {
+  storeUpdateReviewIssues,
+  storeUpdateIssueContext,
+  storeUpdateOperationalContext,
+} from './store-import-update-review.js'
 
 /** Unsaved authoring lives outside the mounted card window. */
 export function mountStoreImportCodeReview(
@@ -108,11 +113,17 @@ export function mountStoreImportCodeReview(
       variantId: issue.variantId || detail.variantId || owner.variantId,
       field:
         issue.field ||
-        (String(issue.code).includes('SIZE') ? 'sizeSuffix' : 'baseCode'),
+        (String(issue.code).includes('SIZE')
+          ? 'sizeSuffix'
+          : issue.batchId || issue.containerNames?.length
+            ? undefined
+            : 'baseCode'),
     }
   }
   function issueText(issue) {
     const fragment = el('span', m(issue.message, issue.params))
+    fragment.append(el('span', storeUpdateIssueContext(issue)))
+    fragment.append(el('small', storeUpdateOperationalContext(issue)))
     if (issue.containerNames?.length)
       fragment.append(el('span', ` · ${issue.containerNames.join(', ')}`))
     if (issue.values?.length)
@@ -242,7 +253,7 @@ export function mountStoreImportCodeReview(
         )
       )
     else {
-      const visible = (review.issues || []).filter((issue) => {
+      const visible = storeUpdateReviewIssues(review).filter((issue) => {
         if (issue.severity === 'warning') return false
         const target = targetOf(issue),
           active = document.activeElement
@@ -264,7 +275,9 @@ export function mountStoreImportCodeReview(
           'p',
           m(
             visible.length
-              ? 'Resolve these code issues before importing.'
+              ? review.target
+                ? 'Resolve these issues before updating the purchase.'
+                : 'Resolve these code issues before importing.'
               : 'Finish editing the code field to check its format.'
           )
         )
@@ -277,7 +290,16 @@ export function mountStoreImportCodeReview(
         button.type = 'button'
         button.append(issueText(issue))
         button.addEventListener('click', () => {
+          if (issue.incomingRow === null && issue.previousRow != null) {
+            button.focus()
+            return
+          }
           const node = windowed.ensureVisible(target.groupId || entries[0]?.key)
+          if (!target.field && node) {
+            node.tabIndex = -1
+            node.focus()
+            return
+          }
           if (
             target.groupId &&
             ['spanishName', 'category', 'material'].includes(target.field)
