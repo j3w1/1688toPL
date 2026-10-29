@@ -673,6 +673,9 @@ test('carton reductions and additions review in every language and update the sa
   await expect(review).toContainText('Cartons reduced: 6 → 4')
   expect(await state(extension)).toEqual(before)
   await dialog.locator('[data-action="review-update-codes"]').click()
+  await expect(
+    dialog.locator('[data-action="update-store-purchase"]')
+  ).toBeEnabled()
   await dialog
     .locator('[data-action="update-store-purchase"]')
     .evaluate((node) => {
