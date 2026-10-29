@@ -1,6 +1,9 @@
 import { test, expect } from './extension-fixture.mjs'
 import { workbookFile, png } from '../fixtures/store-workbook-fixture.mjs'
 import { SYNTHETIC_PHOTO } from '../fixtures/container-fixture.mjs'
+import { readFile } from 'node:fs/promises'
+import { CFB } from 'xlsx'
+import { savedBrowserDownload } from './smart-workspace-helpers.mjs'
 
 const originalRows = [
   { group: '1', description: 'Synthetic cup', price: '3.00' },
@@ -162,6 +165,436 @@ async function changes(dialog) {
   await expect(review).toBeVisible()
   return review
 }
+
+async function editPhotos(extension, orderId) {
+  return extension.inspector.evaluate(async (orderId) => {
+    const db = await window.testRepository,
+      record = (await db.exportBackup({})).orders.find(
+        (record) => record.snapshot.orderId === orderId
+      )
+    for (const [index, item] of record.snapshot.items.entries()) {
+      const canvas = document.createElement('canvas')
+      canvas.width = canvas.height = 640
+      const context = canvas.getContext('2d')
+      context.fillStyle = ['#ffeeaa', '#aaffee', '#eeaaff'][index % 3]
+      context.fillRect(0, 0, 640, 640)
+      await db.setProductPhoto(orderId, item.entryId, {
+        originalPhoto: item.photos[0],
+        thumbnail: canvas.toDataURL('image/png'),
+        edit: {
+          fit: 'cover',
+          scale: 1.2,
+          x: 0.05,
+          y: 0,
+          background: '#ffffff',
+          tags: [
+            {
+              id: `tag-${item.entryId}`,
+              code: `TAG ${item.entryId}`,
+              x: 0.5,
+              y: 0.5,
+              labelX: 0.8,
+              labelY: 0.2,
+            },
+          ],
+          tagScale: 2,
+          pointerScale: 1,
+          invertPointer: false,
+        },
+      })
+    }
+  }, orderId)
+}
+
+test('edited shared-original photos render independently, keep by default and replace only the reviewed image after retry', async ({
+  extension,
+}) => {
+  test.setTimeout(60000)
+  const orderId = await seed(extension)
+  await editPhotos(extension, orderId)
+  const before = await state(extension),
+    updated = originalRows.map((row, index) => ({
+      ...row,
+      boxes: index === 0 ? 2 : 1,
+      kg: 2.5,
+    })),
+    { page, dialog } = await open(extension, workbook(updated)),
+    review = await changes(dialog)
+  await expect(review).toContainText('3 edited photos kept')
+  await review.locator('[data-update-filter="photos"]').click()
+  const first = review.locator('[data-incoming-row="2"]'),
+    second = review.locator('[data-incoming-row="3"]'),
+    current = first
+      .locator('figure')
+      .filter({ hasText: 'Current edited photo' })
+      .locator('img'),
+    result = first
+      .locator('figure')
+      .filter({ hasText: 'Result after update' })
+      .locator('img'),
+    workbookImage = first
+      .locator('figure')
+      .filter({ hasText: 'Workbook photo' })
+      .locator('img')
+  await expect(current).toHaveAttribute('src', /^data:image\//)
+  await expect(result).toHaveAttribute('src', /^data:image\//)
+  await expect(
+    second
+      .locator('figure')
+      .filter({ hasText: 'Current edited photo' })
+      .locator('img')
+  ).toHaveAttribute('src', /^data:image\//)
+  expect(await current.getAttribute('src')).toBe(
+    await result.getAttribute('src')
+  )
+  expect(await current.getAttribute('src')).not.toBe(
+    await workbookImage.getAttribute('src')
+  )
+  expect(await current.getAttribute('src')).not.toBe(
+    await second
+      .locator('figure')
+      .filter({ hasText: 'Current edited photo' })
+      .locator('img')
+      .getAttribute('src')
+  )
+  await first
+    .getByRole('button', { name: 'Enlarge Current edited photo', exact: true })
+    .click()
+  const preview = page.locator('.store-update-photo-preview')
+  await expect(preview).toBeVisible()
+  await expect(preview.locator('img')).toHaveAttribute('src', /^data:image\//)
+  await preview.getByRole('button', { name: 'Done', exact: true }).click()
+  await page.setViewportSize({ width: 390, height: 740 })
+  for (const [language, caption] of [
+    ['es', 'Foto editada actual'],
+    ['zh', '当前编辑后的图片'],
+    ['en', 'Current edited photo'],
+  ]) {
+    await dialog
+      .locator(`.popup-language-toggle [data-language="${language}"]`)
+      .click()
+    await expect(first).toContainText(caption)
+    expect(
+      await dialog.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)
+    ).toBe(true)
+  }
+  expect(await state(extension)).toEqual(before)
+  await first
+    .getByRole('radio', { name: 'Use workbook photo', exact: true })
+    .check()
+  await expect(review).toContainText('2 edited photos kept')
+  await expect(
+    first.getByRole('radio', { name: 'Use workbook photo', exact: true })
+  ).toBeChecked()
+  await dialog.locator('[data-action="review-update-codes"]').click()
+  await dialog.locator('[data-action="back-import-workbook"]').click()
+  await expect(
+    first.getByRole('radio', { name: 'Use workbook photo', exact: true })
+  ).toBeChecked()
+  expect(await state(extension)).toEqual(before)
+  await dialog.locator('[data-action="review-update-codes"]').click()
+  await page.evaluate(() => {
+    const put = IDBObjectStore.prototype.put
+    IDBObjectStore.prototype.put = function (...args) {
+      if (this.name === 'orders') {
+        IDBObjectStore.prototype.put = put
+        throw new Error('Synthetic photo update failure')
+      }
+      return put.apply(this, args)
+    }
+  })
+  await dialog.locator('[data-action="update-store-purchase"]').click()
+  await expect(dialog).toContainText('Synthetic photo update failure')
+  expect(await state(extension)).toEqual(before)
+  await dialog.locator('[data-action="back-import-workbook"]').click()
+  await expect(
+    first.getByRole('radio', { name: 'Use workbook photo', exact: true })
+  ).toBeChecked()
+  await dialog.locator('[data-action="review-update-codes"]').click()
+  await dialog.locator('[data-action="update-store-purchase"]').click()
+  await expect(dialog).toHaveCount(0)
+  const after = await state(extension),
+    items = after.orders[0].snapshot.items,
+    oldItems = before.orders[0].snapshot.items
+  expect(items[0].photoEdits).toBeUndefined()
+  expect(items[0].quantity).toBe('20')
+  for (const index of [1, 2]) {
+    expect(items[index].photoEdits).toEqual(oldItems[index].photoEdits)
+    expect(items[index].thumbnail).toBe(oldItems[index].thumbnail)
+  }
+  expect(after.preparations[0].groups).toEqual(before.preparations[0].groups)
+})
+
+test('history photo-only recovery is explicit, reversible and preserves the already updated purchase values', async ({
+  extension,
+}) => {
+  const orderId = await seed(extension)
+  await editPhotos(extension, orderId)
+  await extension.inspector.evaluate(async (raw) => {
+    const db = await window.testRepository,
+      order = (await db.exportBackup({})).orders[0],
+      target = { accountId: 'local', orderId: order.snapshot.orderId },
+      review = await db.reviewStoreOrderUpdate({ ...raw, target }),
+      photoChoices = structuredClone(review.photoChoices)
+    for (const product of review.photoChanges)
+      for (const slot of product.slots)
+        photoChoices[product.entryId][slot.key].action = 'workbook'
+    const replace = await db.reviewStoreOrderUpdate({ ...review, photoChoices })
+    await db.updateStoreOrder({
+      ...replace,
+      intentId: 'simulate-reviewed-photo-replacement',
+    })
+  }, source())
+  const before = await state(extension),
+    { dialog } = await open(extension, workbook(originalRows)),
+    review = await changes(dialog)
+  await expect(review).toContainText('No changes to apply')
+  await review.locator('[data-update-filter="photos"]').click()
+  await expect(review.locator('[data-incoming-row="2"]')).toContainText(
+    'Previous edited photo'
+  )
+  await review.locator('[data-photo-bulk="previous"]').click()
+  await expect(review).toContainText('3 previous edits selected')
+  await expect(
+    dialog.locator('[data-action="review-update-codes"]')
+  ).toBeEnabled()
+  await review
+    .getByRole('button', { name: 'Reset photo choices', exact: true })
+    .click()
+  await expect(review).toContainText('No changes to apply')
+  expect(await state(extension)).toEqual(before)
+  await review.locator('[data-photo-bulk="previous"]').click()
+  await dialog.locator('[data-action="review-update-codes"]').click()
+  await dialog.locator('[data-action="update-store-purchase"]').click()
+  await expect(dialog).toHaveCount(0)
+  const after = await state(extension)
+  for (const item of after.orders[0].snapshot.items)
+    expect(item.photoEdits['0'].tags[0].code).toBe(`TAG ${item.entryId}`)
+  expect({
+    ...after.orders[0].snapshot.spreadsheet,
+    importedAt: before.orders[0].snapshot.spreadsheet.importedAt,
+  }).toEqual(before.orders[0].snapshot.spreadsheet)
+  expect(after.orders[0].snapshot.purchasedAt).toBe(
+    before.orders[0].snapshot.purchasedAt
+  )
+  expect(
+    after.orders[0].snapshot.items.map(({ quantity, price }) => ({
+      quantity,
+      price,
+    }))
+  ).toEqual(
+    before.orders[0].snapshot.items.map(({ quantity, price }) => ({
+      quantity,
+      price,
+    }))
+  )
+  expect(after.cartonBatches).toEqual(before.cartonBatches)
+  expect(after.preparations[0].groups).toEqual(before.preparations[0].groups)
+})
+
+test('pairing a changed workbook photo to an edited current image keeps its crop and tags by default', async ({
+  extension,
+}) => {
+  test.setTimeout(60000)
+  const raw = source()
+  raw.rows[0].photos.push(SYNTHETIC_PHOTO)
+  const orderId = await extension.inspector.evaluate(async (raw) => {
+    const db = await window.testRepository,
+      review = await db.reviewStoreOrderImport(raw),
+      saved = await db.importStoreOrder({
+        ...review,
+        intentId: 'paired-photo-seed',
+      }),
+      item = saved.snapshot.items[0]
+    await db.setProductPhoto(saved.snapshot.orderId, item.entryId, {
+      originalPhoto: item.photos[0],
+      thumbnail: raw.rows[0].photos[0],
+      edit: {
+        fit: 'cover',
+        scale: 1.3,
+        tags: [
+          {
+            id: 'preserve',
+            code: 'KEEP ME',
+            x: 0.5,
+            y: 0.5,
+            labelX: 0.9,
+            labelY: 0.1,
+          },
+        ],
+      },
+    })
+    return saved.snapshot.orderId
+  }, raw)
+  const originalPhoto = await extension.inspector.evaluate(async (orderId) => {
+    const db = await window.testRepository,
+      item = (await db.exportBackup({})).orders.find(
+        (record) => record.snapshot.orderId === orderId
+      ).snapshot.items[0]
+    return {
+      original: (await db.getImage(item.photos[0])).dataUrl,
+      edit: item.photoEdits['0'],
+      entryId: item.entryId,
+    }
+  }, orderId)
+  const renderer = await extension.context.newPage()
+  await renderer.goto(`${extension.origin}/fixture.html`)
+  const expectedThumbnail = await renderer.evaluate(
+    async ({ original, edit }) => {
+      const { squareProductPhoto } = await import('/src/product-photo.js')
+      return squareProductPhoto(original, edit)
+    },
+    originalPhoto
+  )
+  const expectedTableThumbnail = await renderer.evaluate(async (thumbnail) => {
+    const { pngThumbnail } = await import('/src/clipboard.js')
+    return pngThumbnail(thumbnail, { size: 240 })
+  }, expectedThumbnail)
+  await renderer.close()
+  await extension.inspector.evaluate(
+    async ({ orderId, entryId, thumbnail }) => {
+      const db = await window.testRepository
+      await db.setProductPhoto(orderId, entryId, { thumbnail })
+    },
+    { orderId, entryId: originalPhoto.entryId, thumbnail: expectedThumbnail }
+  )
+  const before = await state(extension),
+    newer = await extension.inspector.evaluate(() => {
+      const canvas = document.createElement('canvas')
+      canvas.width = canvas.height = 48
+      const context = canvas.getContext('2d')
+      context.fillStyle = '#17ac80'
+      context.fillRect(0, 0, 48, 48)
+      return canvas.toDataURL('image/png')
+    }),
+    { page, dialog } = await open(
+      extension,
+      workbook(originalRows, Buffer.from(newer.split(',')[1], 'base64'))
+    ),
+    review = await changes(dialog),
+    product = review.locator('[data-incoming-row="2"]')
+  await product.locator('.store-update-photo-product summary').click()
+  const pairing = product.getByLabel(
+    'Which current photo does this workbook image replace?',
+    { exact: true }
+  )
+  await expect(pairing).toBeVisible()
+  await pairing.selectOption({ label: 'Current photo 1' })
+  const first = product.locator('.store-update-photo-slot').first()
+  await expect(
+    first.getByRole('radio', { name: 'Keep current photo', exact: true })
+  ).toBeChecked()
+  await expect(
+    dialog.locator('[data-action="review-update-codes"]')
+  ).toBeEnabled()
+  expect(await state(extension)).toEqual(before)
+  await dialog.locator('[data-action="review-update-codes"]').click()
+  await dialog.locator('[data-action="update-store-purchase"]').click()
+  await expect(dialog).toHaveCount(0)
+  const after = await state(extension),
+    previous = before.orders.find(
+      (record) => record.snapshot.orderId === orderId
+    ).snapshot.items[0],
+    updated = after.orders.find((record) => record.snapshot.orderId === orderId)
+      .snapshot.items[0]
+  expect(updated.photoEdits['0']).toEqual(previous.photoEdits['0'])
+  expect(updated.thumbnail).toBe(expectedThumbnail)
+  expect(updated.photos[0]).toBe(previous.photos[0])
+  expect(updated.sourcePhotos[0]).not.toBe(previous.photos[0])
+  await page.reload()
+  const row = page
+    .locator('#sheet-body tr[data-selection-key]')
+    .filter({ hasText: 'Synthetic cup' })
+    .first()
+  await expect(row.locator('.thumb-cell img')).toHaveAttribute(
+    'src',
+    expectedTableThumbnail
+  )
+  await row
+    .getByRole('button', {
+      name: `Zoom product photo ${originalPhoto.entryId}`,
+      exact: true,
+    })
+    .click()
+  const viewer = page.getByRole('dialog', {
+    name: 'Product photo',
+    exact: true,
+  })
+  await expect(viewer.locator('.photo-viewport img')).toHaveAttribute(
+    'src',
+    expectedThumbnail
+  )
+  await viewer
+    .getByRole('button', { name: 'Close product photo', exact: true })
+    .click()
+  if (await page.locator('#clear-rows').isEnabled())
+    await page.locator('#clear-rows').click()
+  await row
+    .getByRole('checkbox', {
+      name: `Select product ${originalPhoto.entryId}`,
+      exact: true,
+    })
+    .check()
+  await page.evaluate(() =>
+    localStorage.setItem(
+      '1688-excel-image-columns',
+      JSON.stringify({
+        order: ['thumbnail', 'description', 'quantity'],
+        selected: ['thumbnail', 'description', 'quantity'],
+      })
+    )
+  )
+  await page.locator('#copy-excel-image').click()
+  const excel = page.locator('.image-copy-dialog'),
+    exportButton = excel.locator('[data-action="download-excel-table"]')
+  await expect(exportButton).toBeEnabled()
+  const pending = page.waitForEvent('download')
+  await exportButton.click()
+  const download = await pending,
+    bytes = await readFile(await savedBrowserDownload(extension, download)),
+    archive = CFB.read(bytes, { type: 'buffer' }),
+    photos = archive.FullPaths.flatMap((path, index) =>
+      /\/xl\/media\/[^/]+$/.test(path)
+        ? [{ path, bytes: Buffer.from(archive.FileIndex[index].content) }]
+        : []
+    )
+  expect(photos).toHaveLength(1)
+  const exported = `data:image/${photos[0].path.endsWith('.png') ? 'png' : 'jpeg'};base64,${photos[0].bytes.toString('base64')}`
+  const samples = await page.evaluate(
+    async ({ expected, exported, incoming }) => {
+      const sample = async (source) => {
+        const image = new Image()
+        image.src = source
+        await image.decode()
+        const canvas = document.createElement('canvas')
+        canvas.width = image.naturalWidth
+        canvas.height = image.naturalHeight
+        const context = canvas.getContext('2d')
+        context.drawImage(image, 0, 0)
+        return [
+          ...context.getImageData(
+            Math.floor(canvas.width * 0.1),
+            Math.floor(canvas.height * 0.85),
+            1,
+            1
+          ).data,
+        ].slice(0, 3)
+      }
+      return Promise.all([sample(expected), sample(exported), sample(incoming)])
+    },
+    { expected: expectedThumbnail, exported, incoming: newer }
+  )
+  expect(
+    samples[1].every((value, index) => Math.abs(value - samples[0][index]) < 15)
+  ).toBe(true)
+  expect(
+    samples[1].reduce(
+      (sum, value, index) => sum + Math.abs(value - samples[2][index]),
+      0
+    )
+  ).toBeGreaterThan(100)
+  await excel.getByRole('button', { name: 'Done', exact: true }).click()
+})
 
 test('carton reductions and additions review in every language and update the same batches once', async ({
   extension,
@@ -574,9 +1007,10 @@ test('changed photos show saved and unsaved originals before any update is commi
   const review = await changes(dialog)
   const changedPhoto = review.locator('[data-incoming-row="4"]'),
     images = changedPhoto.locator('img')
-  await expect(images).toHaveCount(2)
+  await expect(images).toHaveCount(3)
   await expect(changedPhoto).toContainText('Current photo')
-  await expect(changedPhoto).toContainText('Updated photo')
+  await expect(changedPhoto).toContainText('Workbook photo')
+  await expect(changedPhoto).toContainText('Result after update')
   for (const image of await images.all()) {
     await expect(image).toHaveAttribute('src', /^data:image\//)
     await image.evaluate((node) => node.decode())
@@ -585,7 +1019,10 @@ test('changed photos show saved and unsaved originals before any update is commi
   expect(await images.nth(0).getAttribute('src')).not.toBe(
     await images.nth(1).getAttribute('src')
   )
-  const added = review.locator('[data-incoming-row="3"] img')
+  expect(await images.nth(2).getAttribute('src')).toBe(
+    await images.nth(1).getAttribute('src')
+  )
+  const added = review.locator('[data-incoming-row="3"] img').first()
   await expect(added).toHaveAttribute('src', /^data:image\//)
   await added.evaluate((node) => node.decode())
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()

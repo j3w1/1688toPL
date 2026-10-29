@@ -115,7 +115,9 @@ export function mountStoreImportCodeReview(
         issue.field ||
         (String(issue.code).includes('SIZE')
           ? 'sizeSuffix'
-          : issue.batchId || issue.containerNames?.length
+          : issue.batchId ||
+              issue.containerNames?.length ||
+              String(issue.code).startsWith('STORE_UPDATE_PHOTO_')
             ? undefined
             : 'baseCode'),
     }

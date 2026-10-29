@@ -2,6 +2,7 @@ import { element as el } from './ui.js'
 import { message as m, bindText, bindAttribute } from './i18n.js'
 import { createVirtualList } from './virtual-list.js'
 import { normalizePrice } from './money.js'
+import { createStoreImportPhotoReview } from './store-import-photo-review.js'
 
 export function storeUpdatePriceDifference(before, after) {
   const [a, af] = normalizePrice(before).split('.'),
@@ -253,6 +254,21 @@ const valueText = (value, field) => {
 
 /** Display filters never change the complete source replacement. */
 export function storeUpdateRowsForFilter(rows, filter) {
+  if (filter === 'photos')
+    return rows.filter((row) =>
+      row.photoChanges?.some(
+        (product) =>
+          product.changed ||
+          product.sourceChanged ||
+          product.customized ||
+          product.slots.some(
+            (slot) =>
+              slot.pairingRequired ||
+              slot.current?.edit !== undefined ||
+              slot.previous
+          )
+      )
+    )
   if (filter === 'prices')
     return rows.filter((row) =>
       ['increased', 'decreased'].includes(row.priceStatus)
@@ -271,6 +287,7 @@ export function mountStoreImportUpdateReview(
     repository,
     onMappingChange,
     onIdentityConfirmation,
+    onPhotoChoicesChange,
     sourceRows = [],
   }
 ) {
@@ -309,6 +326,7 @@ export function mountStoreImportUpdateReview(
     ['prices', 'Price changes'],
     ['added', 'Added'],
     ['removed', 'Removed'],
+    ['photos', 'Photos'],
     ['all', 'All products'],
   ]
   for (const [key, label] of options) {
@@ -331,6 +349,11 @@ export function mountStoreImportUpdateReview(
     empty,
     list
   )
+  const photoReview = createStoreImportPhotoReview({
+    host,
+    imageSource,
+    onChange: (choices) => onPhotoChoicesChange?.(choices),
+  })
 
   async function imageSource(url) {
     if (!url?.startsWith('local-image:')) return url
@@ -348,7 +371,9 @@ export function mountStoreImportUpdateReview(
           }
         })()
       )
-    return assetRequests.get(url)
+    const source = await assetRequests.get(url)
+    if (!source) assetRequests.delete(url)
+    return source
   }
   function photo(url, label) {
     const figure = el('figure'),
@@ -413,7 +438,11 @@ export function mountStoreImportUpdateReview(
     const photos = el('div', undefined, 'store-update-photos'),
       oldPhoto = before?.photos?.[0],
       newPhoto = after?.photos?.[0]
-    if (oldPhoto && newPhoto && oldPhoto !== newPhoto)
+    const photoChoices = photoReview.render(change)
+    if (photoChoices) {
+      card.classList.add('has-photo-review')
+      content.append(photoChoices)
+    } else if (oldPhoto && newPhoto && oldPhoto !== newPhoto)
       photos.append(
         photo(oldPhoto, 'Current photo'),
         photo(newPhoto, 'Updated photo')
@@ -596,7 +625,8 @@ export function mountStoreImportUpdateReview(
       physical.append(caption, header, body)
       content.append(physical)
     }
-    card.append(photos, content)
+    if (photoChoices) card.append(content)
+    else card.append(photos, content)
     return card
   }
   function paintRows() {
@@ -609,11 +639,15 @@ export function mountStoreImportUpdateReview(
       )
     const visible = (review.rowChanges || []).map((row) => {
       const physicalFields = storeUpdatePhysicalFields(review, row)
+      const photoChanges = photoReview.rows(row)
       return {
         ...row,
         physicalFields,
+        photoChanges,
         status:
-          physicalFields.length && row.status === 'unchanged'
+          (physicalFields.length ||
+            photoChanges.some((product) => product.changed)) &&
+          row.status === 'unchanged'
             ? 'changed'
             : row.status,
       }
@@ -651,6 +685,7 @@ export function mountStoreImportUpdateReview(
     windowed.update()
   }
   function paint() {
+    photoReview.setReview(review)
     for (const image of review.sourceCandidate?.images ||
       review.candidate?.images ||
       [])
@@ -700,6 +735,7 @@ export function mountStoreImportUpdateReview(
     )
     if (!summary.hasChanges)
       highlights.append(el('strong', m('No changes to apply')))
+    if (review.photoSummary) highlights.append(photoReview.summary())
     for (const change of review.sourceMetadataChanges || [])
       highlights.append(
         el(
@@ -816,6 +852,7 @@ export function mountStoreImportUpdateReview(
           host.querySelector('input[name="identityChangesConfirmed"]')?.focus()
           return
         }
+        const photoIssue = photoReview.prepareIssue(issue)
         filter = 'all'
         paintRows()
         const index = (review.rowChanges || []).findIndex((row) =>
@@ -830,6 +867,7 @@ export function mountStoreImportUpdateReview(
             `update-${change.incomingRow ?? 'removed'}-${change.previousRow ?? index}`
           )
         if (node) {
+          if (photoIssue && photoReview.focusIssue(node, issue)) return
           node.tabIndex = -1
           ;(node.querySelector('select') || node).focus()
         } else heading.focus()
@@ -844,8 +882,11 @@ export function mountStoreImportUpdateReview(
       return review
     },
     setReview(next) {
+      const top = list.scrollTop
       review = next
       paint()
+      list.scrollTop = top
+      windowed?.update()
     },
     update() {
       windowed?.update()
@@ -855,6 +896,7 @@ export function mountStoreImportUpdateReview(
     },
     destroy() {
       disposed = true
+      photoReview.destroy()
       windowed?.destroy()
       host.replaceChildren()
     },

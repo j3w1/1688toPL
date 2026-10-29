@@ -58,6 +58,18 @@ Use the store number or factory name as the filename, choose the matching purcha
 
 The new workbook is authoritative for all supported imported values: missing rows are removed, new rows are added, and blank optional measurements become unknown. Excel also replaces current unsealed carton counts, capacities, dimensions, weight and volume, including manual facts. Matched products retain their entry/group/variant/carton identities, CE codes and authored names, categories, materials, intentional blanks, notes and tags. Changed photos remain visible in the comparison.
 
+### Review photos before updating
+
+<a href="../screenshots/store-spreadsheet-photos.png"><img src="../screenshots/store-spreadsheet-photos.png" alt="Synthetic comparison showing an edited product photo kept beside the workbook original and the resulting photo" width="800" /></a>
+
+Edited photos are kept automatically; untouched and new photos use the workbook image. Saved crops, backgrounds, tags, pointer positions and deliberate tag clears count as authored edits. **Photos** filters the review to image choices without changing the rest of the purchase update. The summary counts edited photos kept, workbook photos selected and previous edits selected for recovery.
+
+Compare **Current edited photo**, **Workbook photo** and **Result after update**, including the saved composition and annotations. Enlarge a preview to inspect it without saving anything. **Keep current photo** retains its original and edits; **Use workbook photo** removes those edits only for that selected photo. Products sharing an original picture keep their own independent tags. Multiple pictures can be reviewed individually; changed pictures that cannot be matched unambiguously need an explicit pairing or an **Add as new** choice.
+
+When retained history contains a matching earlier edit, **Use previous edited photo** shows its saved date and allows photo-only recovery. This does not restore old quantities, prices, cartons or product codes. Historical edits are never selected automatically. The bulk photo actions state their affected counts and remain reversible until **Update purchase**. Back and code-suggestion reset preserve photo choices; Cancel writes nothing.
+
+The imported workbook originals remain source evidence even when another display photo is selected. Both originals and chosen compositions survive backups. A photo edited in another tab invalidates the review so that its newer edits cannot be overwritten. Importing the same workbook with the same effective choices reports **No changes to apply**.
+
 Different carton counts are supported. The review states **Cartons reduced** or **Cartons increased**, with current → updated counts and cartons added or retired. A reduction retains the first physical cartons in their existing order; an increase adds fresh identities without reusing retired ones. Reported labels remain with retained cartons, while new cartons receive internal references. Previous counts, labels and individual-carton facts remain in history. Existing received/loading decisions and protected shipment records must still be consistent with the replacement; a conflict identifies the affected product or container.
 
 Rows are matched by supported product identity, not their Excel position. Reordered rows retain identities; ambiguous matches need an explicit existing-row or new-row choice. Changed grouping/declarations that conflict with assigned codes require a correction review. New variants can join the existing group base; only genuinely new groups need new bases.

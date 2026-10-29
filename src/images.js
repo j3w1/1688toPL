@@ -71,6 +71,7 @@ export function collectImageReferences({
     for (const item of snapshot.items) {
       add(item.thumbnail)
       for (const url of item.photos || []) add(url)
+      for (const url of item.sourcePhotos || []) add(url)
     }
     for (const row of snapshot.spreadsheet?.rows || [])
       for (const url of row.photos || []) add(url)

@@ -451,6 +451,32 @@ try {
   ).toBeEnabled()
   await updateDialog.locator('[data-action="import-and-assign-codes"]').click()
   await expect(updateDialog).toHaveCount(0)
+  const photoSeed = await build({
+    absWorkingDir: process.cwd(),
+    stdin: {
+      resolveDir: process.cwd(),
+      contents: `
+        import { openDatabase } from './src/database.js';
+        import { squareProductPhoto } from './src/product-photo.js';
+        void (async () => {
+          const db = await openDatabase();
+          const record = (await db.listOrders()).find(value => value.snapshot.store?.name === 'Synthetic update factory');
+          const item = record.snapshot.items.find(value => value.sourceGroup === 'Trays');
+          const original = await db.getImage(item.photos[0]);
+          const edit = { fit: 'contain', scale: 1.15, x: 0, y: 0, background: '#ffffff', tags: [{ id: 'synthetic-tag', code: 'MEDIUM', x: 0.5, y: 0.5, labelX: 0.8, labelY: 0.8 }], tagScale: 2, pointerScale: 1 };
+          await db.setProductPhoto(record.snapshot.orderId, item.entryId, { originalPhoto: item.photos[0], edit, thumbnail: await squareProductPhoto(original.dataUrl, edit) });
+          db.close();
+          window.syntheticPhotoSeedReady = true;
+        })();
+      `,
+    },
+    bundle: true,
+    write: false,
+    format: 'iife',
+    target: 'chrome120',
+  })
+  await updatePage.addScriptTag({ content: photoSeed.outputFiles[0].text })
+  await updatePage.waitForFunction(() => window.syntheticPhotoSeedReady)
   await updatePage
     .getByRole('button', { name: 'Import spreadsheet', exact: true })
     .click()
@@ -471,10 +497,21 @@ try {
     updateDialog.locator('[data-action="review-update-codes"]')
   ).toBeEnabled()
   await updateDialog
-    .getByText('Cartons reduced: 3 → 2', { exact: true })
-    .scrollIntoViewIfNeeded()
+    .locator('.store-import-body, .store-update-list')
+    .evaluateAll((nodes) => nodes.forEach((node) => (node.scrollTop = 0)))
   await updateDialog.screenshot({
     path: 'screenshots/store-spreadsheet-update.png',
+  })
+  const photoComparison = updateDialog.locator(
+    '[data-source-group="Trays"] .store-update-photo-review'
+  )
+  await photoComparison.scrollIntoViewIfNeeded()
+  for (const image of await photoComparison.locator('img').all()) {
+    await expect(image).toHaveAttribute('src', /^data:image\//)
+    await image.evaluate((node) => node.decode())
+  }
+  await photoComparison.locator('.store-update-photo-slot').screenshot({
+    path: 'screenshots/store-spreadsheet-photos.png',
   })
   await updatePage.setViewportSize({ width: 390, height: 740 })
   await updateDialog

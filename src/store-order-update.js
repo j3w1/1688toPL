@@ -24,6 +24,10 @@ import {
   createNameSuggester,
   refreshPreparationNames,
 } from './product-vocabulary.js'
+import {
+  importedProductPhotos,
+  planStoreUpdatePhotos,
+} from './store-order-update-photos.js'
 
 const clone = (value) => structuredClone(value)
 const numericFields = [
@@ -86,7 +90,7 @@ function sourceRows(snapshot, preparation) {
         ).values(),
       ],
       productNumber: items[0]?.productNumber || '',
-      photos: [...new Set(items.flatMap((item) => item.photos || []))],
+      photos: [...new Set(items.flatMap(importedProductPhotos))],
       variants: items.map((item) => ({
         variant: item.sourceVariant || '',
         size: item.sourceSize || '',
@@ -405,6 +409,7 @@ export function planStoreOrderUpdate(
     previousSuggestedPreparation,
     resetCodes = false,
     identityChangesConfirmed = false,
+    photoChoices,
   }
 ) {
   const previous = state.records.find(
@@ -568,6 +573,15 @@ export function planStoreOrderUpdate(
     ...item,
     entryId: idMap.get(item.entryId),
   }))
+  const photoReview = planStoreUpdatePhotos({
+    previous: old,
+    snapshot: next.snapshot,
+    images: next.images,
+    history: state.history || [],
+    photoChoices,
+  })
+  next.snapshot.items = photoReview.items
+  issues.push(...photoReview.issues)
   next.unitsPerCarton = Object.fromEntries(
     Object.entries(next.unitsPerCarton).map(([id, value]) => [
       idMap.get(id),
@@ -969,7 +983,11 @@ export function planStoreOrderUpdate(
           ? 'unresolved'
           : !before
             ? 'added'
-            : fields.length
+            : fields.length ||
+                photoReview.photoChanges.some(
+                  (photo) =>
+                    photo.changed && row.entryIds.includes(photo.entryId)
+                )
               ? 'changed'
               : 'unchanged',
       priceStatus = !before
@@ -1073,6 +1091,9 @@ export function planStoreOrderUpdate(
     identityChanges,
     identityChangesConfirmed,
     sourceMetadataChanges,
+    photoChoices: photoReview.photoChoices,
+    photoChanges: photoReview.photoChanges,
+    photoSummary: photoReview.photoSummary,
     expectedRevisions: reconciliationRevisions(state, target),
     cartonBatchChanges,
   }

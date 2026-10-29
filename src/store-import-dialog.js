@@ -616,11 +616,13 @@ export function openStoreImportDialog({
       submitted ||
       (reviewingChanges &&
         (!updateView?.review.summary?.hasChanges ||
-          updateView.review.issues?.some((issue) =>
-            [
-              'STORE_UPDATE_MAPPING_REQUIRED',
-              'STORE_UPDATE_IDENTITY_REVIEW_REQUIRED',
-            ].includes(issue.code)
+          updateView.review.issues?.some(
+            (issue) =>
+              [
+                'STORE_UPDATE_MAPPING_REQUIRED',
+                'STORE_UPDATE_IDENTITY_REVIEW_REQUIRED',
+              ].includes(issue.code) ||
+              issue.code?.startsWith('STORE_UPDATE_PHOTO_')
           ))) ||
       (reviewingCodes && (codeValidity.pending || !codeValidity.valid))
     resetCodes.disabled = busy || codeValidity.pending
@@ -660,7 +662,7 @@ export function openStoreImportDialog({
       codeReview.querySelector('input')?.focus()
     } else purchaseDate.focus()
   }
-  const setChangeStage = () => {
+  const setChangeStage = ({ preserveScroll = false } = {}) => {
     reviewingChanges = true
     reviewingCodes = false
     workbookReview.hidden = true
@@ -674,7 +676,7 @@ export function openStoreImportDialog({
       status,
       m('Review all replacements before updating this purchase.')
     )
-    body.scrollTop = 0
+    if (!preserveScroll) body.scrollTop = 0
     updateView?.update()
     updateSubmit()
   }
@@ -1120,6 +1122,7 @@ export function openStoreImportDialog({
                 previousSuggestedPreparation: draft.suggestedPreparation,
                 target: draft.target,
                 mappings: draft.mappings,
+                photoChoices: draft.photoChoices,
                 preparation: draft.preparation,
                 expectedRevisions: draft.expectedRevisions,
                 identityChangesConfirmed,
@@ -1150,9 +1153,12 @@ export function openStoreImportDialog({
       onMappingChange(row, previous) {
         return refreshChanges({ [row]: previous }, rows)
       },
+      onPhotoChoicesChange(choices) {
+        return refreshChanges({}, rows, choices)
+      },
     })
   }
-  const refreshChanges = async (mappings, rows) => {
+  const refreshChanges = async (mappings, rows, photoChoices) => {
     if (busy) return
     const current = generation
     setBusy(true)
@@ -1166,6 +1172,7 @@ export function openStoreImportDialog({
           updateDraft.suggestedPreparation,
         target: updateDraft.target,
         mappings: { ...updateDraft.mappings, ...mappings },
+        photoChoices: photoChoices ?? updateDraft.photoChoices,
         preparation: codeView?.review.preparation || updateDraft.preparation,
         expectedRevisions: updateDraft.expectedRevisions,
         identityChangesConfirmed,
@@ -1174,7 +1181,7 @@ export function openStoreImportDialog({
       updateDraft = result
       updateView.setReview(result)
       mountCodes(result, rows)
-      setChangeStage()
+      setChangeStage({ preserveScroll: photoChoices !== undefined })
     } catch (error) {
       fail(error)
     } finally {
@@ -1189,7 +1196,8 @@ export function openStoreImportDialog({
         updateDraft?.issues?.some(
           (issue) =>
             issue.code === 'STORE_UPDATE_MAPPING_REQUIRED' ||
-            issue.code === 'STORE_UPDATE_IDENTITY_REVIEW_REQUIRED'
+            issue.code === 'STORE_UPDATE_IDENTITY_REVIEW_REQUIRED' ||
+            issue.code?.startsWith('STORE_UPDATE_PHOTO_')
         )
       ) {
         updateView.showErrors()
@@ -1234,6 +1242,7 @@ export function openStoreImportDialog({
               previousSuggestedPreparation: draft.suggestedPreparation,
               target: draft.target,
               mappings: draft.mappings,
+              photoChoices: draft.photoChoices,
               preparation: draft.preparation,
               expectedRevisions: draft.expectedRevisions,
               identityChangesConfirmed,

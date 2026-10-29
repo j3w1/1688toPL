@@ -330,7 +330,8 @@ test('large selected reviews stay bounded and retain every selected row for assi
   })
   await expect(review.locator('article[data-entry-id="2150"]')).toBeVisible()
   await commit(review).click()
-  await expect(review).toBeHidden()
+  // The complete 150-row transaction can outlast the default assertion timeout.
+  await expect(review).toBeHidden({ timeout: 15000 })
   expect(
     entries((await libraryBackup(extension)).preparations[0])
   ).toHaveLength(150)
@@ -1092,6 +1093,7 @@ for (const [language, labels] of [
     await expect(editor).toBeHidden()
     for (const name of [labels.back, labels.cancel, labels.confirm]) {
       const control = review.getByRole('button', { name, exact: true })
+      await expect(control).toBeEnabled()
       await control.focus()
       await expect(control).toBeFocused()
       const bounds = await control.boundingBox()

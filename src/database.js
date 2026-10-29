@@ -9,6 +9,7 @@ import {
 } from './product-families.js'
 import { reviewStoreImportCodes } from './store-import-codes.js'
 import { planStoreOrderUpdate } from './store-order-update.js'
+import { squareProductPhoto } from './product-photo.js'
 import { parseStoreFilename } from './store-workbook-model.js'
 import { planOrderRemoval } from './order-removal.js'
 import { validateReconciliationReview } from './order-reconciliation.js'
@@ -2653,6 +2654,94 @@ export async function openDatabase({ name = '1688-order-library' } = {}) {
     return review
   }
 
+  async function storeUpdateAssets(tx, review) {
+    const assets = new Map(
+      review.candidate.images.map((image) => [image.url, image])
+    )
+    for (const url of collectImageReferences({
+      orders: [{ snapshot: review.candidate.snapshot }],
+    })) {
+      if (!localImageReference.test(url) || assets.has(url)) continue
+      const cached = await requested(tx.objectStore('images').get(url))
+      if (cached) assets.set(url, validateImage(cached))
+      else {
+        const item = review.candidate.snapshot.items.find(
+          (value) =>
+            value.thumbnail === url ||
+            value.photos?.includes(url) ||
+            value.sourcePhotos?.includes(url)
+        )
+        review.issues.push({
+          code: 'STORE_UPDATE_PHOTO_MISSING',
+          severity: 'error',
+          message:
+            'A photo selected for this update is missing. Reopen the review before updating.',
+          entryIds: item ? [item.entryId] : [],
+          incomingRow: item?.sourceRow,
+        })
+      }
+    }
+    return assets
+  }
+
+  const photoThumbnailRecipe = (item) =>
+    stableValue([item.entryId, item.photos?.[0], item.photoEdits?.[0] ?? null])
+
+  async function prepareStoreUpdate(input, candidate) {
+    const prepared = await read(OPERATIONAL_STORES, async (tx) => {
+      const review = reviewedStoreUpdate(
+        await containerRepository.state(tx),
+        input,
+        candidate
+      )
+      return { review, assets: await storeUpdateAssets(tx, review) }
+    })
+    const thumbnails = new Map()
+    // Image decoding happens after the read transaction has finished. The final
+    // write rebuilds the plan and verifies both its revisions and these recipes.
+    for (const item of prepared.review.candidate.snapshot.items) {
+      if (!localImageReference.test(item.thumbnail)) continue
+      const original = prepared.assets.get(item.photos?.[0])
+      if (!original) continue
+      try {
+        const thumbnail =
+          item.photoEdits?.[0] !== undefined
+            ? await squareProductPhoto(original.dataUrl, item.photoEdits[0])
+            : original.dataUrl
+        thumbnails.set(item.entryId, {
+          recipe: photoThumbnailRecipe(item),
+          thumbnail,
+        })
+        item.thumbnail = thumbnail
+      } catch {
+        prepared.review.issues.push({
+          code: 'STORE_UPDATE_PHOTO_RENDER_FAILED',
+          severity: 'error',
+          message:
+            'The selected photo could not be prepared. Choose another photo or retry.',
+          entryIds: [item.entryId],
+          incomingRow: item.sourceRow,
+        })
+      }
+    }
+    return { review: prepared.review, thumbnails }
+  }
+
+  function applyStoreUpdateThumbnails(review, prepared) {
+    for (const item of review.candidate.snapshot.items) {
+      if (!localImageReference.test(item.thumbnail)) continue
+      const rendition = prepared?.thumbnails.get(item.entryId)
+      if (!rendition || rendition.recipe !== photoThumbnailRecipe(item))
+        throw Object.assign(
+          new Error(
+            'The selected photo changed. Reopen the review before updating.'
+          ),
+          { code: 'STORE_UPDATE_PHOTO_CHANGED' }
+        )
+      item.thumbnail = rendition.thumbnail
+    }
+  }
+
   return {
     ...containerRepository.api,
     ...reportRepository.api,
@@ -2855,13 +2944,7 @@ export async function openDatabase({ name = '1688-order-library' } = {}) {
 
     async reviewStoreOrderUpdate(input) {
       const candidate = await storeUpdateCandidate(input)
-      return read(OPERATIONAL_STORES, async (tx) =>
-        reviewedStoreUpdate(
-          await containerRepository.state(tx),
-          input,
-          candidate
-        )
-      )
+      return (await prepareStoreUpdate(input, candidate)).review
     },
 
     async updateStoreOrder(input) {
@@ -2870,11 +2953,28 @@ export async function openDatabase({ name = '1688-order-library' } = {}) {
         throw new Error(
           'Review the spreadsheet changes and product codes before updating.'
         )
+      // Let the existing mutation receipt resolve identical retries before any
+      // stale review or image-decoding checks are repeated.
+      const completed =
+        input.intentId &&
+        (await read(['operationIntents'], (tx) =>
+          requested(tx.objectStore('operationIntents').get(input.intentId))
+        ))
+      const prepared = completed
+        ? null
+        : await prepareStoreUpdate(input, candidate)
       return containerRepository.mutate(
         'updateStoreOrder',
         input,
         async (tx, state) => {
           const review = reviewedStoreUpdate(state, input, candidate)
+          await storeUpdateAssets(tx, review)
+          if (prepared)
+            review.issues.push(
+              ...prepared.review.issues.filter(
+                (issue) => issue.code === 'STORE_UPDATE_PHOTO_RENDER_FAILED'
+              )
+            )
           const issue = review.issues.find(
             (value) => value.severity === 'error'
           )
@@ -2888,6 +2988,7 @@ export async function openDatabase({ name = '1688-order-library' } = {}) {
             (record) => orderKey(record.snapshot) === orderKey(review.target)
           )
           if (!review.summary.hasChanges) return previous
+          applyStoreUpdateThumbnails(review, prepared)
           const snapshot = validateSnapshot({
             ...review.candidate.snapshot,
             store: { ...previous.snapshot.store },

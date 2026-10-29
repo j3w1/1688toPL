@@ -344,17 +344,25 @@ export function reprojectPhotoVariantTags(
 }
 
 export async function squareProductPhoto(source, edit = {}, size = 640) {
-  const image = new Image()
-  image.src = source
-  await image.decode()
-  const canvas = document.createElement('canvas')
-  canvas.width = canvas.height = size
+  const worker = typeof Image === 'undefined' || typeof document === 'undefined'
+  let image, canvas
+  if (worker) {
+    const response = await fetch(source)
+    image = await createImageBitmap(await response.blob())
+    canvas = new OffscreenCanvas(size, size)
+  } else {
+    image = new Image()
+    image.src = source
+    await image.decode()
+    canvas = document.createElement('canvas')
+    canvas.width = canvas.height = size
+  }
   const context = canvas.getContext('2d')
   context.fillStyle = edit.background || DEFAULT_PHOTO_EDIT.background
   context.fillRect(0, 0, size, size)
   const rect = photoPlacement(
-    image.naturalWidth,
-    image.naturalHeight,
+    image.naturalWidth || image.width,
+    image.naturalHeight || image.height,
     size,
     edit
   )
@@ -368,7 +376,14 @@ export async function squareProductPhoto(source, edit = {}, size = 640) {
       edit.pointerScale ?? 1,
       edit.invertPointer ?? false
     )
-  return canvas.toDataURL('image/png')
+  if (!worker) return canvas.toDataURL('image/png')
+  image.close()
+  const blob = await canvas.convertToBlob({ type: 'image/png' }),
+    bytes = new Uint8Array(await blob.arrayBuffer())
+  let binary = ''
+  for (let offset = 0; offset < bytes.length; offset += 8192)
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192))
+  return `data:image/png;base64,${btoa(binary)}`
 }
 
 /** Keep product associations even when several products share one image asset. */
