@@ -30,8 +30,13 @@ const reviewLifetime = new AbortController()
 async function send(type, data = {}) {
   const response = await chrome.runtime.sendMessage({ type, ...data })
   if (!response?.ok)
-    throw new Error(
-      response?.error || 'Reload the extension and refresh this page.'
+    throw Object.assign(
+      new Error(
+        response?.error || 'Reload the extension and refresh this page.'
+      ),
+      response?.code === 'ORDER_AMOUNT_MISMATCH'
+        ? { code: response.code, diagnostics: response.diagnostics }
+        : {}
     )
   return response.data
 }

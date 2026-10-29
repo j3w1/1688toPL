@@ -7,6 +7,51 @@ const short = (value, limit = 160) => {
   return text.length > limit ? `${text.slice(0, limit - 1)}…` : text
 }
 const count = (value) => (Number.isSafeInteger(value) && value >= 0 ? value : 0)
+const totalFields = [
+  'goodsGross',
+  'shipping',
+  'sourceDiscount',
+  'orderAdjustment',
+  'goodsNet',
+  'payable',
+  'customizationService',
+  'grossIncludedCustomization',
+  'redPacketDiscount',
+  'orderDiscount',
+  'priceIncludedDiscount',
+  'rowIncludedAdjustment',
+  'orderLevelAdjustment',
+]
+const diagnosticMoney = (value) => {
+  if (typeof value !== 'string' || value.length > 64) return undefined
+  try {
+    return centsToMoney(moneyToCents(value))
+  } catch {
+    return undefined
+  }
+}
+
+/** Exact, allowlisted equality evidence from final storage validation. */
+function amountFailure(input) {
+  if (
+    !input ||
+    input.code !== 'ORDER_AMOUNT_MISMATCH' ||
+    ![...totalFields, 'discount'].includes(input.field) ||
+    !['equal', 'at-least', 'at-most'].includes(input.comparison)
+  )
+    return undefined
+  const expected = diagnosticMoney(input.expected),
+    actual = diagnosticMoney(input.actual)
+  if (expected === undefined || actual === undefined) return undefined
+  return {
+    code: input.code,
+    field: input.field,
+    comparison: input.comparison,
+    expected,
+    actual,
+    ...(count(input.row) ? { row: input.row } : {}),
+  }
+}
 
 /** Bound persisted diagnostics to financial fields, never page HTML or session data. */
 export function financialDiagnostics(input) {
@@ -17,8 +62,20 @@ export function financialDiagnostics(input) {
     ? input.products.sample
     : []
   const invalidDiscount = input.products?.invalidDiscount
+  const failure = amountFailure(input.failure)
+  const totals = Object.fromEntries(
+    totalFields.flatMap((field) => {
+      const value = diagnosticMoney(input.snapshotTotals?.[field])
+      return value === undefined ? [] : [[field, value]]
+    })
+  )
   return {
     version: 1,
+    ...(['reading', 'validation', 'saving'].includes(input.stage)
+      ? { stage: input.stage }
+      : {}),
+    ...(failure ? { failure } : {}),
+    ...(Object.keys(totals).length ? { snapshotTotals: totals } : {}),
     extensionVersion: short(input.extensionVersion, 32),
     capturedAt: short(input.capturedAt, 32),
     totalSections: count(input.totalSections),
@@ -72,9 +129,51 @@ export function financialDiagnostics(input) {
   }
 }
 
+/** Capture the already-read financial snapshot when persistence fails. */
+export function snapshotFinancialDiagnostics(
+  snapshot,
+  { stage = 'saving', failure, diagnostics } = {}
+) {
+  const input = {
+    ...(financialDiagnostics(diagnostics) || {}),
+    version: 1,
+    stage,
+    capturedAt: new Date().toISOString(),
+    failure,
+    snapshotTotals: snapshot?.totals,
+    products: {},
+  }
+  try {
+    const items = snapshot?.items || []
+    input.products = {
+      count: items.length,
+      gross: centsToMoney(
+        items.reduce(
+          (sum, item) => sum + lineGrossCents(item.price, item.quantity),
+          0n
+        )
+      ),
+      discount: centsToMoney(
+        items.reduce((sum, item) => sum + moneyToCents(item.sourceDiscount), 0n)
+      ),
+      sample: items.slice(0, 25).map((item, index) => ({
+        row: index + 1,
+        price: item.price,
+        quantity: item.quantity,
+        discount: item.sourceDiscount,
+      })),
+      omittedRows: Math.max(0, items.length - 25),
+    }
+  } catch {
+    // Malformed values do not authorize copying arbitrary source fields.
+  }
+  return financialDiagnostics(input)
+}
+
 export function collectFinancialDiagnostics(document, url, extensionVersion) {
   const input = {
     version: 1,
+    stage: 'reading',
     extensionVersion,
     capturedAt: new Date().toISOString(),
     products: {},

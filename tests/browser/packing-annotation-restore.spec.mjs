@@ -264,12 +264,44 @@ test('fresh packing restore keeps assigned tag colors and completes same-time so
         month: group.month ?? checkpoint.month,
       })),
     }
-  expect(result.completed.preparations).toEqual(
-    result.full.preparations.map((preparation) => ({
-      ...explicitMonths(preparation),
-      defaultPacking: explicitMonths(preparation.defaultPacking),
-      revision: preparation.revision + 1,
-    }))
+  // Family evidence is an unordered identity set. A scoped-first merge may
+  // retain that scope's evidence first; every mapping/value must still match.
+  // Keep authored group/variant arrays untouched in this exact comparison.
+  const canonicalFamilyEvidence = (preparation) => ({
+    ...preparation,
+    ...(preparation.productFamilies
+      ? {
+          productFamilies: {
+            ...preparation.productFamilies,
+            families: preparation.productFamilies.families
+              .map((family) => ({
+                ...family,
+                entryIds: [...family.entryIds].sort(),
+                ...(family.identities
+                  ? {
+                      identities: [...family.identities].sort((a, b) =>
+                        a.entryId.localeCompare(b.entryId)
+                      ),
+                    }
+                  : {}),
+              }))
+              .sort((a, b) =>
+                JSON.stringify(a.entryIds).localeCompare(
+                  JSON.stringify(b.entryIds)
+                )
+              ),
+          },
+        }
+      : {}),
+  })
+  expect(result.completed.preparations.map(canonicalFamilyEvidence)).toEqual(
+    result.full.preparations.map((preparation) =>
+      canonicalFamilyEvidence({
+        ...explicitMonths(preparation),
+        defaultPacking: explicitMonths(preparation.defaultPacking),
+        revision: preparation.revision + 1,
+      })
+    )
   )
   const effectiveItemMonths = (checkpoint) =>
     checkpoint?.groups.flatMap((group) =>
@@ -283,6 +315,9 @@ test('fresh packing restore keeps assigned tag colors and completes same-time so
   for (const original of result.full.preparations) {
     const restored = result.completed.preparations.find(
       ({ orderId }) => orderId === original.orderId
+    )
+    expect(restored.groups.map((group) => group.id)).toEqual(
+      original.groups.map((group) => group.id)
     )
     expect(effectiveItemMonths(restored)).toEqual(effectiveItemMonths(original))
     expect(effectiveItemMonths(restored.defaultPacking)).toEqual(

@@ -854,6 +854,30 @@ function groupsWithMonths(preparation) {
 function normalizedAuthoring(preparation) {
   const { restoreScopes, ...result } = preparation
   result.groups = groupsWithMonths(preparation)
+  // Family membership and per-entry mappings are sets, unlike authored display
+  // order. Disjoint restore order must not manufacture an evidence conflict.
+  if (preparation.productFamilies)
+    result.productFamilies = {
+      ...preparation.productFamilies,
+      families: preparation.productFamilies.families
+        .map((family) => ({
+          ...family,
+          entryIds: [...family.entryIds].sort(),
+          ...(family.identities
+            ? {
+                identities: [...family.identities].sort((left, right) =>
+                  left.entryId.localeCompare(right.entryId, 'en')
+                ),
+              }
+            : {}),
+        }))
+        .sort((left, right) =>
+          JSON.stringify(left.entryIds).localeCompare(
+            JSON.stringify(right.entryIds),
+            'en'
+          )
+        ),
+    }
   for (const field of ['defaultPacking', 'previousPacking', 'defaults'])
     if (preparation[field])
       result[field] = normalizedAuthoring(preparation[field])

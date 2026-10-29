@@ -158,6 +158,12 @@ function independentMarkFixture() {
     { snapshot: record.snapshot }
   )
   prep.groups.push(...added.preparation.groups)
+  // This fixture adds a third source row before persistence. Its family
+  // context must describe that final source rather than the earlier two rows.
+  prep.productFamilies = createPreparation(
+    record.snapshot,
+    '2026-10'
+  ).productFamilies
   state.allocations = added.allocations
   state.issuedCodes = added.issuedCodes
   const batch = state.batches[0]

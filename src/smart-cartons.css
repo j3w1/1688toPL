@@ -268,26 +268,33 @@
 .purchase-code-review .purchase-code {
   --ce-code-size: 16px;
 }
-.preparation-code-field,
-.preparation-family-source label {
+.preparation-code-field {
   display: grid;
   gap: 0.2rem;
   min-inline-size: 0;
   margin-block: 0.4rem;
 }
-.preparation-code-field input,
-.preparation-family-source :is(input, select) {
+.preparation-code-field input {
   box-sizing: border-box;
   inline-size: min(100%, 24rem);
   max-inline-size: 100%;
 }
-.preparation-family-source {
+.purchase-family-context-row {
   padding: 0.65rem;
   border-block-end: 1px solid var(--line, #c4b9a6);
   overflow-wrap: anywhere;
 }
-.preparation-family-source [data-family-mode-control][hidden] {
-  display: none;
+.purchase-family-context {
+  max-block-size: 14rem;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.purchase-code-review:modal,
+.purchase-code-review:modal::backdrop {
+  overscroll-behavior: contain;
+}
+.purchase-code-review:modal::backdrop {
+  overflow: hidden;
 }
 .purchase-code-review .dialog-actions {
   position: sticky;

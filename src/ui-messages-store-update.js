@@ -1,4 +1,169 @@
 export const STORE_UPDATE_MESSAGES = {
+  'Retry photo preparation': {
+    zh: '重试图片准备',
+    es: 'Reintentar preparación de fotos',
+  },
+  'Photo choices for {0}': { zh: '{0} 的图片选择', es: 'Fotos para {0}' },
+  'Product {0}': { zh: '商品 {0}', es: 'Producto {0}' },
+  'Review this product’s photo choices again.': {
+    zh: '请重新审核此商品的图片选择。',
+    es: 'Revisa de nuevo las fotos elegidas para este producto.',
+  },
+  'Choose each current photo only once, or add the workbook photo as new.': {
+    zh: '每张当前图片只能选择一次，或将表格图片添加为新图片。',
+    es: 'Elige cada foto actual solo una vez o añade la foto del libro como nueva.',
+  },
+  'Choose which current photo this workbook photo replaces, or add it as new.':
+    {
+      zh: '请选择此表格图片要替换的当前图片，或添加为新图片。',
+      es: 'Elige qué foto actual sustituye esta foto del libro o añádela como nueva.',
+    },
+  'The selected photo is no longer available. Review the photo choices again.':
+    {
+      zh: '所选图片已不可用，请重新审核图片选择。',
+      es: 'La foto seleccionada ya no está disponible. Revisa de nuevo las fotos elegidas.',
+    },
+  'Keep at least one photo for this product.': {
+    zh: '请为此商品保留至少一张图片。',
+    es: 'Conserva al menos una foto de este producto.',
+  },
+  'Previous edit to recover': {
+    zh: '选择要恢复的旧编辑',
+    es: 'Edición anterior que recuperar',
+  },
+  'Choose a previous edited photo': {
+    zh: '选择之前编辑的图片',
+    es: 'Elige una foto editada anterior',
+  },
+  'Saved {date} · Photo {number}': {
+    zh: '保存于 {date} · 图片 {number}',
+    es: 'Guardada el {date} · Foto {number}',
+  },
+  'Spreadsheet source photos require original local photos': {
+    zh: '表格来源图片必须保留原始本地图片。',
+    es: 'Las fotos de origen de la hoja deben conservar las imágenes locales originales.',
+  },
+  'A photo selected for this update is missing. Reopen the review before updating.':
+    {
+      zh: '本次更新选择的图片已丢失。请重新打开审核后再更新。',
+      es: 'Falta una foto seleccionada para esta actualización. Vuelve a abrir la revisión antes de actualizar.',
+    },
+  'The selected photo could not be prepared. Choose another photo or retry.': {
+    zh: '无法准备所选图片。请选择其他图片或重试。',
+    es: 'No se pudo preparar la foto seleccionada. Elige otra foto o vuelve a intentarlo.',
+  },
+  'The selected photo changed. Reopen the review before updating.': {
+    zh: '所选图片已更改。请重新打开审核后再更新。',
+    es: 'La foto seleccionada ha cambiado. Vuelve a abrir la revisión antes de actualizar.',
+  },
+  'Current edited photo': { zh: '当前编辑后的图片', es: 'Foto editada actual' },
+  'Result after update': {
+    zh: '更新后的结果',
+    es: 'Resultado tras actualizar',
+  },
+  'Previous edited photo': {
+    zh: '之前编辑的图片',
+    es: 'Foto editada anterior',
+  },
+  'Saved {0}': { zh: '保存于 {0}', es: 'Guardada el {0}' },
+  'Enlarge {0}': { zh: '放大：{0}', es: 'Ampliar {0}' },
+  'Retry photo preview': { zh: '重试图片预览', es: 'Reintentar vista de foto' },
+  'Could not load photo preview.': {
+    zh: '无法加载图片预览。',
+    es: 'No se pudo cargar la vista de la foto.',
+  },
+  'Review {0} product photos': {
+    zh: '审核 {0} 张商品图片',
+    es: 'Revisar {0} fotos del producto',
+  },
+  'Photo {0}': { zh: '图片 {0}', es: 'Foto {0}' },
+  'Which current photo does this workbook image replace?': {
+    zh: '这张表格图片要替换哪张当前图片？',
+    es: '¿Qué foto actual sustituye esta imagen del libro?',
+  },
+  'Choose the matching photo, or add this as a new image.': {
+    zh: '请选择对应图片，或将其添加为新图片。',
+    es: 'Elige la foto correspondiente o añade esta imagen como nueva.',
+  },
+  'Choose a photo match': {
+    zh: '选择对应图片',
+    es: 'Elige una foto correspondiente',
+  },
+  'Current photo {0}': { zh: '当前图片 {0}', es: 'Foto actual {0}' },
+  'Add as a new image': { zh: '添加为新图片', es: 'Añadir como imagen nueva' },
+  'Keep current photo': { zh: '保留当前图片', es: 'Conservar foto actual' },
+  'Use workbook photo': { zh: '使用表格图片', es: 'Usar foto del libro' },
+  'Use previous edited photo': {
+    zh: '使用之前编辑的图片',
+    es: 'Usar foto editada anterior',
+  },
+  'Remove this photo': { zh: '移除此图片', es: 'Quitar esta foto' },
+  'Using the workbook photo removes the current crop and tags only for this photo.':
+    {
+      zh: '使用表格图片将仅移除此图片当前的裁剪和标注。',
+      es: 'Usar la foto del libro elimina el recorte y las etiquetas actuales solo de esta foto.',
+    },
+  'Previous photos': { zh: '上一组图片', es: 'Fotos anteriores' },
+  'Next photos': { zh: '下一组图片', es: 'Fotos siguientes' },
+  'Photos {from}–{to} of {total}': {
+    zh: '图片 {from}–{to}，共 {total} 张',
+    es: 'Fotos {from}–{to} de {total}',
+  },
+  '{kept} edited photos kept · {workbook} workbook photos selected · {previous} previous edits selected':
+    {
+      zh: '保留 {kept} 张编辑图片 · 选择 {workbook} 张表格图片 · 恢复 {previous} 张之前的编辑图片',
+      es: '{kept} fotos editadas conservadas · {workbook} fotos del libro seleccionadas · {previous} ediciones anteriores seleccionadas',
+    },
+  'Keep edited photos ({0})': {
+    zh: '保留编辑图片（{0}）',
+    es: 'Conservar fotos editadas ({0})',
+  },
+  'Use workbook photos ({0})': {
+    zh: '使用表格图片（{0}）',
+    es: 'Usar fotos del libro ({0})',
+  },
+  'Use previous edited photos ({0})': {
+    zh: '使用之前编辑的图片（{0}）',
+    es: 'Usar fotos editadas anteriores ({0})',
+  },
+  'Reset photo choices': {
+    zh: '重置图片选择',
+    es: 'Restablecer selección de fotos',
+  },
+  ' · Group {group} · Saved row {row}': {
+    zh: ' · 商品组 {group} · 原记录第 {row} 行',
+    es: ' · Grupo {group} · Fila guardada {row}',
+  },
+  'No unused carton identities remain in this batch.': {
+    zh: '此批次已无可用的新箱子编号。请先审核箱子记录，再重试更新。',
+    es: 'No quedan identificadores nuevos de caja en este lote. Revisa los registros de cajas antes de volver a actualizar.',
+  },
+  ' · Received: {received} · Loaded: {loaded} · Updated cartons: {count}': {
+    zh: ' · 已收货：{received} · 已装柜：{loaded} · 更新箱数：{count}',
+    es: ' · Recibidas: {received} · Cargadas: {loaded} · Cajas actualizadas: {count}',
+  },
+  'Cartons reduced: {before} → {after}': {
+    zh: '箱数减少：{before} → {after}',
+    es: 'Cajas reducidas: {before} → {after}',
+  },
+  'Cartons increased: {before} → {after}': {
+    zh: '箱数增加：{before} → {after}',
+    es: 'Cajas aumentadas: {before} → {after}',
+  },
+  '{added} cartons added · {retired} cartons retired': {
+    zh: '新增 {added} 箱 · 移除 {retired} 箱',
+    es: '{added} cajas añadidas · {retired} cajas retiradas',
+  },
+  ' · Group {group} · Excel row {row}': {
+    zh: ' · 商品组 {group} · Excel 第 {row} 行',
+    es: ' · Grupo {group} · Fila de Excel {row}',
+  },
+  ' · Group {0}': { zh: ' · 商品组 {0}', es: ' · Grupo {0}' },
+  ' · Excel row {0}': { zh: ' · Excel 第 {0} 行', es: ' · Fila de Excel {0}' },
+  'Resolve these issues before updating the purchase.': {
+    zh: '更新采购前请解决以下问题。',
+    es: 'Resuelve estos problemas antes de actualizar la compra.',
+  },
   'Enter the base code without surrounding spaces.': {
     zh: '基础货号前后不能有空格。',
     es: 'Escribe el código base sin espacios al principio ni al final.',

@@ -114,6 +114,72 @@ test('Back and Cancel preserve Orders selection and reserve nothing; an unrelate
   }
 })
 
+test('Back preserves the same-selection draft and its original source guard while Cancel discards it', async ({
+  extension,
+}) => {
+  await seedSmartOrder(extension, { count: 2, assignCodes: false })
+  const page = await openSmartLibrary(extension)
+  await page.locator('#select-rows').click()
+  const before = await libraryBackup(extension)
+  let review = await openSelection(page)
+  await editPreparedDetails(
+    review,
+    page,
+    { spanishName: 'BACK DRAFT', material: '' },
+    { replace: true }
+  )
+  const base = review.locator('[data-review-code="baseCode"]').first()
+  await base.fill('CE26090109')
+  await base.blur()
+  await expect(commit(review)).toBeEnabled()
+  const codes = await review.locator('.purchase-code').allTextContents()
+  await review.getByRole('button', { name: 'Back', exact: true }).click()
+  await expect(review).toBeHidden()
+  unchanged(await libraryBackup(extension), before)
+  review = await openSelection(page)
+  await expect(commit(review)).toBeEnabled()
+  expect(await review.locator('.purchase-code').allTextContents()).toEqual(
+    codes
+  )
+  await expect(
+    review.locator('[data-detail-comparison="spanishName"] strong')
+  ).toHaveText(['BACK DRAFT', 'BACK DRAFT'])
+  await expect(
+    review.locator('[data-detail-comparison="material"] strong')
+  ).toHaveText(['—', '—'])
+  await review.getByRole('button', { name: 'Back', exact: true }).click()
+  await extension.inspector.evaluate(async (orderId) => {
+    const repository = await window.testRepository,
+      record = await repository.getOrder(orderId)
+    await repository.saveSnapshot({
+      ...record.snapshot,
+      status: 'Synthetic changed source',
+      observedAt: new Date().toISOString(),
+    })
+  }, first)
+  const changed = await libraryBackup(extension)
+  review = await openSelection(page)
+  await expect(commit(review)).toBeDisabled()
+  await expect(review.getByRole('status')).toContainText('Close this review')
+  expect(await review.locator('.purchase-code').allTextContents()).toEqual(
+    codes
+  )
+  await expect(
+    review.locator('[data-detail-comparison="spanishName"] strong')
+  ).toHaveText(['BACK DRAFT', 'BACK DRAFT'])
+  unchanged(await libraryBackup(extension), changed)
+  await review.getByRole('button', { name: 'Cancel', exact: true }).click()
+  review = await openSelection(page)
+  await expect(commit(review)).toBeEnabled()
+  await expect(
+    review
+      .locator('[data-detail-comparison="spanishName"] strong')
+      .filter({ hasText: 'BACK DRAFT' })
+  ).toHaveCount(0)
+  await review.getByRole('button', { name: 'Cancel', exact: true }).click()
+  unchanged(await libraryBackup(extension), changed)
+})
+
 test('order selection and empty product selection never expand scope', async ({
   extension,
 }) => {
@@ -160,25 +226,12 @@ test('selected products across orders are grouped and already assigned codes rem
   await expect(review.getByText('New assignment', { exact: true })).toHaveCount(
     1
   )
-  await review.locator('[data-action="review-product-families"]').click()
-  const families = page.locator('[data-action="product-family-review"]'),
-    savedRows = families.locator(
-      `[data-family-entry][data-order-id="${first}"]`
-    )
-  await expect(savedRows).toHaveCount(3)
-  for (const row of await savedRows.all()) {
-    await expect(
-      row.locator('[data-action="review-family-family"]')
-    ).toBeDisabled()
-    await expect(
-      row.locator('[data-action="review-family-style"]')
-    ).toBeDisabled()
-    await expect(
-      row.locator('[data-action="review-family-size"]')
-    ).toBeDisabled()
-  }
-  await expect(savedRows.first()).toContainText('Use Edit product in Orders')
-  await families.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(
+    review.locator('[data-action="review-product-families"]')
+  ).toHaveCount(0)
+  await expect(
+    review.getByText('Existing prepared family', { exact: true })
+  ).toBeVisible()
   await commit(review).click()
   await expect(review).toBeHidden()
   const after = await libraryBackup(extension)
@@ -277,13 +330,14 @@ test('large selected reviews stay bounded and retain every selected row for assi
   })
   await expect(review.locator('article[data-entry-id="2150"]')).toBeVisible()
   await commit(review).click()
-  await expect(review).toBeHidden()
+  // The complete 150-row transaction can outlast the default assertion timeout.
+  await expect(review).toBeHidden({ timeout: 15000 })
   expect(
     entries((await libraryBackup(extension)).preparations[0])
   ).toHaveLength(150)
 })
 
-test('article families keep a standalone large horse bare and prepare elephant siblings with A and B', async ({
+test('same-title horse and elephants share one automatic family despite different article stems', async ({
   extension,
 }) => {
   await seedSmartOrder(extension, { count: 3, assignCodes: false })
@@ -310,16 +364,16 @@ test('article families keep a standalone large horse bare and prepare elephant s
   await page.locator('#select-rows').click()
   const before = await libraryBackup(extension),
     review = await openSelection(page)
-  await expect(review.locator('[data-product-family]')).toHaveCount(2)
+  await expect(review.locator('[data-product-family]')).toHaveCount(1)
   await expect(
     review.locator('article[data-entry-id="2001"] .purchase-code')
-  ).toHaveText('CE26090101')
+  ).toHaveText('CE26090101A')
   await expect(
     review.locator('article[data-entry-id="2002"] .purchase-code')
-  ).toHaveText('CE26090102A')
+  ).toHaveText('CE26090101B')
   await expect(
     review.locator('article[data-entry-id="2003"] .purchase-code')
-  ).toHaveText('CE26090102B')
+  ).toHaveText('CE26090101C')
   await expect(
     review.locator('[data-action="resolve-code-sizes"]')
   ).toBeHidden()
@@ -336,7 +390,65 @@ test('article families keep a standalone large horse bare and prepare elephant s
           `${group.baseCode}${variant.variantSuffix}${variant.sizeSuffix}`
       )
     )
-  ).toEqual([['CE26090101'], ['CE26090102A', 'CE26090102B']])
+  ).toEqual([['CE26090101A', 'CE26090101B', 'CE26090101C']])
+})
+
+test('numeric cylinder articles prepare by title with available order and group editors', async ({
+  extension,
+}) => {
+  await seedSmartOrder(extension, { count: 6, assignCodes: false })
+  await extension.inspector.evaluate(async (orderId) => {
+    const repository = await window.testRepository,
+      record = await repository.getOrder(orderId),
+      snapshot = structuredClone(record.snapshot),
+      articles = ['1520', '1230', '1540', '1515', '1525', '1530'],
+      dimensions = [
+        '口径15 高20cm【防摔直筒】',
+        '口径12 高30cm【防摔直筒】',
+        '口径15高40cm【防摔直筒】',
+        '口径15高15cm【防摔直筒】',
+        '口径15高25cm【防摔直筒】',
+        '口径15高30cm【防摔直筒】',
+      ]
+    for (const [index, item] of snapshot.items.entries()) {
+      item.title = 'Synthetic transparent cylinder family'
+      item.productNumber = articles[index]
+      item.skuProperties = [{ label: '尺寸', value: dimensions[index] }]
+      item.description = item.title + '\n尺寸：' + dimensions[index]
+    }
+    snapshot.observedAt = new Date().toISOString()
+    await repository.saveSnapshot(snapshot)
+  }, first)
+  const page = await openSmartLibrary(extension)
+  await page.locator('#select-rows').click()
+  const before = await libraryBackup(extension),
+    review = await openSelection(page)
+  await expect(review.locator('[data-product-family]')).toHaveCount(1)
+  await expect(review.locator('.purchase-code')).toHaveText(
+    ['A', 'B', 'C', 'D', 'E', 'F'].map((ending) => 'CE26090101' + ending)
+  )
+  await expect(
+    review.locator('[data-review-details="edit-order-details"]')
+  ).toBeEnabled()
+  await expect(
+    review.locator('[data-review-details="edit-group-details"]')
+  ).toBeEnabled()
+  await expect(
+    review.locator('[data-action="review-product-families"]')
+  ).toHaveCount(0)
+  await expect(review.locator('[data-family-size-fallback]')).toHaveCount(1)
+  await editPreparedDetails(
+    review,
+    page,
+    { spanishName: 'CILINDRO CONFIRMADO' },
+    { scope: 'group' }
+  )
+  await expect(
+    review.locator('[data-detail-comparison="spanishName"] strong')
+  ).toHaveText(Array(6).fill('CILINDRO CONFIRMADO'))
+  unchanged(await libraryBackup(extension), before)
+  await review.getByRole('button', { name: 'Cancel', exact: true }).click()
+  unchanged(await libraryBackup(extension), before)
 })
 
 test('a concurrent claim rolls back all selected assignments and retains a review requiring confirmation again', async ({
@@ -367,7 +479,7 @@ test('a concurrent claim rolls back all selected assignments and retains a revie
   await review.getByRole('button', { name: 'Cancel', exact: true }).click()
 })
 
-test('ambiguous source sizes resolve only in the unsaved review, reject invalid/duplicate endings, and survive an assignment retry', async ({
+test('ambiguous source sizes receive variant letters and keep editable codes and authored details across retries', async ({
   extension,
 }) => {
   await seedSmartOrder(extension, {
@@ -396,51 +508,42 @@ test('ambiguous source sizes resolve only in the unsaved review, reject invalid/
   await page.locator('#select-rows').click()
   const before = await libraryBackup(extension),
     review = await openSelection(page)
-  await expect(commit(review)).toBeDisabled()
-  await expect(
-    await editPreparedDetails(review, page, {
-      spanishName: 'SIZE DRAFT NAME',
-      category: '尺寸草稿',
-    })
-  ).toBeHidden()
-  await review.locator('[data-action="resolve-code-sizes"]').click()
-  let sizes = page.locator('[data-action="resolve-purchase-code-sizes"]')
-  await expect(sizes.locator('input')).toHaveCount(2)
-  await sizes.locator('input').first().fill('S')
-  await sizes.getByRole('button', { name: 'Cancel', exact: true }).click()
-  await expect(sizes).toBeHidden()
-  unchanged(await libraryBackup(extension), before)
-  await expect(commit(review)).toBeDisabled()
-  await review.locator('[data-action="resolve-code-sizes"]').click()
-  sizes = page.locator('[data-action="resolve-purchase-code-sizes"]')
-  const fields = sizes.locator('[data-action="review-size-ending"]'),
-    apply = sizes.locator('[data-action="apply-reviewed-size-endings"]')
-  await fields.nth(0).fill('   ')
-  await fields.nth(1).fill('S')
-  await apply.click()
-  await expect(sizes).toBeVisible()
-  await expect(sizes.getByRole('status')).toContainText('Enter a size ending')
-  unchanged(await libraryBackup(extension), before)
-  await fields.nth(0).fill('%')
-  await fields.nth(1).fill('S')
-  await apply.click()
-  await expect(sizes).toHaveAttribute('aria-busy', 'false')
-  await expect(fields.nth(0)).toHaveValue('%')
-  await expect(fields.nth(0)).toHaveAttribute('aria-invalid', 'true')
-  await expect(sizes.getByRole('status')).not.toHaveText('')
-  await fields.nth(0).fill(' S ')
-  await apply.click()
-  await expect(sizes).toBeVisible()
-  await expect(sizes).toHaveAttribute('aria-busy', 'false')
-  await expect(sizes.getByRole('status')).not.toHaveText('')
-  unchanged(await libraryBackup(extension), before)
-  await sizes.locator('[data-action="review-no-size-ending"]').nth(1).click()
-  await apply.click()
-  await expect(sizes).toBeHidden()
   await expect(commit(review)).toBeEnabled()
-  const codes = await review.locator('.purchase-code').allTextContents()
-  expect(codes.some((code) => code.endsWith('S'))).toBe(true)
-  expect(codes.some((code) => /^CE[0-9]{8}$/.test(code))).toBe(true)
+  await expect(review.locator('.purchase-code')).toHaveText([
+    'CE26090101A',
+    'CE26090101B',
+  ])
+  await expect(review.locator('[data-family-size-fallback]')).toHaveCount(1)
+  await expect(
+    review.locator('[data-action="resolve-code-sizes"]')
+  ).toBeHidden()
+  await editPreparedDetails(review, page, {
+    spanishName: 'SIZE DRAFT NAME',
+    category: '尺寸草稿',
+  })
+  const ending = review.locator('[data-review-code="variantSuffix"]').first()
+  await ending.fill('%')
+  await ending.blur()
+  await expect(commit(review)).toBeDisabled()
+  await expect(ending).toHaveAttribute('aria-invalid', 'true')
+  await ending.fill('B')
+  await ending.blur()
+  await expect(commit(review)).toBeDisabled()
+  await ending.fill('X')
+  await ending.blur()
+  await expect(commit(review)).toBeEnabled()
+  await expect(review.locator('.purchase-code')).toHaveText([
+    'CE26090101X',
+    'CE26090101B',
+  ])
+  await review
+    .locator('[data-action="reset-preparation-code-suggestions"]')
+    .click()
+  await expect(commit(review)).toBeEnabled()
+  await expect(review.locator('.purchase-code')).toHaveText([
+    'CE26090101A',
+    'CE26090101B',
+  ])
   unchanged(await libraryBackup(extension), before)
   await seedSmartOrder(extension, {
     count: 1,
@@ -460,15 +563,14 @@ test('ambiguous source sizes resolve only in the unsaved review, reject invalid/
     review.locator('[data-detail-comparison="spanishName"] strong').first()
   ).toHaveText('SIZE DRAFT NAME')
   const retryCodes = await review.locator('.purchase-code').allTextContents()
-  expect(retryCodes.some((code) => code.endsWith('S'))).toBe(true)
-  expect(retryCodes.some((code) => /^CE[0-9]{8}$/.test(code))).toBe(true)
+  expect(retryCodes.map((code) => code.slice(-1))).toEqual(['A', 'B'])
   await commit(review).click()
   await expect(review).toBeHidden()
   const saved = await libraryBackup(extension),
     preparation = saved.preparations.find((value) => value.orderId === first)
   expect(
     preparation.groups[0].variants.map((variant) => variant.sizeSuffix).sort()
-  ).toEqual(['', 'S'])
+  ).toEqual(['', ''])
   expect(
     preparation.groups[0].variants.every((variant) => !variant.needsSizeMapping)
   ).toBe(true)
@@ -538,7 +640,7 @@ async function editPreparedDetails(
   return editor
 }
 
-test('family membership and code edits remain unsaved, match complete-order identities and reset without losing details', async ({
+test('automatic title families and code edits remain unsaved and reset without losing details', async ({
   extension,
 }) => {
   await seedSmartOrder(extension, {
@@ -571,24 +673,11 @@ test('family membership and code edits remain unsaved, match complete-order iden
     'CE26090101BS',
   ])
   await expect(review).toContainText('Coding mode: Variants and sizes')
-  await review.locator('[data-action="review-product-families"]').click()
-  const family = page.locator('[data-action="product-family-review"]'),
-    source = family.locator('[data-family-entry]')
-  await expect(source).toHaveCount(3)
-  await source.nth(2).locator('[data-action="review-family-family"]').fill('G2')
-  await source
-    .nth(2)
-    .locator('[data-action="review-family-mode"]')
-    .selectOption('none')
-  await family.locator('[data-action="apply-family-choices"]').click()
-  await expect(family).toBeHidden()
-  await expect(commit(review)).toBeEnabled()
-  await expect(review.locator('[data-product-family]')).toHaveCount(2)
-  await expect(review.locator('.purchase-code')).toHaveText([
-    'CE26090101S',
-    'CE26090101L',
-    'CE26090102',
-  ])
+  await expect(
+    review.locator('[data-action="review-product-families"]')
+  ).toHaveCount(0)
+  await expect(review.locator('[data-product-family]')).toHaveCount(1)
+  await expect(review).toContainText('Grouped by source title')
   await editPreparedDetails(review, page, {
     spanishName: 'NOMBRE CONFIRMADO',
     material: 'Metal',
@@ -601,18 +690,18 @@ test('family membership and code edits remain unsaved, match complete-order iden
   await base.blur()
   await expect(commit(review)).toBeEnabled()
   await expect(review.locator('.purchase-code')).toHaveText([
-    'CE26090109S',
-    'CE26090109L',
-    'CE26090102',
+    'CE26090109AS',
+    'CE26090109AL',
+    'CE26090109BS',
   ])
   await review
     .locator('[data-action="reset-preparation-code-suggestions"]')
     .click()
   await expect(commit(review)).toBeEnabled()
   await expect(review.locator('.purchase-code')).toHaveText([
-    'CE26090101S',
-    'CE26090101L',
-    'CE26090102',
+    'CE26090101AS',
+    'CE26090101AL',
+    'CE26090101BS',
   ])
   await expect(
     review.locator('[data-detail-comparison="spanishName"] strong')
@@ -621,7 +710,7 @@ test('family membership and code edits remain unsaved, match complete-order iden
   await commit(review).click()
   await expect(review).toBeHidden()
   const after = await libraryBackup(extension)
-  expect(after.preparations[0].groups).toHaveLength(2)
+  expect(after.preparations[0].groups).toHaveLength(1)
   expect(after.preparations[0].productFamilies.version).toBe(2)
   expect(after.orders).toEqual(before.orders)
   expect(after.cartonBatches).toEqual(before.cartonBatches)
@@ -631,7 +720,7 @@ test('family membership and code edits remain unsaved, match complete-order iden
   )
 })
 
-test('Prepare products resolves title-only families without saving and commits selected details with its codes', async ({
+test('Prepare products automatically groups title-only families and commits only selected details with their codes', async ({
   extension,
 }) => {
   await seedSmartOrder(extension, {
@@ -661,23 +750,21 @@ test('Prepare products resolves title-only families without saving and commits s
   await expect(
     review.getByRole('heading', { name: 'Prepare products', exact: true })
   ).toBeVisible()
-  await expect(commit(review)).toBeDisabled()
-  await review.locator('[data-action="review-product-families"]').click()
-  let family = page.locator('[data-action="product-family-review"]')
-  await family
-    .getByRole('radio', { name: 'Use one product family', exact: true })
-    .check()
-  await family.getByRole('button', { name: 'Cancel', exact: true }).click()
-  unchanged(await libraryBackup(extension), before)
-  await review.locator('[data-action="review-product-families"]').click()
-  family = page.locator('[data-action="product-family-review"]')
-  await family
-    .getByRole('radio', { name: 'Use one product family', exact: true })
-    .check()
-  await family.locator('[data-action="apply-family-choices"]').click()
-  await expect(family).toBeHidden()
   await expect(commit(review)).toBeEnabled()
+  await expect(
+    review.locator('[data-action="review-product-families"]')
+  ).toHaveCount(0)
   await expect(review.locator('[data-product-family]')).toHaveCount(1)
+  await expect(
+    review.locator('[data-review-details="edit-order-details"]')
+  ).toBeEnabled()
+  await expect(
+    review.locator('[data-review-details="edit-group-details"]')
+  ).toBeEnabled()
+  const context = review.locator('[data-family-context]')
+  await context.locator('summary').click()
+  await expect(context.locator('[data-context-entry="2003"]')).toBeVisible()
+  await expect(context.getByRole('checkbox')).toHaveCount(0)
   const details = await editPreparedDetails(review, page, {
     spanishName: 'FAMILIA SINTÉTICA',
     category: '合成系列',
@@ -983,52 +1070,30 @@ for (const [language, labels] of [
     const before = await libraryBackup(extension),
       review = await openSelection(page)
     await expect(review.getByRole('checkbox')).toHaveCount(0)
-    await expect(commit(review)).toBeDisabled()
-    await review.locator('[data-action="review-product-families"]').click()
-    const families = page.locator('[data-action="product-family-review"]')
-    await expect(families.locator('[data-family-entry]')).toHaveCount(3)
-    const familyInput = families
-      .locator('[data-action="review-family-family"]')
+    await expect(commit(review)).toBeEnabled()
+    await expect(
+      review.locator('[data-action="review-product-families"]')
+    ).toHaveCount(0)
+    await expect(
+      review.locator('[data-action="resolve-code-sizes"]')
+    ).toBeHidden()
+    await expect(review.locator('[data-family-size-fallback]')).toHaveCount(1)
+    await expect(
+      review.locator('[data-review-details="edit-order-details"]')
+    ).toBeEnabled()
+    const groupEditor = review
+      .locator('[data-review-details="edit-group-details"]')
       .first()
-    await familyInput.focus()
-    await expect(familyInput).toBeFocused()
-    const familyBounds = await familyInput.boundingBox()
-    expect(familyBounds.x).toBeGreaterThanOrEqual(0)
-    expect(familyBounds.x + familyBounds.width).toBeLessThanOrEqual(390)
-    await expect(families).toContainText(
-      language === 'zh'
-        ? '商品组标识'
-        : language === 'es'
-          ? 'Identificador de familia'
-          : 'Family identifier'
-    )
-    await families
+    await groupEditor.click()
+    const editor = page.locator('.product-detail-dialog')
+    await expect(editor).toBeVisible()
+    await editor
       .getByRole('button', { name: labels.cancel, exact: true })
       .click()
-    await expect(families).toBeHidden()
-    await review
-      .getByRole('button', { name: labels.sizes, exact: true })
-      .click()
-    const sizes = page.locator('[data-action="resolve-purchase-code-sizes"]')
-    await expect(sizes.locator('input')).toHaveCount(2)
-    await sizes.locator('input').first().fill('S')
-    await sizes
-      .getByRole('button', { name: labels.none, exact: true })
-      .nth(1)
-      .click()
-    const apply = sizes.getByRole('button', { name: labels.apply, exact: true })
-    await apply.focus()
-    const bounds = await apply.boundingBox()
-    expect(bounds.x).toBeGreaterThanOrEqual(0)
-    expect(bounds.x + bounds.width).toBeLessThanOrEqual(390)
-    await sizes.screenshot({
-      path: testInfo.outputPath(`size-endings-${language}.png`),
-    })
-    await apply.click()
-    await expect(sizes).toBeHidden()
-    await expect(commit(review)).toBeEnabled()
+    await expect(editor).toBeHidden()
     for (const name of [labels.back, labels.cancel, labels.confirm]) {
       const control = review.getByRole('button', { name, exact: true })
+      await expect(control).toBeEnabled()
       await control.focus()
       await expect(control).toBeFocused()
       const bounds = await control.boundingBox()

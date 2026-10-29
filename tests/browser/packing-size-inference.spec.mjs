@@ -8,7 +8,12 @@ import {
   libraryBackup,
 } from './smart-workspace-helpers.mjs'
 
-async function openSizes(extension, sizes, colors = ['透明', '透明']) {
+async function openSizes(
+  extension,
+  sizes,
+  colors = ['透明', '透明'],
+  { legacyUnresolved = false } = {}
+) {
   const [record] = await extension.inspector.evaluate(
     `(${createDemoRecords.toString()})(document)`
   )
@@ -43,12 +48,22 @@ async function openSizes(extension, sizes, colors = ['透明', '透明']) {
   )
   expect(restored.ok, restored.error).toBe(true)
   const legacyDraft = createPreparation(
-      record.snapshot,
-      record.snapshot.purchasedAt.slice(0, 7)
-    ),
-    unfinished = legacyDraft.groups.some((group) =>
-      group.variants.some((variant) => variant.needsSizeMapping)
-    )
+    record.snapshot,
+    record.snapshot.purchasedAt.slice(0, 7)
+  )
+  if (legacyUnresolved) {
+    // An archived preparation predates automatic title-family fallback. Keep
+    // its unresolved flags explicitly instead of expecting new suggestions to
+    // manufacture a legacy state that the current planner no longer creates.
+    delete legacyDraft.productFamilies
+    for (const variant of legacyDraft.groups[0].variants) {
+      variant.needsSizeMapping = true
+      variant.sizeSuffix = ''
+    }
+  }
+  const unfinished = legacyDraft.groups.some((group) =>
+    group.variants.some((variant) => variant.needsSizeMapping)
+  )
   if (unfinished)
     // Older saved preparations may retain unresolved sizes. The selected-row
     // preparation flow now requires resolution before its final confirmation.
@@ -130,7 +145,8 @@ test('unresolved size flags save quietly and recognition preference survives reo
   const { page } = await openSizes(
       extension,
       ['待确认尺寸甲', '待确认尺寸乙'],
-      ['金色', '银色']
+      ['金色', '银色'],
+      { legacyUnresolved: true }
     ),
     before = await backup(extension)
   expect(
@@ -362,7 +378,12 @@ test('embedded height and diameter use all axes before price and survive reopeni
 test('price-only size suggestions require visual confirmation with exact original photos and source money retained', async ({
   extension,
 }) => {
-  const { page } = await openSizes(extension, ['待确认尺寸甲', '待确认尺寸乙']),
+  const { page } = await openSizes(
+      extension,
+      ['待确认尺寸甲', '待确认尺寸乙'],
+      ['透明', '透明'],
+      { legacyUnresolved: true }
+    ),
     before = await backup(extension)
   expect(
     before.preparations[0].groups[0].variants.map(
@@ -410,7 +431,12 @@ test('price-only size suggestions require visual confirmation with exact origina
 test('orphan historical reservations cannot block reviewed size suggestions or change the current owner', async ({
   extension,
 }) => {
-  const { page } = await openSizes(extension, ['待确认尺寸甲', '待确认尺寸乙'])
+  const { page } = await openSizes(
+    extension,
+    ['待确认尺寸甲', '待确认尺寸乙'],
+    ['透明', '透明'],
+    { legacyUnresolved: true }
+  )
   await editorFor(page)
     .locator('[data-authoring-field="spanish-name"]')
     .fill('NOMBRE CONSERVADO')

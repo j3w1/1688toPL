@@ -1,5 +1,8 @@
 import { detailUrl } from './order-list.js'
-import { financialDiagnostics } from './import-diagnostics.js'
+import {
+  financialDiagnostics,
+  snapshotFinancialDiagnostics,
+} from './import-diagnostics.js'
 import { validateReconciliationReview } from './order-reconciliation.js'
 import { readerDiagnostics } from './import-report.js'
 
@@ -559,7 +562,13 @@ export function createImportController({
       order.lastFailure = {
         at: new Date(now()).toISOString(),
         message: order.error,
-        diagnostics: financialDiagnostics(error?.diagnostics),
+        diagnostics: snapshot
+          ? snapshotFinancialDiagnostics(snapshot, {
+              stage: error?.diagnostics?.stage || job.detailStage,
+              failure: error?.diagnostics?.failure,
+              diagnostics: error?.diagnostics,
+            })
+          : financialDiagnostics(error?.diagnostics),
       }
       job.latestResult = {
         orderId: order.orderId,

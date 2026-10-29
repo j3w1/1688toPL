@@ -280,7 +280,7 @@ test('selected B retains the complete order A/B/C identity without preparing A o
   assert.deepEqual(s, before)
 })
 
-test('ambiguous family review requires a source-scoped choice and retains the same revision guards before confirmation', () => {
+test('title family review needs no manual choice and retains complete revision guards', () => {
   const s = colourState()
   for (const item of s.records[0].snapshot.items) item.productNumber = ''
   const before = structuredClone(s),
@@ -310,17 +310,9 @@ test('ambiguous family review requires a source-scoped choice and retains the sa
         },
       ],
     })
-  assert.ok(
-    unresolved.issues.some(
-      (issue) => issue.code === 'PRODUCT_FAMILY_REVIEW_REQUIRED'
-    )
-  )
-  assert.deepEqual(unresolved.familyReview[0].issues[0].entryIds, [
-    '1',
-    '2',
-    '3',
-  ])
-  assert.equal(unresolved.plan.preparations.length, 0)
+  assert.deepEqual(unresolved.issues, [])
+  assert.equal(unresolved.plan.preparations.length, 1)
+  assert.equal(unresolved.changes[0].after, 'CE26100101B')
   assert.deepEqual(joined.issues, [])
   assert.equal(joined.changes[0].after, 'CE26100101B')
   assert.deepEqual(separate.issues, [])
@@ -343,7 +335,7 @@ test('ambiguous family review requires a source-scoped choice and retains the sa
   assert.deepEqual(s, before)
 })
 
-test('partial family inference gives standalone horse no suffix and preserves elephant family letters from all source siblings', () => {
+test('partial title-family inference uses letters from all source siblings', () => {
   const s = unassignedState(),
     original = s.records[0].snapshot.items[0]
   s.records[0].snapshot.items = ['7128F-02', '7128K-01', '7128K-02'].map(
@@ -366,9 +358,9 @@ test('partial family inference gives standalone horse no suffix and preserves el
   const horse = selectedReview(s, ['1']),
     elephant = selectedReview(s, ['3'])
   assert.deepEqual(horse.issues, [])
-  assert.equal(horse.changes[0].after, 'CE26100101')
+  assert.equal(horse.changes[0].after, 'CE26100101A')
   assert.deepEqual(elephant.issues, [])
-  assert.equal(elephant.changes[0].after, 'CE26100101B')
+  assert.equal(elephant.changes[0].after, 'CE26100101C')
   assert.deepEqual(
     elephant.plan.preparations[0].groups[0].variants[0].entryIds,
     ['3']
@@ -612,15 +604,19 @@ test('ambiguous previously separated source groups require review instead of ass
   assert.deepEqual(s, before)
 })
 
-test('a custom assigned ending is preserved and a colliding new canonical ending blocks the review', () => {
+test('a custom assigned ending remains reserved while a new style receives an unused ending', () => {
   let s = colourState()
   s = acceptReview(s, selectedReview(s, ['1']))
   s.preparations[0].groups[0].variants[0].variantSuffix = 'B'
   const before = structuredClone(s),
     review = selectedReview(s, ['2'])
-  assert.equal(review.plan.preparations.length, 0)
-  assert.ok(
-    review.issues.some((issue) => issue.code === 'PACKING_CODE_CONFLICT')
+  assert.deepEqual(review.issues, [])
+  const variants = review.plan.preparations[0].groups[0].variants
+  assert.equal(variants[0].variantSuffix, 'B')
+  assert.equal(variants[1].variantSuffix, 'A')
+  assert.equal(
+    new Set(variants.map((v) => v.variantSuffix + v.sizeSuffix)).size,
+    2
   )
   assert.deepEqual(s, before)
 })

@@ -119,10 +119,10 @@ test('description-only family evidence changes with source attributes while olde
       families: [{ kind: 'family', entryIds: ['1', '2'] }],
     },
   }
-  assert.equal(
-    planProductFamilies(changed, { preparation: prep }).evidence,
-    null
-  )
+  const rebuilt = planProductFamilies(changed, { preparation: prep })
+  assert.equal(rebuilt.evidence.sourceKey, productFamilySourceKey(changed))
+  assert.equal(rebuilt.families[0].provenance, 'title')
+  assert.equal(rebuilt.families[0].identities[0].style, 'green')
 })
 
 test('color values in a size field remain styles and a common product size adds no ending', () => {
@@ -147,24 +147,24 @@ test('color values in a size field remain styles and a common product size adds 
         '2026-10'
       )
     ),
-    [[''], ['']]
+    [['A', 'B']]
   )
 })
 
-test('generic article names never merge different listings and unresolved sibling evidence requires review', () => {
+test('generic article names never merge different titles and numeric siblings need no review', () => {
   const snapshot = source([
     ['玻璃装饰', '金色', 'Synthetic tree'],
     ['玻璃装饰', '金色', 'Synthetic stand'],
   ])
   assert.equal(planProductFamilies(snapshot).families.length, 2)
-  assert.equal(
+  assert.deepEqual(
     planProductFamilies(
       source([
         ['100-01', '甲'],
         ['100-02', '乙'],
       ])
-    ).issues[0].code,
-    'PRODUCT_FAMILY_REVIEW_REQUIRED'
+    ).issues,
+    []
   )
 })
 
@@ -186,7 +186,7 @@ test('mixed alphanumeric model series support uninterrupted prefixes without uni
         ['NUM-02', '乙'],
       ])
     ).issues.length,
-    1
+    0
   )
 })
 
@@ -255,7 +255,7 @@ test('reviewed coding modes and identities are portable version 2 while old vers
     )
 })
 
-test('same supplier historical cross-title size family supplies convention without borrowing CE bases', () => {
+test('historical cross-title group cannot merge different titles in a newly prepared purchase', () => {
   const original = source(
     [
       ['PLUSH11A-01', '55cm', 'Synthetic lion'],
@@ -290,15 +290,16 @@ test('same supplier historical cross-title size family supplies convention witho
   const proposed = review.plan.preparations[0],
     group = proposed.groups[0]
   assert.equal(group.variants.length, 1)
-  assert.equal(group.variants[0].sizeSuffix, 'M')
+  assert.equal(group.variants[0].sizeSuffix, '')
   assert.equal(group.variants[0].size, '65cm')
   assert.notEqual(group.baseCode, allocated.groups[0].baseCode)
   assert.deepEqual(group.variants[0].entryIds, ['2'])
-  assert.equal(review.familyReview[0].families[0].provenance, 'historical')
-  assert.equal(barcodeValue(group, group.variants[0]).endsWith('M'), true)
+  assert.equal(review.familyReview[0].families[0].provenance, 'title')
+  assert.equal(review.familyReview[0].families.length, 3)
+  assert.equal(barcodeValue(group, group.variants[0]), group.baseCode)
 })
 
-test('historical lookup is account and supplier scoped and conflicting family conventions need review', () => {
+test('other purchases cannot impose historical group splits or block a new title family', () => {
   const snapshot = source([
     ['MODEL22A-01', 'red'],
     ['MODEL22A-02', 'blue'],
@@ -319,11 +320,8 @@ test('historical lookup is account and supplier scoped and conflicting family co
     records: [{ snapshot: earlier }, { snapshot: alternate }],
     preparations: [prep, separate],
   }
-  assert.ok(
-    planProductFamilies(snapshot, state).issues.some((issue) =>
-      /disagree/.test(issue.message)
-    )
-  )
+  assert.deepEqual(planProductFamilies(snapshot, state).issues, [])
+  assert.equal(planProductFamilies(snapshot, state).families.length, 1)
   for (const extra of [
     { accountId: 'other' },
     { sellerMemberLogin: 'other-supplier' },
@@ -333,4 +331,88 @@ test('historical lookup is account and supplier scoped and conflicting family co
       plan.families.every((family) => family.provenance !== 'historical')
     )
   }
+})
+
+test('measurement formatting and generic quality wording cannot create extra option identities', () => {
+  const snapshot = source([
+    ['MODEL22A-01', '红色 10*20(cm)【优质】'],
+    ['MODEL22A-01', '红色 10×20cm【品质】'],
+  ])
+  const draft = createPreparation(snapshot, '2026-10')
+  assert.equal(draft.groups.length, 1)
+  assert.equal(draft.groups[0].variants.length, 1)
+  assert.deepEqual(draft.groups[0].variants[0].entryIds, ['1', '2'])
+  assert.deepEqual(endings(draft), [['']])
+})
+
+test('a legacy title containing punctuation remains a title rather than a SKU field', () => {
+  const snapshot = source([
+    ['', 'red'],
+    ['', 'blue'],
+  ])
+  for (const item of snapshot.items) {
+    delete item.title
+    item.description = `Synthetic vase: glass\n颜色:${item.skuProperties[0].value}`
+  }
+  const plan = planProductFamilies(snapshot)
+  assert.deepEqual(plan.issues, [])
+  assert.equal(plan.families[0].title, 'Synthetic vase: glass')
+  assert.deepEqual(endings(createPreparation(snapshot, '2026-10')), [
+    ['A', 'B'],
+  ])
+})
+
+test('portable variants-only mode distinguishes complete size options and later selected siblings', () => {
+  const snapshot = source([
+    ['DEMO-1', 'red S'],
+    ['DEMO-2', 'red L'],
+  ])
+  const familyChoices = [
+    {
+      accountId: 'local',
+      orderId: snapshot.orderId,
+      kind: 'family',
+      entryIds: ['1', '2'],
+      mode: 'variants',
+      identities: [
+        { entryId: '1', style: 'red', size: 'S' },
+        { entryId: '2', style: 'red', size: 'L' },
+      ],
+    },
+  ]
+  const draft = createPreparation(snapshot, '2026-10', undefined, undefined, {
+    familyChoices,
+  })
+  assert.deepEqual(endings(draft), [['A', 'B']])
+  const state = { records: [{ snapshot }], preparations: [], preferences: {} }
+  const first = planPurchaseCodeReview(state, {
+    entryRefs: [
+      { accountId: 'local', orderId: snapshot.orderId, entryId: '1' },
+    ],
+    familyChoices,
+  })
+  assert.deepEqual(first.issues, [])
+  assert.equal(first.changes[0].after, 'CE26100101A')
+  const assigned = allocatePreparation(first.plan.preparations[0], [], [], {
+    snapshot,
+  })
+  const later = planPurchaseCodeReview(
+    {
+      ...state,
+      preparations: [assigned.preparation],
+      allocations: assigned.allocations,
+      issuedCodes: assigned.issuedCodes,
+    },
+    {
+      entryRefs: [
+        { accountId: 'local', orderId: snapshot.orderId, entryId: '2' },
+      ],
+    }
+  )
+  assert.deepEqual(later.issues, [])
+  assert.equal(later.changes[0].after, 'CE26100101B')
+  assert.deepEqual(
+    later.plan.preparations[0].groups[0].variants[0],
+    assigned.preparation.groups[0].variants[0]
+  )
 })

@@ -142,6 +142,17 @@ export function validateStoreItem(item) {
     sourceRow: item.sourceRow,
     photos: [...item.photos],
   }
+  if (item.sourcePhotos !== undefined) {
+    if (
+      !Array.isArray(item.sourcePhotos) ||
+      !item.sourcePhotos.length ||
+      item.sourcePhotos.some(
+        (photo) => !/^local-image:[a-f0-9]{64}$/.test(photo)
+      )
+    )
+      throw new Error('Spreadsheet source photos require original local photos')
+    result.sourcePhotos = [...item.sourcePhotos]
+  }
   for (const field of ['sourceVariant', 'sourceSize']) {
     if (item[field] !== undefined) result[field] = text(item[field], field)
   }

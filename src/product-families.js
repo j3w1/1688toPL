@@ -18,12 +18,6 @@ const modelArticle = (value) =>
   /^[A-Z0-9]+(?:[-_][A-Z0-9]+)*$/.test(value) &&
   /[A-Z]/.test(value) &&
   /\d|[-_]/.test(value)
-const articleStem = (value) =>
-  /^(?=[A-Z0-9]*[A-Z])(?=[A-Z0-9]*\d)([A-Z0-9]*[A-Z])[-_]\d{1,3}$/.exec(
-    value
-  )?.[1] ??
-  /^([A-Z0-9]*[A-Z]\d+)\d{2}$/.exec(value)?.[1] ??
-  /^(?=[A-Z0-9]*[A-Z])(?=[A-Z0-9]*\d)([A-Z0-9]*[A-Z])\d{2}$/.exec(value)?.[1]
 const escape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /** Strip only source-proven identifiers and explicitly labelled packaging facts. */
@@ -31,6 +25,10 @@ export function extractFamilyProduct(item, classifier) {
   const identity = productArticleIdentity(item)
   const clean = (value) => {
     let result = text(value)
+      .replace(
+        /([0-9])\s*[（(]\s*(mm|cm|m|毫米|厘米|公分|米)\s*[)）]/gi,
+        '$1$2'
+      )
       .replace(/[（(][^()（）]*(?:包装|外箱|箱规)[^()（）]*[)）]/g, '')
       .replace(
         /(?:包装尺寸|外箱尺寸|箱规)\s*[:：]?\s*[\d.\s*x×厘米公分cm]+/gi,
@@ -78,8 +76,10 @@ export function extractFamilyProduct(item, classifier) {
           ? 'style'
           : text(property.label).toLowerCase(),
       value: clean(property.value)
+        .replace(/高品质|品质|优质|质量保证/g, '')
         .toLowerCase()
-        .replace(/[()（）]/g, '')
+        .replace(/[()（）【】\[\]]/g, ' ')
+        .replace(/\s+/g, ' ')
         .trim(),
     }))
     .filter(
@@ -226,28 +226,244 @@ export function validateProductFamilies(input) {
   }
 }
 
-/** Source facts identify families; a common marketing title alone does not. */
+/** A title is purchase-local family evidence, not a supplier-wide code identity. */
+export function productFamilyTitle(item) {
+  const title = text(item.title).replace(/\s+/g, ' ')
+  if (title) return title
+  const first =
+    text(item.description)
+      .split(/[\r\n]+/)
+      .find((line) => line.trim())
+      ?.trim() || ''
+  return /^(?:颜色|色号|款式|尺寸|规格|货号|型号|材质|color|size|model|material)\s*[:：]/i.test(
+    first
+  )
+    ? ''
+    : first.replace(/\s+/g, ' ')
+}
+
+const letters = (index) => {
+  let result = ''
+  do {
+    result = String.fromCharCode(65 + (index % 26)) + result
+    index = Math.floor(index / 26) - 1
+  } while (index >= 0)
+  return result
+}
+const sizeKey = (extracted) => {
+  const info = extracted.sizeInfo
+  return JSON.stringify(
+    info.kind === 'named'
+      ? ['named', info.suffix]
+      : info.kind === 'measurement'
+        ? ['measurement', info.dimension, info.axes || [], info.values]
+        : ['source', text(extracted.size).toLowerCase().replace(/\s+/g, ' ')]
+  )
+}
+
+/** Determine complete options before choosing a coding mode or reserving codes. */
+function automaticOptions(items, classifier, overrides = [], mode) {
+  const rows = items.map((item) => {
+    const original = extractFamilyProduct(item, classifier),
+      override = overrides.find((identity) => identity.entryId === item.entryId)
+    const extracted = override
+      ? {
+          ...original,
+          size: override.size,
+          sizeInfo: classifier.extract({
+            skuProperties: [{ label: '尺寸', value: override.size }],
+          }).sizeInfo,
+        }
+      : original
+    return {
+      item,
+      extracted,
+      style: override
+        ? override.style
+        : extracted.variantProperties
+            .map((p) => p.value)
+            .sort()
+            .join(' / '),
+      sizeKey: sizeKey(extracted),
+    }
+  })
+  const articles = new Map()
+  for (const row of rows) {
+    const key = JSON.stringify([row.style, row.sizeKey]),
+      values = articles.get(key) || new Set()
+    if (productArticleIdentity(row.item))
+      values.add(productArticleIdentity(row.item))
+    articles.set(key, values)
+  }
+  for (const row of rows)
+    if (articles.get(JSON.stringify([row.style, row.sizeKey])).size > 1)
+      row.style = [row.style, productArticleIdentity(row.item)]
+        .filter(Boolean)
+        .join(' / ')
+  const styles = [...new Set(rows.map((row) => row.style))]
+  const suggestions = classifier.suggest(
+    rows.map((row) => row.extracted.size),
+    rows.map((row) => row.style)
+  )
+  const sizesByStyle = new Map(
+    styles.map((style) => [
+      style,
+      new Set(
+        rows.filter((row) => row.style === style).map((row) => row.sizeKey)
+      ),
+    ])
+  )
+  const reliableSizes = new Set(
+    rows
+      .filter(
+        (row, index) =>
+          !suggestions[index].needsSizeMapping &&
+          ['named', 'measurement'].includes(row.extracted.sizeInfo.kind)
+      )
+      .map((row) => row.sizeKey)
+  )
+  const sizeFallback = rows.some(
+    (row, index) =>
+      suggestions[index].needsSizeMapping &&
+      sizesByStyle.get(row.style).size > 1
+  )
+  const complete = [
+    ...new Set(rows.map((row) => JSON.stringify([row.style, row.sizeKey]))),
+  ]
+  const identities = rows.map((row, index) => ({
+    entryId: row.item.entryId,
+    style: row.style,
+    size: row.extracted.size,
+    variantSuffix: ['none', 'sizes'].includes(mode)
+      ? ''
+      : sizeFallback || mode === 'variants'
+        ? complete.length > 1
+          ? letters(complete.indexOf(JSON.stringify([row.style, row.sizeKey])))
+          : ''
+        : styles.length > 1
+          ? letters(styles.indexOf(row.style))
+          : '',
+    sizeSuffix:
+      ['none', 'variants'].includes(mode) ||
+      sizeFallback ||
+      reliableSizes.size < 2 ||
+      suggestions[index].needsSizeMapping
+        ? ''
+        : suggestions[index].sizeSuffix,
+  }))
+  const hasVariants = identities.some((identity) => identity.variantSuffix)
+  const hasSizes = identities.some((identity) => identity.sizeSuffix)
+  return {
+    identities,
+    sizeFallback,
+    mode: hasVariants
+      ? hasSizes
+        ? 'variants-and-sizes'
+        : 'variants'
+      : hasSizes
+        ? 'sizes'
+        : 'none',
+  }
+}
+
+/** Reuse saved endings for identical options, without changing existing assignments. */
+function retainAssignedOptions(family, preparation, classifier) {
+  const members = new Map(
+    (preparation?.groups || []).flatMap((group) =>
+      group.variants.flatMap((variant) =>
+        variant.entryIds.map((id) => [id, variant])
+      )
+    )
+  )
+  const completeOptions = family.sizeFallback || family.mode === 'variants'
+  const optionKey = (identity) =>
+    JSON.stringify([
+      identity.style,
+      sizeKey({
+        size: identity.size,
+        sizeInfo: classifier.extract({
+          skuProperties: [{ label: '尺寸', value: identity.size }],
+        }).sizeInfo,
+      }),
+    ])
+  const endings = new Map(),
+    styles = new Map(),
+    used = new Set(),
+    conflictingOptions = new Set(),
+    conflictingStyles = new Set(),
+    conflicts = []
+  for (const identity of family.identities) {
+    const assigned = members.get(identity.entryId)
+    if (!assigned) continue
+    const option = optionKey(identity),
+      previous = endings.get(option)
+    if (
+      previous &&
+      (previous.variantSuffix !== assigned.variantSuffix ||
+        previous.sizeSuffix !== assigned.sizeSuffix)
+    )
+      conflictingOptions.add(option)
+    endings.set(option, {
+      variantSuffix: assigned.variantSuffix,
+      sizeSuffix: assigned.sizeSuffix,
+    })
+    if (!completeOptions) {
+      if (
+        styles.has(identity.style) &&
+        styles.get(identity.style) !== assigned.variantSuffix
+      )
+        conflictingStyles.add(identity.style)
+      styles.set(identity.style, assigned.variantSuffix)
+    }
+    used.add(assigned.variantSuffix)
+  }
+  const suggestedStyles = new Map()
+  let next = 0
+  for (const identity of family.identities) {
+    const assigned = members.get(identity.entryId),
+      retained = endings.get(optionKey(identity))
+    if (
+      !assigned &&
+      (conflictingOptions.has(optionKey(identity)) ||
+        (!retained &&
+          !completeOptions &&
+          conflictingStyles.has(identity.style)))
+    ) {
+      conflicts.push(identity.entryId)
+      continue
+    }
+    if (assigned || retained) {
+      identity.variantSuffix = (assigned || retained).variantSuffix
+      identity.sizeSuffix = (assigned || retained).sizeSuffix
+      continue
+    }
+    const key = completeOptions ? optionKey(identity) : identity.style
+    if (styles.has(key)) identity.variantSuffix = styles.get(key)
+    else if (identity.variantSuffix) {
+      if (!suggestedStyles.has(key)) {
+        while (used.has(letters(next))) next++
+        const suffix = letters(next++)
+        suggestedStyles.set(key, suffix)
+        used.add(suffix)
+      }
+      identity.variantSuffix = suggestedStyles.get(key)
+    }
+  }
+  return conflicts
+}
+
+/** New 1688 families follow source titles; saved membership remains authoritative. */
 export function planProductFamilies(
   snapshot,
-  {
-    choices = [],
-    preparation,
-    records = [],
-    preparations = [],
-    history = [],
-    sizeVocabulary,
-  } = {}
+  { choices = [], preparation, sizeVocabulary } = {}
 ) {
-  const sourceKey = productFamilySourceKey(snapshot),
-    source = snapshot.items.map((item, index) => ({
-      entryId: item.entryId,
-      index,
-      title: text(item.title || item.description),
-      article: productArticleIdentity(item),
-    })),
-    byId = new Map(source.map((item) => [item.entryId, item])),
+  const accountId = snapshot.accountId || 'local',
     orderId = snapshot.orderId,
-    accountId = snapshot.accountId || 'local',
+    sourceKey = productFamilySourceKey(snapshot),
+    classifier = createSizeClassifier(sizeVocabulary),
+    byId = new Map(
+      snapshot.items.map((item, index) => [item.entryId, { item, index }])
+    ),
     selectedChoices = choices.filter(
       (choice) =>
         (!choice.orderId || choice.orderId === orderId) &&
@@ -261,402 +477,122 @@ export function planProductFamilies(
       ...saved.filter(
         (family) =>
           !selectedChoices.some((choice) =>
-            choice.entryIds?.some((entryId) =>
-              family.entryIds.includes(entryId)
-            )
+            choice.entryIds?.some((id) => family.entryIds.includes(id))
           )
       ),
       ...selectedChoices,
     ],
-    evidence = reviewed.length
+    explicit = reviewed.length
       ? validateProductFamilies({ version: 2, sourceKey, families: reviewed })
       : null
-  for (const family of evidence?.families ?? [])
-    if (family.entryIds.some((entryId) => !byId.has(entryId)))
+  for (const family of explicit?.families || [])
+    if (family.entryIds.some((id) => !byId.has(id)))
       throw new Error(
         'Reviewed product families refer to missing source products'
       )
-
-  const root = (item) => articleStem(item.article),
-    siblings = new Map()
-  for (const item of source) {
-    const stem = root(item)
-    if (!stem) continue
-    const key = JSON.stringify([stem, item.title]),
-      values = siblings.get(key) ?? new Set()
-    values.add(item.article)
-    siblings.set(key, values)
-  }
-  const groups = new Map()
-  for (const item of source) {
-    const stem = root(item),
-      siblingKey = JSON.stringify([stem, item.title]),
-      grouped = stem && siblings.get(siblingKey)?.size > 1,
-      key = grouped
-        ? `model:${siblingKey}`
-        : item.article
-          ? `article:${JSON.stringify([item.article, item.title])}`
-          : `source:${item.entryId}`
-    if (!groups.has(key))
-      groups.set(key, {
-        entryIds: [],
-        provenance: grouped
-          ? 'article-family'
-          : item.article && modelArticle(item.article)
-            ? 'article'
-            : 'source',
-        ...(grouped ? { articleFamily: stem } : {}),
+  const reviewedIds = new Set(
+    (explicit?.families || []).flatMap((family) => family.entryIds)
+  )
+  const groups = new Map(),
+    issues = []
+  for (const item of snapshot.items) {
+    if (reviewedIds.has(item.entryId)) continue
+    const title = productFamilyTitle(item)
+    if (!title)
+      issues.push({
+        code: 'PRODUCT_TITLE_REQUIRED',
+        message:
+          'The source product title is missing. Refresh the order before preparing products.',
+        accountId,
+        orderId,
+        entryIds: [item.entryId],
       })
+    const key = title || `missing:${item.entryId}`
+    if (!groups.has(key))
+      groups.set(key, { title, entryIds: [], provenance: 'title' })
     groups.get(key).entryIds.push(item.entryId)
   }
-  const reviewedIds = new Set(
-      (evidence?.families ?? []).flatMap((family) => family.entryIds)
-    ),
-    families = [...groups.values()]
-      .map((family) => ({
-        ...family,
-        entryIds: family.entryIds.filter(
-          (entryId) => !reviewedIds.has(entryId)
-        ),
-      }))
-      .filter((family) => family.entryIds.length)
-  for (const family of evidence?.families ?? []) {
+  const families = [...groups.values()]
+  for (const family of explicit?.families || [])
     for (const entryIds of family.kind === 'standalone'
-      ? family.entryIds.map((entryId) => [entryId])
+      ? family.entryIds.map((id) => [id])
       : [family.entryIds])
       families.push({
         ...family,
-        entryIds: [...entryIds],
+        entryIds,
+        title: productFamilyTitle(byId.get(entryIds[0]).item),
         provenance: 'reviewed',
-        ...(family.identities
-          ? {
-              identities: family.identities.filter((identity) =>
-                entryIds.includes(identity.entryId)
-              ),
-            }
-          : {}),
+        identities: family.identities?.filter((identity) =>
+          entryIds.includes(identity.entryId)
+        ),
       })
-  }
-
-  // Historical conventions are read from actual retained purchases, never a
-  // bundled supplier catalogue or a previous purchase's CE reservation.
-  const supplier = (value) =>
-    value.sellerUnavailable ? '' : text(value.sellerMemberLogin)
-  const sources = new Map(
-    records.map((record) => {
-      const value = record.snapshot ?? record
-      return [
-        JSON.stringify([value.accountId || 'local', value.orderId]),
-        value,
-      ]
-    })
-  )
-  const observations = [...records, ...history].map(
-    (record) => record.snapshot ?? record
-  )
-  const references = new Set(),
-    byMember = new Map()
-  const memberKey = (member) =>
-    JSON.stringify([member.article, member.title, member.properties])
-  const mergeMember = (reference, member) => {
-    const key = memberKey(member),
-      previous = reference.members.get(key)
-    if (
-      previous?.variantSuffix !== undefined &&
-      member.variantSuffix !== undefined &&
-      (previous.variantSuffix !== member.variantSuffix ||
-        previous.sizeSuffix !== member.sizeSuffix)
-    )
-      reference.conflict = true
-    const identity =
-        !previous ||
-        (member.reviewed && !previous.reviewed) ||
-        (previous.style === undefined && member.style !== undefined)
-          ? member
-          : previous,
-      ending = previous?.variantSuffix !== undefined ? previous : member
-    reference.members.set(key, {
-      ...identity,
-      ...(ending.variantSuffix !== undefined
-        ? { variantSuffix: ending.variantSuffix, sizeSuffix: ending.sizeSuffix }
-        : {}),
-    })
-  }
-  for (const prior of preparations) {
-    const orderKey = JSON.stringify([
-        prior.accountId || 'local',
-        prior.orderId,
-      ]),
-      original = prior.productFamilies
-        ? observations.find(
-            (value) =>
-              JSON.stringify([value.accountId || 'local', value.orderId]) ===
-                orderKey &&
-              productFamilySourceKey(value) === prior.productFamilies.sourceKey
-          )
-        : sources.get(orderKey)
-    if (
-      !original ||
-      original.orderId === snapshot.orderId ||
-      (original.accountId || 'local') !== accountId ||
-      !supplier(snapshot) ||
-      supplier(original) !== supplier(snapshot) ||
-      original.sourceType === 'spreadsheet'
-    )
-      continue
-    for (const group of prior.groups) {
-      const assigned = new Map(
-          group.variants.flatMap((variant) =>
-            variant.entryIds.map((entryId) => [entryId, variant])
-          )
-        ),
-        context = (prior.productFamilies?.families ?? []).filter((family) =>
-          family.entryIds.some((entryId) => assigned.has(entryId))
-        ),
-        entryIds = new Set([
-          ...assigned.keys(),
-          ...context.flatMap((family) =>
-            family.kind === 'family' ? family.entryIds : []
-          ),
-        ]),
-        observedMode = group.variants.some((variant) => variant.variantSuffix)
-          ? group.variants.some((variant) => variant.sizeSuffix)
-            ? 'variants-and-sizes'
-            : 'variants'
-          : group.variants.some((variant) => variant.sizeSuffix)
-            ? 'sizes'
-            : 'none',
-        declaredModes = new Set(
-          context.map((family) => family.mode).filter(Boolean)
-        ),
-        reference = {
-          members: new Map(),
-          modes: declaredModes.size ? declaredModes : new Set([observedMode]),
-          groups: new Map([[orderKey, new Set([group.id])]]),
-          conflict: false,
-        }
-      for (const entryId of entryIds) {
-        const item = original.items.find((item) => item.entryId === entryId)
-        if (!item) continue
-        const variant = assigned.get(entryId),
-          reviewed = context
-            .flatMap((family) => family.identities ?? [])
-            .find((identity) => identity.entryId === entryId)
-        mergeMember(reference, {
-          article: productArticleIdentity(item),
-          title: text(item.title || item.description),
-          properties: JSON.stringify(
-            sizeSourceProperties(item).map(({ label, value }) => [
-              text(label),
-              text(value),
-            ])
-          ),
-          ...(reviewed || variant
-            ? {
-                style: reviewed?.style ?? variant.variant,
-                size: reviewed?.size ?? variant.size,
-              }
-            : {}),
-          ...(variant
-            ? {
-                variantSuffix: variant.variantSuffix,
-                sizeSuffix: variant.sizeSuffix,
-              }
-            : reviewed?.variantSuffix !== undefined ||
-                reviewed?.sizeSuffix !== undefined
-              ? {
-                  variantSuffix: reviewed.variantSuffix,
-                  sizeSuffix: reviewed.sizeSuffix,
-                }
-              : {}),
-          reviewed: Boolean(reviewed),
-        })
-      }
-      // Partial preparations carry only selected assignments. Merge overlapping
-      // evidence while retaining explicit separation in every earlier purchase.
-      const overlapping = new Set(
-        [...reference.members.keys()]
-          .map((key) => byMember.get(key))
-          .filter(Boolean)
-      )
-      for (const previous of overlapping) {
-        reference.conflict ||= previous.conflict
-        for (const mode of previous.modes) reference.modes.add(mode)
-        for (const member of previous.members.values())
-          mergeMember(reference, member)
-        for (const [order, groups] of previous.groups) {
-          const combined = reference.groups.get(order) ?? new Set()
-          for (const id of groups) combined.add(id)
-          reference.groups.set(order, combined)
-        }
-        references.delete(previous)
-      }
-      reference.conflict ||=
-        reference.modes.size > 1 ||
-        [...reference.groups.values()].some((groups) => groups.size > 1)
-      references.add(reference)
-      for (const key of reference.members.keys()) byMember.set(key, reference)
-    }
-  }
-  const classifier = createSizeClassifier(sizeVocabulary),
-    historical = new Map(),
-    historicalIssues = []
-  for (const item of source) {
-    if (reviewedIds.has(item.entryId) || !item.article) continue
-    const matches = [...references].filter((reference) =>
-      [...reference.members.values()].some(
-        (member) =>
-          member.article === item.article && member.title === item.title
-      )
-    )
-    if (matches.length > 1 || matches[0]?.conflict) {
-      historicalIssues.push(item.entryId)
-      continue
-    }
-    if (!matches.length) continue
-    const reference = matches[0]
-    const group = historical.get(reference) ?? {
-      entryIds: [],
-      provenance: 'historical',
-      mode: [...reference.modes][0],
-      identities: [],
-    }
-    const row = snapshot.items.find((row) => row.entryId === item.entryId),
-      properties = JSON.stringify(
-        sizeSourceProperties(row).map(({ label, value }) => [
-          text(label),
-          text(value),
-        ])
-      ),
-      member = reference.members.get(memberKey({ ...item, properties }))
-    group.entryIds.push(item.entryId)
-    if (member?.style !== undefined) {
-      group.identities.push({
-        entryId: item.entryId,
-        style: member.style,
-        size: member.size,
-        ...(member.variantSuffix !== undefined
-          ? { variantSuffix: member.variantSuffix }
-          : {}),
-        ...(member.sizeSuffix !== undefined
-          ? { sizeSuffix: member.sizeSuffix }
-          : {}),
-      })
-    }
-    historical.set(reference, group)
-  }
-  const historyIds = new Set(
-    [...historical.values()].flatMap((family) => family.entryIds)
-  )
-  for (const family of families)
-    family.entryIds = family.entryIds.filter((id) => !historyIds.has(id))
-  families.push(...historical.values())
-  for (let i = families.length - 1; i >= 0; i--)
-    if (!families[i].entryIds.length) families.splice(i, 1)
-
-  // Already authored membership is authoritative. This never recodes a saved
-  // family; the code planner separately rejects ambiguous multi-group appends.
-  const preparedIds = new Set()
-  for (const group of preparation?.groups ?? []) {
+  // Existing groups may span titles after authored grouping. Keep their identity,
+  // and let the append transaction detect multiple incompatible destinations.
+  for (const group of preparation?.groups || []) {
     const ids = new Set(
       group.variants
         .flatMap((variant) => variant.entryIds)
-        .filter((entryId) => byId.has(entryId))
+        .filter((id) => byId.has(id))
     )
-    for (const entryId of ids) preparedIds.add(entryId)
     const matching = families.filter((family) =>
-      family.entryIds.some((entryId) => ids.has(entryId))
+      family.entryIds.some((id) => ids.has(id))
     )
     if (!matching.length) continue
     const merged = {
       ...(matching.length === 1 ? matching[0] : {}),
+      title: matching[0].title,
       entryIds: [...new Set(matching.flatMap((family) => family.entryIds))],
       provenance: 'existing',
     }
     for (const family of matching) families.splice(families.indexOf(family), 1)
     families.push(merged)
   }
-  const titles = new Map()
-  for (const item of source) {
-    const cohort = titles.get(item.title) ?? []
-    cohort.push(item)
-    titles.set(item.title, cohort)
-  }
-  const issues = []
-  for (const cohort of titles.values()) {
-    const differentArticles =
-      new Set(cohort.map((item) => item.article)).size > 1
-    if (
-      cohort.length < 2 ||
-      !cohort.some(
-        (item) =>
-          (!modelArticle(item.article) || (differentArticles && !root(item))) &&
-          !historyIds.has(item.entryId) &&
-          !reviewedIds.has(item.entryId) &&
-          !preparedIds.has(item.entryId)
-      )
-    )
-      continue
-    issues.push({
-      code: 'PRODUCT_FAMILY_REVIEW_REQUIRED',
-      message:
-        'These products share a title, but their product-family identity needs your review.',
-      accountId,
-      orderId,
-      entryIds: cohort.map((item) => item.entryId),
-    })
-  }
-  if (historicalIssues.length)
-    issues.push({
-      code: 'PRODUCT_FAMILY_REVIEW_REQUIRED',
-      message:
-        'Previous product families disagree. Review the family membership and endings.',
-      accountId,
-      orderId,
-      entryIds: historicalIssues,
-    })
   families.sort(
-    (left, right) =>
-      Math.min(...left.entryIds.map((entryId) => byId.get(entryId).index)) -
-      Math.min(...right.entryIds.map((entryId) => byId.get(entryId).index))
+    (a, b) =>
+      Math.min(...a.entryIds.map((id) => byId.get(id).index)) -
+      Math.min(...b.entryIds.map((id) => byId.get(id).index))
   )
+  const proposals = families.map((family) => {
+    const items = family.entryIds.map((id) => byId.get(id).item),
+      automatic = automaticOptions(
+        items,
+        classifier,
+        family.identities,
+        family.mode
+      )
+    const result = {
+      ...automatic,
+      ...family,
+      id: `family:${[...family.entryIds].sort().join(':')}`,
+      kind: family.entryIds.length > 1 ? 'family' : 'standalone',
+      identities: automatic.identities.map((identity) => ({
+        ...identity,
+        ...family.identities?.find(
+          (saved) => saved.entryId === identity.entryId
+        ),
+      })),
+    }
+    const conflicts = retainAssignedOptions(result, preparation, classifier)
+    if (conflicts.length)
+      issues.push({
+        code: 'PURCHASE_GROUP_REVIEW_REQUIRED',
+        message:
+          'Review this product group before assigning more source products. Existing authored groups or variants do not identify one unambiguous destination.',
+        accountId,
+        orderId,
+        entryIds: conflicts,
+      })
+    return result
+  })
+  const evidence = proposals.length
+    ? validateProductFamilies({ version: 2, sourceKey, families: proposals })
+    : null
   return {
     accountId,
     orderId,
     sourceKey,
-    families: families.map((family) => ({
-      ...family,
-      id: `family:${[...family.entryIds].sort().join(':')}`,
-      kind: family.entryIds.length > 1 ? 'family' : 'standalone',
-      identities: family.entryIds.map((entryId) => {
-        const existing = family.identities?.find(
-          (identity) => identity.entryId === entryId
-        )
-        if (existing) return existing
-        const extracted = extractFamilyProduct(
-          snapshot.items.find((item) => item.entryId === entryId),
-          classifier
-        )
-        return {
-          entryId,
-          style: extracted.variantProperties
-            .map((property) => property.value)
-            .join(' / '),
-          size: extracted.size,
-          suggested: true,
-        }
-      }),
-    })),
+    families: proposals,
     issues,
-    evidence: historyIds.size
-      ? validateProductFamilies({
-          version: 2,
-          sourceKey,
-          families: families.map((family) => ({
-            ...family,
-            kind: family.entryIds.length > 1 ? 'family' : 'standalone',
-          })),
-        })
-      : evidence,
+    evidence,
   }
 }

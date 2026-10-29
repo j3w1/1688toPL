@@ -98,7 +98,7 @@ test('unavailable seller cannot allocate labels until a real identity is supplie
   assert.equal(result.preparation.groups[0].baseCode, 'CE26100101')
 })
 
-test('standalone decorative horse has a bare code while its sibling elephant articles receive family letters', () => {
+test('same-title horse and elephants receive one family base with source-order letters', () => {
   const snapshot = source([
       {
         title: 'Synthetic generic decoration',
@@ -122,12 +122,12 @@ test('standalone decorative horse has a bare code while its sibling elephant art
       [],
       []
     )
-  assert.equal(allocated.preparation.groups.length, 2)
+  assert.equal(allocated.preparation.groups.length, 1)
   assert.deepEqual(
     allocated.preparation.groups.map((group) =>
       group.variants.map((variant) => barcodeValue(group, variant))
     ),
-    [['CE26100101'], ['CE26100102A', 'CE26100102B']]
+    [['CE26100101A', 'CE26100101B', 'CE26100101C']]
   )
   assert.deepEqual(snapshot, before)
 })
@@ -292,7 +292,7 @@ test('vocabulary suggestions require agreement independently for each field', ()
   assert.equal(unknown.category, '')
 })
 
-test('dimension suggestions order 2 through 5 sizes and leave ambiguous sets unresolved', () => {
+test('dimension suggestions rank reliable sets and fall back to letters for ambiguous alternatives', () => {
   for (const [dimensions, expected] of [
     [
       ['30cm', '10cm'],
@@ -334,17 +334,22 @@ test('dimension suggestions order 2 through 5 sizes and leave ambiguous sets unr
       '2026-06'
     )
     assert.ok(
-      draft.groups[0].variants.every((variant) => variant.needsSizeMapping)
+      draft.groups[0].variants.every(
+        (variant) => !variant.needsSizeMapping && variant.sizeSuffix === ''
+      )
+    )
+    assert.deepEqual(
+      draft.groups[0].variants.map((v) => v.variantSuffix),
+      dimensions.map((_, index) => String.fromCharCode(65 + index))
     )
     const allocated = allocatePreparation(draft, [], [])
-    assert.equal(allocated.issuedCodes.length, 1)
-    assert.throws(
-      () =>
-        barcodeValue(
-          allocated.preparation.groups[0],
-          allocated.preparation.groups[0].variants[0]
-        ),
-      /Map this variant size/
+    assert.equal(allocated.issuedCodes.length, dimensions.length + 1)
+    assert.equal(
+      barcodeValue(
+        allocated.preparation.groups[0],
+        allocated.preparation.groups[0].variants[0]
+      ),
+      allocated.preparation.groups[0].baseCode + 'A'
     )
   }
 })
@@ -638,7 +643,13 @@ test('size suggestions normalize units and rank measurements only when dimension
       '2026-06'
     )
     assert.ok(
-      draft.groups[0].variants.every((variant) => variant.needsSizeMapping)
+      draft.groups[0].variants.every(
+        (variant) => !variant.needsSizeMapping && variant.sizeSuffix === ''
+      )
+    )
+    assert.deepEqual(
+      draft.groups[0].variants.map((v) => v.variantSuffix),
+      ['A', 'B']
     )
   }
   const textual = createPreparation(
