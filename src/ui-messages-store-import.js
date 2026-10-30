@@ -133,10 +133,10 @@ export const STORE_IMPORT_MESSAGES = {
       zh: 'cbm 是供应商提供的每箱体积。完整厘米尺寸分别填入 cbmx、cbmy、cbmz。工作区按长 × 宽 × 高 ÷ 1,000,000 计算体积；填写完整尺寸前，供应商体积仅供查看。',
       es: 'cbm es el volumen por caja indicado por el proveedor. Pon las medidas completas en centímetros en cbmx, cbmy y cbmz. El espacio de trabajo calcula largo × ancho × alto ÷ 1,000,000; el volumen indicado es de solo lectura hasta completar las medidas.',
     },
-  'abcd shares one quantity and amount across A–D. Enter the actual split during review; never duplicate the totals or assume equal quantities. abs, abm and abl mean A/B in sizes S, M and L. Reviewed allocations keep one source carton record; they never multiply its cartons.':
+  'abcd shares one quantity and amount across A–D. Quantities start with an even whole-piece split; extra pieces go one each in declaration order. Edit the split if the seller supplies a different breakdown. abs, abm and abl mean A/B in sizes S, M and L. Allocations keep one source carton record; they never multiply its cartons.':
     {
-      zh: 'abcd 表示 A–D 共用一份数量和金额。审核时输入实际分配；不可复制总数或假定平均分配。abs、abm、abl 分别表示 S、M、L 尺码的 A/B 款。已审核的数量分配仍保留一份来源纸箱记录，不会增加箱数。',
-      es: 'abcd comparte una cantidad e importe entre A–D. Introduce el reparto real al revisar; nunca dupliques los totales ni supongas cantidades iguales. abs, abm y abl indican A/B en tallas S, M y L. Los repartos revisados conservan un único registro original de cajas; nunca multiplican su número.',
+      zh: 'abcd 表示 A–D 共用一份数量和金额。默认按整件平均分配，余数按声明顺序逐款多分一件；供应商提供其他分配时可修改。abs、abm、abl 分别表示 S、M、L 尺码的 A/B 款。分配后仍保留一份来源纸箱记录，不会增加箱数。',
+      es: 'abcd comparte una cantidad e importe entre A–D. Se propone un reparto uniforme de piezas enteras; los sobrantes se distribuyen de uno en uno según el orden declarado. Ajusta las cantidades si el proveedor indica otro reparto. abs, abm y abl indican A/B en tallas S, M y L. Se conserva un único registro original de cajas, sin multiplicarlas.',
     },
   'Every product needs a photo. One photo can serve different groups when its anchor or merged pic cell covers their rows. Confirm shared photos during review. Missing or unreadable photos block import. Square thumbnails keep proportions and originals.':
     {
@@ -238,10 +238,11 @@ export const STORE_IMPORT_MESSAGES = {
     zh: '请在 Excel 中将此照片替换为嵌入图片。',
     es: 'Sustituye esta foto por una imagen incrustada en Excel.',
   },
-  'Allocate the combined quantity in the product row below.': {
-    zh: '请在下方商品行分配合并款式的数量。',
-    es: 'Reparte la cantidad combinada en la fila del producto de abajo.',
-  },
+  'Review the suggested quantities in the product row below; adjust them if needed.':
+    {
+      zh: '请查看下方商品行的建议数量，需要时可修改。',
+      es: 'Revisa las cantidades propuestas en la fila inferior y ajústalas si hace falta.',
+    },
   'Correct qty, boxes or perbox in Excel.': {
     zh: '请在 Excel 中修改 qty、boxes 或 perbox。',
     es: 'Corrige qty, boxes o perbox en Excel.',
@@ -387,10 +388,10 @@ export const STORE_IMPORT_MESSAGES = {
     zh: '请填写全部三项纸箱尺寸：cbmx、cbmy 和 cbmz。',
     es: 'Introduce las tres medidas de la caja: cbmx, cbmy y cbmz.',
   },
-  'This row combines variants. Allocate its existing quantity across the variants; do not duplicate the row totals or cartons.':
+  'This row combines variants. Quantities are suggested evenly; adjust them if needed. Source totals and cartons stay unchanged.':
     {
-      zh: '此行包含多种款式。请分配原有数量，不要重复计算该行的总金额或箱数。',
-      es: 'Esta fila combina variantes. Reparte su cantidad existente sin duplicar los importes ni las cajas.',
+      zh: '此行包含多种款式，默认建议平均分配，可按需要修改。来源总数量、金额和箱数保持不变。',
+      es: 'Esta fila combina variantes. Se propone un reparto uniforme que puedes ajustar. Los totales y las cajas originales no cambian.',
     },
   'No included product rows were found. Add group values to the product rows to import.':
     {
@@ -561,6 +562,21 @@ export const STORE_IMPORT_MESSAGES = {
     zh: '分配合计数量',
     es: 'Reparte la cantidad combinada',
   },
+  'Split evenly by default. Adjust these quantities if the seller supplies a different breakdown.':
+    {
+      zh: '默认平均分配。供应商提供不同分配时，请修改这些数量。',
+      es: 'Se reparte por igual de forma predeterminada. Ajusta estas cantidades si el proveedor indica otro reparto.',
+    },
+  'For the default split, extra pieces go one each to the first variants in declaration order.':
+    {
+      zh: '默认分配时，多出的件数按声明顺序逐款多分一件。',
+      es: 'En el reparto predeterminado, las piezas sobrantes se asignan de una en una a las primeras variantes según el orden declarado.',
+    },
+  'Row {0}: {1} pieces cannot give all {2} variants a positive whole-piece quantity. Correct the total or variant declaration.':
+    {
+      zh: '第 {0} 行：{1} 件不足以为全部 {2} 个款式各分配至少一整件。请更正总数量或款式声明。',
+      es: 'Fila {0}: {1} piezas no permiten asignar al menos una pieza entera a cada una de las {2} variantes. Corrige el total o la declaración de variantes.',
+    },
   'These variants share the source row’s cartons. Their physical packing needs review; carton counts are never multiplied.':
     {
       zh: '这些款式共用源数据行的纸箱。实际装箱需要审核；箱数不会重复计算。',
@@ -807,11 +823,6 @@ export const STORE_IMPORT_MESSAGES = {
     zh: '合并款式须先审核再拆分',
     es: 'Revisa antes de separar variantes combinadas',
   },
-  'A row marked abcd contains one combined quantity and amount for A, B, C and D. Review must ask for the actual split; it must never duplicate the totals or assume equal quantities. abs, abm and abl mean variants A and B together in sizes S, M and L respectively.':
-    {
-      zh: '标记 abcd 的单行包含 A、B、C、D 合计的数量与金额。审核时必须填写实际分配，不得重复总数或默认平均分配。abs、abm、abl 分别表示 A、B 两种款式合计的 S、M、L 尺寸。',
-      es: 'Una fila con abcd contiene una cantidad y un importe conjuntos para A, B, C y D. La revisión debe pedir el reparto real, sin duplicar totales ni suponer cantidades iguales. abs, abm y abl representan las variantes A y B juntas en las tallas S, M y L, respectivamente.',
-    },
   'Review photos before importing': {
     zh: '导入前审核照片',
     es: 'Revisa las fotos antes de importar',

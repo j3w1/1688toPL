@@ -3,7 +3,10 @@ import { message as m, bindText, bindAttribute } from './i18n.js'
 import { decorateIcon } from './icons.js'
 import { mountStoreSpreadsheetGuide } from './store-spreadsheet-guide.js'
 import { readStoreWorkbookAsync } from './store-workbook-client.js'
-import { analyzeStoreSheet } from './store-workbook-model.js'
+import {
+  analyzeStoreSheet,
+  suggestStoreVariantQuantities,
+} from './store-workbook-model.js'
 import { findMatchingStoreImports } from './store-import-matches.js'
 import { createPhotoViewer } from './photo-viewer.js'
 import { squareProductPhoto } from './product-photo.js'
@@ -17,6 +20,9 @@ const positiveInteger = (value) =>
   /^\d+$/.test(String(value ?? '')) &&
   Number.isSafeInteger(Number(value)) &&
   Number(value) > 0
+
+const insufficientVariantQuantity =
+  'Row {0}: {1} pieces cannot give all {2} variants a positive whole-piece quantity. Correct the total or variant declaration.'
 
 function validDate(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
@@ -54,6 +60,17 @@ export function validateStoreImportReview(analysis, review) {
   }
   const rows = (analysis?.rows ?? []).map((row) => {
     if ((row.variants?.length ?? 0) <= 1) return row
+    if (
+      positiveInteger(row.quantity) &&
+      Number(row.quantity) < row.variants.length
+    ) {
+      issues.push({
+        message: insufficientVariantQuantity,
+        params: { 0: row.row, 1: row.quantity, 2: row.variants.length },
+        row: row.row,
+      })
+      return row
+    }
     const values = review.allocations?.get(String(row.row)) ?? []
     if (
       values.length !== row.variants.length ||
@@ -124,7 +141,7 @@ const issueInstructions = {
   'photo-missing': 'Paste a picture into this row’s pic cell in Excel.',
   'photo-unresolved': 'Replace this picture with an embedded image in Excel.',
   'variant-allocation':
-    'Allocate the combined quantity in the product row below.',
+    'Review the suggested quantities in the product row below; adjust them if needed.',
   'quantity-mismatch': 'Correct qty, boxes or perbox in Excel.',
   'amount-mismatch': 'Correct price, qty or amount in Excel.',
   'total-mismatch': 'Correct the product rows or the seller’s total in Excel.',
@@ -851,11 +868,20 @@ export function openStoreImportDialog({
         const split = el('fieldset', undefined, 'store-import-allocation'),
           result = el('p', undefined, 'store-import-allocation-total'),
           controls = el('div', undefined, 'store-import-allocation-controls'),
-          values = row.variants.map(() => '')
+          values = suggestStoreVariantQuantities(row),
+          guidance = el(
+            'small',
+            m(
+              'Split evenly by default. Adjust these quantities if the seller supplies a different breakdown.'
+            )
+          )
         allocations.set(String(row.row), values)
         result.id = `store-import-allocation-${crypto.randomUUID()}`
+        result.setAttribute('aria-live', 'polite')
+        guidance.id = `${result.id}-help`
         split.append(
           el('legend', m('Split the combined quantity')),
+          guidance,
           controls,
           result,
           el(
@@ -865,6 +891,19 @@ export function openStoreImportDialog({
             )
           )
         )
+        if (
+          row.variantAllocations === undefined &&
+          values.every(positiveInteger) &&
+          Number(row.quantity) % row.variants.length
+        )
+          split.append(
+            el(
+              'small',
+              m(
+                'For the default split, extra pieces go one each to the first variants in declaration order.'
+              )
+            )
+          )
         const update = () => {
           const assigned = values.reduce(
             (sum, quantity) => sum + (Number(quantity) || 0),
@@ -872,7 +911,16 @@ export function openStoreImportDialog({
           )
           bindText(
             result,
-            m('{0} of {1} units allocated', { 0: assigned, 1: row.quantity })
+            Number(row.quantity) < row.variants.length
+              ? m(insufficientVariantQuantity, {
+                  0: row.row,
+                  1: row.quantity,
+                  2: row.variants.length,
+                })
+              : m('{0} of {1} units allocated', {
+                  0: assigned,
+                  1: row.quantity,
+                })
           )
           const valid =
             values.every(positiveInteger) && assigned === Number(row.quantity)
@@ -892,7 +940,8 @@ export function openStoreImportDialog({
           input.step = '1'
           input.inputMode = 'numeric'
           input.required = true
-          input.setAttribute('aria-describedby', result.id)
+          input.value = values[index]
+          input.setAttribute('aria-describedby', `${guidance.id} ${result.id}`)
           bindAttribute(
             input,
             'aria-label',

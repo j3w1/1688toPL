@@ -35,6 +35,8 @@ Save-time financial failures retain optional bounded diagnostics: processing `st
 
 Open **Import spreadsheet** after the Orders readiness control is enabled. Upload through the labeled Workbook field, select the sheet, confirm the purchase date and supplier, resolve review/quantity items, and check the final photos/totals confirmation. Then use `review-import-codes`; this creates no purchase or code reservation.
 
+Combined declarations prefill positive whole-piece quantities evenly across their parsed variant/size identities. Extra pieces go one each in declaration order. These defaults apply to both import modes; agents may edit them before confirmation. Do not clear or repeatedly refill untouched inputs, derive splits from photo counts, or assume a product split proves individual-carton contents. Cleared/invalid drafts stay invalid, and fewer pieces than variants require a corrected source total or declaration. Back, language/photo edits and code reset preserve the current allocation draft. Repository callers must continue to supply explicit valid `variantAllocations`; the save APIs do not infer missing quantities.
+
 | `data-action`                 | Accessible name / behavior                                                                        |
 | ----------------------------- | ------------------------------------------------------------------------------------------------- |
 | `review-import-codes`         | Review products and codes; validate the workbook and propose assignments and details.             |

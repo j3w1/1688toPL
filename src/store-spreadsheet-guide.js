@@ -253,7 +253,7 @@ export function mountStoreSpreadsheetGuide(
     ),
     section(
       'Keep combined variants together until review',
-      'abcd shares one quantity and amount across A–D. Enter the actual split during review; never duplicate the totals or assume equal quantities. abs, abm and abl mean A/B in sizes S, M and L. Reviewed allocations keep one source carton record; they never multiply its cartons.'
+      'abcd shares one quantity and amount across A–D. Quantities start with an even whole-piece split; extra pieces go one each in declaration order. Edit the split if the seller supplies a different breakdown. abs, abm and abl mean A/B in sizes S, M and L. Allocations keep one source carton record; they never multiply its cartons.'
     ),
     section(
       'Review photos before importing',
