@@ -39,6 +39,7 @@ export function workbookFile({
   rows,
   photoBytes = png,
   photoSpans = [{ from: 1, to: 2 }],
+  additionalSheets = [],
 } = {}) {
   const workbook = utils.book_new()
   utils.book_append_sheet(
@@ -53,6 +54,12 @@ export function workbookFile({
     ),
     'Products'
   )
+  for (const sheet of additionalSheets)
+    utils.book_append_sheet(
+      workbook,
+      utils.aoa_to_sheet(sheet.rows),
+      sheet.name
+    )
   const archive = CFB.read(
     new Uint8Array(write(workbook, { type: 'array', bookType: 'xlsx' })),
     { type: 'array' }

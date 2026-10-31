@@ -1203,7 +1203,7 @@ test('import review cards show photos, source values and arithmetic comparisons 
     await dialog
       .locator('.store-import-allocation input')
       .evaluateAll((inputs) => inputs.map((input) => input.value))
-  ).toEqual(['', ''])
+  ).toEqual(['10', '10'])
   await dialog.locator('input[name="purchaseDate"]').fill('2026-10-20')
   await dialog.locator('input[name="photosReviewed"]').check()
   await dialog
@@ -1216,6 +1216,9 @@ test('import review cards show photos, source values and arithmetic comparisons 
   await expect(
     dialog.locator('.store-import-review-check input:checked')
   ).toHaveCount(0)
+  const allocationInputs = dialog.locator('.store-import-allocation input')
+  await allocationInputs.nth(0).fill('0')
+  await allocationInputs.nth(1).fill('20')
   await all.check()
   await dialog.locator('input[name="purchaseDate"]').fill('2026-10-20')
   await dialog.locator('input[name="photosReviewed"]').check()
@@ -1298,12 +1301,14 @@ test('store import reads a real marked workbook in its worker, blocks bad totals
   expect(result.images).toHaveLength(1)
 })
 
-test('combined variants require actual quantities and photo adjustments keep originals', async ({
+test('combined variants start evenly, retain editable quantities and photo adjustments keep originals', async ({
   extension,
 }) => {
   const { page, dialog, file } = await openImport(extension)
   await file.setInputFiles(workbookFile({ variants: 'abs' }))
   const quantities = dialog.locator('.store-import-allocation input')
+  await expect(quantities.nth(0)).toHaveValue('10')
+  await expect(quantities.nth(1)).toHaveValue('10')
   await expect(quantities).toHaveCount(2)
   await dialog.getByLabel('Purchase date', { exact: true }).fill('2026-10-20')
   await dialog

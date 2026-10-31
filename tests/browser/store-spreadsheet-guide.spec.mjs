@@ -91,7 +91,7 @@ test('store spreadsheet format guide supports keyboard sections and exact marker
   const review = guide.getByRole('tab', { name: 'Checks', exact: true })
   await expect(review).toBeFocused()
   await expect(guide.getByRole('tabpanel', { name: 'Checks' })).toContainText(
-    'never duplicate the totals or assume equal quantities'
+    'Quantities start with an even whole-piece split'
   )
   const checks = guide.getByRole('tabpanel', { name: 'Checks' })
   await expect(checks).toContainText(

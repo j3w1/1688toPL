@@ -3,6 +3,7 @@ import { mkdir } from 'node:fs/promises'
 import { build } from 'esbuild'
 import { startPreview } from './preview.mjs'
 import { workbookFile } from '../tests/fixtures/store-workbook-fixture.mjs'
+import { evenVariantWorkbook } from '../tests/fixtures/even-variant-split.mjs'
 
 async function waitForVisibleProductImages(page) {
   const images = page.locator(
@@ -171,6 +172,27 @@ try {
     .getByRole('button', { name: 'Close import', exact: true })
     .click()
   const first = page.locator('#sheet-body tr[data-selection-key]').first()
+  await page
+    .getByRole('button', { name: 'Import spreadsheet', exact: true })
+    .click()
+  const evenReview = page.locator('.store-import-dialog')
+  await evenReview
+    .getByLabel('Workbook', { exact: true })
+    .setInputFiles(evenVariantWorkbook())
+  const evenRow = evenReview.locator('[data-source-row="22"]')
+  await expect(
+    evenRow.locator('.store-import-allocation input').first()
+  ).toHaveValue('129')
+  await evenRow.scrollIntoViewIfNeeded()
+  await evenRow.locator('img').evaluate((image) => image.decode())
+  await evenRow.screenshot({ path: 'screenshots/store-variant-defaults.png' })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await evenRow.scrollIntoViewIfNeeded()
+  await evenReview.screenshot({ path: 'work/even-variant-defaults-narrow.png' })
+  await evenReview
+    .getByRole('button', { name: 'Close import', exact: true })
+    .click()
+  await page.setViewportSize({ width: 1280, height: 960 })
   await first.locator('.description-cell').click({ position: { x: 5, y: 5 } })
   const details = page.locator('.product-details-dialog')
   await details.locator('img').evaluate((image) => image.decode())

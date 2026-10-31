@@ -1,6 +1,6 @@
 # Chrome Web Store Listing — 1688toPL
 
-Last updated: 2026-10-29. **SEAL implementation, version 2.10.0; unpublished to the store.** This file is the store metadata source of truth, not authorization to submit or release. Current verification is tracked below; historical test counts do not establish acceptance of this candidate.
+Last updated: 2026-10-30. **SEAL implementation, version 2.10.0; unpublished to the store.** This file is the store metadata source of truth, not authorization to submit or release. Current verification is tracked below; historical test counts do not establish acceptance of this candidate.
 
 ## Store Listing
 
@@ -129,6 +129,14 @@ Visibility/regions are unselected. Repository rename, local implementation or Gi
 Earlier release and verification chronology remains in Git history. It is not current-candidate acceptance.
 
 ## Review Notes
+
+### Even combined-variant spreadsheet defaults — local candidate, 2026-10-30
+
+Combined spreadsheet rows start with editable even whole-piece allocations for both new imports and purchase updates. Remainders go one extra per earlier parsed variant/size identity, keeping the largest and smallest shares within one piece. Explicit incoming allocations and manual edits retain precedence through photo/code review, Back, language changes and code reset. Insufficient quantities remain actionable; the source total, exact money validation and single shared carton record stay protected. No migration, permissions or remote service is added. The normal final confirmation saves the reviewed allocation; loading/restore never redistribute existing purchases.
+
+Verification passed **75 focused unit/storage/translation checks** and all **36 affected Chromium cases**, including the eight-row/30-variant equivalent, exact remainder distribution, manual edits, insufficient pieces, worksheet changes, all three languages/narrow layouts, photo/code-review draft retention, new import, existing-purchase update, duplicate confirmation, cancellation, reopening and native backup restoration. A read-only replay of the supplied workbook independently reconciled 5,400 pieces, 18 cartons and ¥10,740.00 with the expected allocations. Existing malformed-quantity, unsupported source and exact-cent rejection tests remain intact. Source syntax, documentation, changed-file formatting and diff checks passed. The synthetic [even-split review](screenshots/store-variant-defaults.png) and narrow layout were regenerated and visually inspected.
+
+The explicit development build and repository trial verified **30 manifest resources**. Trial status is `loaded:false`, `staged:false`, `verified:false`, `reason:no-local-trial-target`; installed acceptance remains unverified. Full `npm run verify`, native Excel and physical printing were not run for this focused local batch. Private workbooks remain outside tracked assets. No owner-library mutation, push, merge or publication is included.
 
 ### Spreadsheet photo preservation and replacement review — local candidate, 2026-10-29
 

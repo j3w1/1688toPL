@@ -48,7 +48,7 @@ test('manual variant review preserves combined totals and source cartons once', 
   assert.deepEqual(analysis, original)
 })
 
-test('variant allocations never infer equal splits or accept missing/fractional/negative/overflow values', () => {
+test('review validation never fills allocations or accepts missing/fractional/negative/overflow values', () => {
   for (const values of [
     [],
     ['', ''],

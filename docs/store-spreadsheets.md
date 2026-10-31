@@ -100,9 +100,13 @@ Use **Back** to return to workbook review or **Cancel** to leave without saving.
 
 ## Variants and descriptions
 
+<a href="../screenshots/store-variant-defaults.png"><img src="../screenshots/store-variant-defaults.png" alt="Synthetic combined row with seven editable variant quantities, distributing 900 pieces as 129/129/129/129/128/128/128" width="800" /></a>
+
 Equal `group` values collect source rows even when not adjacent; they are not CE codes. A nonblank `var` declares the complete suggested barcode ending: `a` means `A` with no added size ending, `s` means size `S`, and `as` means variant `A` plus size `S`. Measurements in descriptions do not add another suffix to a declared ending. The review identifies the workbook declaration and source cell beside the editable endings and complete barcode; deliberate edits remain custom choices, and resetting suggestions returns to the declaration.
 
-A row marked `abcd` declares A/B/C/D sharing one source quantity, amount and carton record. Supply actual positive per-variant quantities during review, summing to the source quantity and preserving its rounded total. Do not divide equally by assumption or use picture count as a split. `abs`, `abm`, `abl` mean A/B in S/M/L; ambiguous nested or repeated assortments are refused. Repeated identical explicit identities may share a barcode while their source rows remain separately accounted.
+A row marked `abcd` declares A/B/C/D sharing one source quantity, amount and carton record. The review starts with an even whole-piece split across the parsed variants, including size combinations. For example, 900 across A–D gives 225 each; 900 across A–G gives 129/129/129/129/128/128/128. Extra pieces go one each to the first variants in declaration order. Picture count does not determine the split. `abs`, `abm`, `abl` mean A/B in S/M/L; ambiguous nested or repeated assortments are refused. Repeated identical explicit identities may share a barcode while their source rows remain separately accounted.
+
+These are editable defaults for both new imports and existing-purchase updates. Change the quantities if the seller supplies another breakdown; every value must be a positive whole number and the sum must match the source quantity. Back, language/photo changes and code-suggestion resets preserve your draft edits, including deliberately cleared fields. Choosing another workbook or worksheet starts fresh defaults. A total smaller than the number of variants needs a corrected total or declaration. Confirm the usual date, photo and total checks, then review codes and save once; there is no extra allocation checkbox. Existing saved orders are not redistributed during loading or restore.
 
 The reviewed split does not duplicate source cartons. Printing only part of a shared carton record needs explicit carton-count review. Physical contents are recorded separately in [Cartons](cartons.md).
 

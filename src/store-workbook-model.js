@@ -26,6 +26,38 @@ const markerSet = new Set(STORE_IMPORT_MARKERS)
 const clean = (value) => String(value ?? '').trim()
 const normalizedMarker = (value) => clean(value).toLowerCase()
 
+/** Draft defaults only: saving still requires explicit, validated allocations. */
+export function suggestStoreVariantQuantities(row) {
+  const variants = row.variants || []
+  if (variants.length <= 1) return []
+  if (row.variantAllocations !== undefined) {
+    return variants.map((variant) => {
+      const matches = Array.isArray(row.variantAllocations)
+        ? row.variantAllocations.filter(
+            (entry) =>
+              (entry?.variant || '') === (variant.variant || '') &&
+              (entry?.size || '') === (variant.size || '')
+          )
+        : []
+      return matches.length === 1 ? String(matches[0]?.quantity ?? '') : ''
+    })
+  }
+  const quantity = Number(row.quantity)
+  if (
+    !/^\d+$/.test(String(row.quantity ?? '')) ||
+    !Number.isSafeInteger(quantity) ||
+    quantity < variants.length
+  )
+    return variants.map(() => '')
+  const total = BigInt(quantity),
+    count = BigInt(variants.length),
+    each = total / count,
+    remainder = total % count
+  return variants.map((_, index) =>
+    (each + (BigInt(index) < remainder ? 1n : 0n)).toString()
+  )
+}
+
 /** Strip only familiar duplicate-download suffixes; a numeric stem identifies a market store. */
 export function parseStoreFilename(filename) {
   let stem = clean(filename)
@@ -547,7 +579,7 @@ export function analyzeStoreSheet(workbook, sheetName) {
       issue(
         'review',
         'variant-allocation',
-        'This row combines variants. Allocate its existing quantity across the variants; do not duplicate the row totals or cartons.',
+        'This row combines variants. Quantities are suggested evenly; adjust them if needed. Source totals and cartons stay unchanged.',
         [row.cells.var, row.cells.qty || row.cells.perbox].filter(Boolean),
         rowNumber
       )
