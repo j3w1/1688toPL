@@ -1363,6 +1363,7 @@ for (const abortSave of [false, true])
       exact: true,
     })
     await expect(close).toBeEnabled()
+    await expect(close).toHaveAccessibleDescription('')
     const before = await extension.inspector.evaluate(
       async () =>
         (await chrome.runtime.sendMessage({ type: 'BACKUP_EXPORT' })).data
@@ -1427,6 +1428,7 @@ for (const abortSave of [false, true])
         'Photo saved. Original preserved.'
       )
     await expect(close).toBeEnabled()
+    await expect(close).toHaveAccessibleDescription('')
     const after = await extension.inspector.evaluate(
       async () =>
         (await chrome.runtime.sendMessage({ type: 'BACKUP_EXPORT' })).data
