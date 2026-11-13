@@ -290,7 +290,7 @@ export async function startLibrary(
     copyBusy = false,
     showDismissed = false,
     resetOrders = true
-  let packing
+  let packing, packingStartupError
   let productKeys = [],
     orderKeys = [],
     orderList
@@ -2697,6 +2697,12 @@ export async function startLibrary(
     return refreshWork
   }
   async function refreshOnce() {
+    // A later healthy data read cannot complete a failed workspace setup.
+    // Keep its controls guarded and repeat the actual error until page reload.
+    if (!packing) {
+      if (packingStartupError) throw packingStartupError
+      return
+    }
     const previousOrderIds = new Set(
       records.map((record) => record.snapshot.orderId)
     )
@@ -3700,6 +3706,7 @@ export async function startLibrary(
       addEventListener('pagehide', stopLibraryChanges, { once: true })
     await refresh()
   } catch (error) {
+    if (!packing) packingStartupError = error
     feedback(error.message, true)
   }
 }
