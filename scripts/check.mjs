@@ -1,6 +1,7 @@
 import { readdir } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import path from 'node:path'
+import { checkCiBrowserImages } from './check-ci-browser.mjs'
 
 async function check(folder) {
   for (const item of await readdir(folder, { withFileTypes: true })) {
@@ -15,4 +16,5 @@ async function check(folder) {
   }
 }
 for (const folder of ['src', 'scripts', 'tests', 'preview']) await check(folder)
+await checkCiBrowserImages()
 console.log('JavaScript syntax checks passed')

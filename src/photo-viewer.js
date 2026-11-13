@@ -106,7 +106,6 @@ export function createPhotoViewer(
     let savingPhoto = false,
       recognizedSize = ''
     status.id = `photo-viewer-status-${crypto.randomUUID()}`
-    close.setAttribute('aria-describedby', status.id)
     addSizeTag.type = 'button'
     addSizeTag.dataset.action = 'add-size-tag'
     sizeTagControl.append(addSizeTag)
@@ -128,6 +127,8 @@ export function createPhotoViewer(
       sizeTagControl.tabIndex = addSizeTag.disabled ? 0 : -1
       editButton.disabled = !ready || !originalData || savingPhoto
       close.disabled = savingPhoto
+      if (savingPhoto) close.setAttribute('aria-describedby', status.id)
+      else close.removeAttribute('aria-describedby')
       bindText(
         addSizeTag,
         recognizedSize

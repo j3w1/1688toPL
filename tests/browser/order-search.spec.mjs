@@ -31,10 +31,8 @@ test('order search combines seller, member login and order IDs with purchase fil
   })
   await page.goto(`${extension.extensionBaseUrl}/library.html`)
   await expect(page.locator('.month-toggle')).not.toHaveCount(0)
-  for (const toggle of await page
-    .locator('.month-toggle[aria-expanded=false]')
-    .all())
-    await toggle.click()
+  const collapsed = page.locator('.month-toggle[aria-expanded=false]')
+  while (await collapsed.count()) await collapsed.first().click()
   await expect(page.locator('.order-card')).toHaveCount(3)
   const search = page.getByRole('combobox', {
     name: 'Search orders',

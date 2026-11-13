@@ -58,6 +58,7 @@ async function openLibrary(extension) {
     'clipboard-write',
   ])
   const page = await extension.context.newPage()
+  await page.clock.setFixedTime(new Date('2026-10-15T04:00:00Z'))
   await page.addInitScript(() => {
     if (localStorage.getItem('1688-library-purchase-months') === null)
       localStorage.setItem('1688-library-purchase-months', '[]')

@@ -3,7 +3,6 @@ import { createHash, generateKeyPairSync, randomInt } from 'node:crypto'
 import { once } from 'node:events'
 import { createServer } from 'node:http'
 import {
-  cp,
   mkdir,
   mkdtemp,
   readFile,
@@ -16,6 +15,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 import { buildOrderFixture } from '../fixtures/order-fixture.mjs'
+import { copyExtension } from '../helpers/extension-copy.mjs'
 
 const repository = fileURLToPath(new URL('../../', import.meta.url))
 const syntheticOrderId = '1234567890123456789'
@@ -149,7 +149,7 @@ async function startFixtureServer() {
 }
 
 async function prepareExtension(directory, importFlow) {
-  await cp(path.join(repository, 'dist'), directory, { recursive: true })
+  await copyExtension(path.join(repository, 'dist'), directory)
   // Disposable inspector only: tests call the same public repository/planner
   // as the packaged UI. No direct IndexedDB writes or alternate inventory.
   const harness = await build({

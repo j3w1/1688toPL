@@ -200,9 +200,16 @@ for (const stale of ['purchase', 'container', 'account'])
       '1.5',
     ])
     const page = await extension.context.newPage()
-    await page.addInitScript(() =>
+    await page.addInitScript(() => {
       localStorage.setItem('1688-library-purchase-months', '[]')
-    )
+      window.initialRouteHistoryLength = history.length
+      window.routePushes = []
+      const pushState = history.pushState
+      history.pushState = function (...args) {
+        window.routePushes.push(String(args[2]))
+        return pushState.apply(this, args)
+      }
+    })
     const hash =
       stale === 'purchase'
         ? 'workspace=orders&view=cartons&accountId=local&orderId=900000000000000019'
@@ -210,7 +217,6 @@ for (const stale of ['purchase', 'container', 'account'])
           ? `workspace=orders&view=cartons&accountId=missing-synthetic-account&orderId=${records[0].snapshot.orderId}`
           : 'workspace=packing&view=loading&containerId=missing-synthetic-container'
     await page.goto(`${extension.extensionBaseUrl}/library.html#${hash}`)
-    const historyLength = await page.evaluate(() => history.length)
     await expect(page.locator('#order-count')).toHaveText('1')
     await expect(page.locator('#orders-products-view')).toBeVisible()
     await expect(
@@ -219,7 +225,10 @@ for (const stale of ['purchase', 'container', 'account'])
     expect(await page.evaluate(() => location.hash)).toBe(
       '#workspace=orders&view=products'
     )
-    expect(await page.evaluate(() => history.length)).toBe(historyLength)
+    expect(await page.evaluate(() => window.routePushes)).toEqual([])
+    expect(await page.evaluate(() => history.length)).toBe(
+      await page.evaluate(() => window.initialRouteHistoryLength)
+    )
     for (const selector of bootstrapControls) {
       if (
         ['#clear-rows', '#remove-orders', '#review-purchase-codes'].includes(
@@ -257,6 +266,103 @@ for (const stale of ['purchase', 'container', 'account'])
     expect(after.orderCartonDrafts).toEqual(before.orderCartonDrafts)
     expect(extension.unexpectedRequests).toEqual([])
   })
+
+test('a partial product-authoring startup abort keeps data controls protected after healthy storage and refresh notifications', async ({
+  extension,
+}) => {
+  const records = await extension.inspector.evaluate(
+    `(${createDemoRecords.toString()})(document)`
+  )
+  const before = await extension.inspector.evaluate(async (record) => {
+    const repository = await window.testRepository
+    await repository.restoreBackup({
+      format: '1688-order-library',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      orders: [record],
+      history: [],
+      images: [],
+    })
+    return repository.exportBackup({})
+  }, records[0])
+  const page = await extension.context.newPage()
+  await page.addInitScript(() => {
+    localStorage.setItem('1688-library-purchase-months', '[]')
+    window.authoringReadAborted =
+      sessionStorage.getItem('synthetic-authoring-read-aborted') === 'true'
+    const getAll = IDBIndex.prototype.getAll
+    IDBIndex.prototype.getAll = function (...args) {
+      const request = getAll.apply(this, args)
+      if (
+        this.objectStore.name === 'preparations' &&
+        this.name === 'account' &&
+        this.objectStore.transaction.mode === 'readonly'
+      ) {
+        const transaction = this.objectStore.transaction
+        request.addEventListener(
+          'success',
+          () => {
+            if (!window.authoringReadAborted) {
+              window.authoringReadAborted = true
+              sessionStorage.setItem('synthetic-authoring-read-aborted', 'true')
+              transaction.abort()
+            }
+          },
+          { once: true }
+        )
+      }
+      return request
+    }
+  })
+  await page.goto(`${extension.extensionBaseUrl}/library.html`)
+  const error = page.locator('#orders-view .error-notice-message')
+  await expect(error).toContainText(/abort/i)
+  expect(await page.evaluate(() => window.authoringReadAborted)).toBe(true)
+  // The injected fault is one native readonly abort, not a broken repository:
+  // subsequent real source, authoring and preference reads still work.
+  const healthy = await extension.inspector.evaluate(async () => {
+    const repository = await window.testRepository
+    return {
+      orders: (await repository.listOrders()).length,
+      preparations: await repository.listPreparations(),
+      preferences: await repository.getPackingPreferences(),
+    }
+  })
+  expect(healthy.orders).toBe(1)
+  expect(healthy.preparations).toEqual([])
+  expect(healthy.preferences).toBeTruthy()
+  for (const refresh of ['focus', 'notification']) {
+    await page.locator('#orders-view .error-notice-close').click()
+    await expect(error).toHaveCount(0)
+    if (refresh === 'focus')
+      await page.evaluate(() => dispatchEvent(new Event('focus')))
+    else
+      await extension.inspector.evaluate(() =>
+        chrome.runtime.sendMessage({ type: 'LIBRARY_CHANGED' })
+      )
+    await expect(error).toContainText(/abort/i)
+    for (const selector of bootstrapControls)
+      await expect(page.locator(selector)).toBeDisabled()
+  }
+  // A new document can complete setup after the transient fault. No restore,
+  // reset or alternate initialization path is needed to regain working actions.
+  await page.reload()
+  await page.locator('#view-packing').click()
+  await expect(page.locator('#packing-view')).toBeVisible()
+  await page.locator('#view-orders').click()
+  await expect(page.locator('#order-count')).toHaveText('1')
+  await expect(page.locator('#sheet-body tr[data-selection-key]')).toHaveCount(
+    3
+  )
+  const after = await extension.inspector.evaluate(async () =>
+    (await window.testRepository).exportBackup({})
+  )
+  expect(after.orders.map((record) => record.snapshot)).toEqual(
+    before.orders.map((record) => record.snapshot)
+  )
+  expect(after.preparations).toEqual(before.preparations)
+  expect(extension.unexpectedRequests).toEqual([])
+})
 
 test('an actual initial readonly storage abort leaves a visible error and protected data controls', async ({
   extension,

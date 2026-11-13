@@ -90,6 +90,7 @@ test('workspace text and validation colors stay readable on every interactive su
 })
 async function openLibrary(extension, scheme = 'light') {
   const page = await extension.context.newPage()
+  await page.clock.setFixedTime(new Date('2026-10-15T04:00:00Z'))
   await page.emulateMedia({ colorScheme: scheme })
   await page.goto(`${extension.extensionBaseUrl}/library.html`)
   return page

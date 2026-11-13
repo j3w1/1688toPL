@@ -481,6 +481,7 @@ function focusedCartonFixture(weight) {
   }
   return {
     context,
+    repository,
     drafts,
     confirmations,
     key: batch.id,
@@ -500,6 +501,215 @@ function focusedCartonFixture(weight) {
     },
   }
 }
+
+function cartonTarget(session, selectedKeys) {
+  const rows = session.projection().cartons,
+    keys = rows.map((row) => row.key)
+  return captureGridTarget({
+    orderRef: ref,
+    generation: session.state().generation,
+    viewVersion: 0,
+    visibleKeys: keys,
+    selectedKeys: selectedKeys || keys,
+    columns: CARTON_GRID_COLUMNS,
+    anchorKey: keys[0],
+    anchorColumn: 'weight',
+  })
+}
+
+test('the pending commit barrier waits for the parsed field and its durable recovery write', async (t) => {
+  const fixture = focusedCartonFixture('2.5'),
+    started = Promise.withResolvers(),
+    release = Promise.withResolvers(),
+    save = fixture.repository.saveOrderCartonDraft
+  fixture.repository.saveOrderCartonDraft = async (input) => {
+    if (input.draft.plannerDraft.cartons[0]?.weight === '9.5') {
+      started.resolve()
+      await release.promise
+    }
+    return save(input)
+  }
+  const session = await fixture.create(t)
+  t.after(() => release.resolve())
+  session.editCell(fixture.key, 'weight', '9.5')
+  const committing = session.commitCell(fixture.key, 'weight', '9.5')
+  let captured = false
+  const barrier = session.pendingCommitBarrier().then(() => {
+    captured = true
+  })
+  await started.promise
+  await new Promise(setImmediate)
+  assert.equal(captured, false)
+  assert.equal(fixture.drafts.at(-1).draft.plannerDraft.cartons.length, 0)
+  release.resolve()
+  await Promise.all([committing, barrier])
+  assert.equal(captured, true)
+  assert.equal(
+    fixture.drafts.at(-1).draft.plannerDraft.cartons[0].weight,
+    '9.5'
+  )
+  assert.equal(
+    fixture.drafts.at(-1).draft.generation,
+    session.state().generation
+  )
+})
+
+test('the pending commit barrier includes capacity acknowledgement persistence', async (t) => {
+  const fixture = focusedCartonFixture('2.5'),
+    started = Promise.withResolvers(),
+    release = Promise.withResolvers(),
+    key = sourceKey({ ...ref, entryId: '2001' }),
+    encoded = JSON.stringify([key, 'capacity']),
+    save = fixture.repository.saveOrderCartonDraft
+  let updated = false
+  fixture.repository.updateOrderCapacities = async ({ values }) => {
+    fixture.context.record.unitsPerCarton = values
+    updated = true
+    return { record: structuredClone(fixture.context.record) }
+  }
+  fixture.repository.saveOrderCartonDraft = async (input) => {
+    if (updated && !Object.hasOwn(input.draft.rawCells, encoded)) {
+      started.resolve()
+      await release.promise
+    }
+    return save(input)
+  }
+  const session = await fixture.create(t)
+  t.after(() => release.resolve())
+  session.editCell(key, 'capacity', '50')
+  const flushing = session.flush()
+  await started.promise
+  let captured = false
+  const barrier = session.pendingCommitBarrier().then(() => {
+    captured = true
+  })
+  await new Promise(setImmediate)
+  assert.equal(captured, false)
+  release.resolve()
+  await Promise.all([flushing, barrier])
+  assert.equal(captured, true)
+  assert.equal(fixture.drafts.at(-1).draft.rawCells[encoded], undefined)
+  assert.equal(
+    fixture.drafts.at(-1).draft.generation,
+    session.state().generation
+  )
+})
+
+for (const invalidPaste of [false, true])
+  test(`the pending commit barrier permits Fill to repair an invalid ${invalidPaste ? 'paste alignment' : 'selected weight'}`, async (t) => {
+    const fixture = focusedCartonFixture('2.5'),
+      second = syntheticBatch(ref.orderId, 1, '50', {
+        id: `${fixture.key}-second`,
+        weight: '4',
+      })
+    fixture.context.batches[0].contents[0].quantity = '50'
+    fixture.context.batches.push(second)
+    const session = await fixture.create(t)
+    if (invalidPaste) {
+      const target = cartonTarget(session),
+        plan = await session.previewPaste(
+          '9.5\n12..',
+          target,
+          session.projection().cartons
+        )
+      assert.equal(plan.valid, false)
+      await session.applyPaste(plan, cartonTarget(session))
+      assert.ok(session.state().alignment.errors.length)
+    } else {
+      session.editCell(second.id, 'weight', '12..')
+      session.editCell(fixture.key, 'weight', '9.5')
+    }
+    await session.commitCell(fixture.key, 'weight', '9.5')
+    await session.pendingCommitBarrier()
+    assert.equal(session.rawCell(second.id, 'weight'), '12..')
+    await assert.rejects(
+      session.flush(),
+      invalidPaste ? /invalid paste cells/ : /nonnegative decimal/
+    )
+    const target = cartonTarget(session),
+      plan = planGridFill(
+        session.projection().cartons,
+        target,
+        'weight',
+        session.rawCell(fixture.key, 'weight')
+      )
+    await session.applyPaste(plan, cartonTarget(session))
+    assert.deepEqual(
+      fixture.drafts.at(-1).draft.plannerDraft.cartons.map((row) => row.weight),
+      ['9.5', '9.5']
+    )
+    assert.deepEqual(session.state().alignment.errors, [])
+    assert.equal(fixture.confirmations.length, 0)
+    assert.deepEqual(
+      fixture.context.batches.map((row) => row.weight),
+      ['2.5', '4']
+    )
+  })
+
+test('Fill apply still rejects invalid cells outside its selected range', async (t) => {
+  const fixture = focusedCartonFixture('2.5'),
+    second = syntheticBatch(ref.orderId, 1, '50', {
+      id: `${fixture.key}-second`,
+      weight: '4',
+    })
+  fixture.context.batches[0].contents[0].quantity = '50'
+  fixture.context.batches.push(second)
+  const session = await fixture.create(t)
+  session.editCell(second.id, 'weight', '12..')
+  session.editCell(fixture.key, 'weight', '9.5')
+  await session.commitCell(fixture.key, 'weight', '9.5')
+  await session.pendingCommitBarrier()
+  const target = cartonTarget(session, [fixture.key]),
+    plan = planGridFill(session.projection().cartons, target, 'weight', '9.5')
+  await assert.rejects(
+    session.applyPaste(plan, cartonTarget(session, [fixture.key])),
+    /nonnegative decimal/
+  )
+  assert.equal(session.rawCell(second.id, 'weight'), '12..')
+  assert.equal(fixture.confirmations.length, 0)
+  assert.deepEqual(
+    fixture.context.batches.map((row) => row.weight),
+    ['2.5', '4']
+  )
+})
+
+test('the pending commit barrier propagates durable recovery write failures', async (t) => {
+  const fixture = focusedCartonFixture('2.5'),
+    failure = new Error('synthetic durable recovery failure')
+  fixture.repository.saveOrderCartonDraft = async () => {
+    throw failure
+  }
+  const session = await fixture.create(t)
+  session.editCell(fixture.key, 'weight', '9.5')
+  await assert.rejects(
+    session.pendingCommitBarrier(),
+    (error) => error === failure
+  )
+  assert.equal(session.rawCell(fixture.key, 'weight'), '9.5')
+  assert.equal(fixture.confirmations.length, 0)
+})
+
+test('the pending commit barrier propagates a queued parsed-field write failure', async (t) => {
+  const fixture = focusedCartonFixture('2.5'),
+    save = fixture.repository.saveOrderCartonDraft,
+    failure = new Error('synthetic parsed-field recovery failure')
+  fixture.repository.saveOrderCartonDraft = async (input) => {
+    if (input.draft.plannerDraft.cartons[0]?.weight === '9.5') throw failure
+    return save(input)
+  }
+  const session = await fixture.create(t)
+  session.editCell(fixture.key, 'weight', '9.5')
+  const results = await Promise.allSettled([
+    session.commitCell(fixture.key, 'weight', '9.5'),
+    session.pendingCommitBarrier(),
+  ])
+  for (const result of results) {
+    assert.equal(result.status, 'rejected')
+    assert.equal(result.reason, failure)
+  }
+  assert.equal(session.rawCell(fixture.key, 'weight'), '9.5')
+  assert.equal(fixture.confirmations.length, 0)
+})
 
 for (const baseline of ['', '2.5'])
   test(`a focused unedited carton weight (${JSON.stringify(baseline)}) writes nothing on foreign refresh, blur or Confirm`, async (t) => {

@@ -37,10 +37,8 @@ async function openLibrary(extension) {
   await expect(
     page.locator('#order-list .month-toggle, #order-list .order-search-empty')
   ).not.toHaveCount(0)
-  for (const toggle of await page
-    .locator('.month-toggle[aria-expanded=false]')
-    .all())
-    await toggle.click()
+  const collapsed = page.locator('.month-toggle[aria-expanded=false]')
+  while (await collapsed.count()) await collapsed.first().click()
   return page
 }
 async function confirmOperation(page, name) {

@@ -30,7 +30,7 @@ jobs:
           node-version: 24
           package-manager-cache: false
       - name: Verify routing rules
-        run: node --test tests/classify-changes.test.mjs
+        run: node scripts/check-ci-browser.mjs && node --test tests/classify-changes.test.mjs
       - name: Classify complete diff
         id: route
         run: node scripts/classify-changes.mjs
@@ -54,6 +54,9 @@ jobs:
     if: needs.classify.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      options: --init --ipc=host
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -61,14 +64,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      # The real-canvas regression tests in npm test launch Chromium.
-      - name: Cache the pinned Playwright browser
-        uses: actions/cache@v6
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-${{ runner.arch }}-playwright-${{ hashFiles('package-lock.json') }}
-      - name: Install Chromium and system dependencies
-        run: npx playwright install --with-deps --no-shell chromium
+      # The image includes the browsers and system libraries for real-canvas units.
       - name: Verify source, documentation, regression tests and complete build
         run: npm run check && npm run check:docs && npm test && npm run build
 
@@ -79,6 +75,9 @@ jobs:
     if: needs.classify.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      options: --init --ipc=host
     strategy:
       fail-fast: false
       matrix:
@@ -90,14 +89,6 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - name: Cache the pinned Playwright browser
-        uses: actions/cache@v6
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-${{ runner.arch }}-playwright-${{ hashFiles('package-lock.json') }}
-      # Always install OS libraries; a browser cache cannot provide them.
-      - name: Install Chromium and system dependencies
-        run: npx playwright install --with-deps --no-shell chromium
       - run: npm run build
       - name: Test the complete extension in Chromium
         run: npm run test:browser -- --shard=${{ matrix.shard }}/4

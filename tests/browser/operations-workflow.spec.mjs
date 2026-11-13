@@ -404,6 +404,7 @@ async function openWorkspace(
   )
   expect(restored.ok, restored.error).toBe(true)
   const page = await extension.context.newPage()
+  await page.clock.setFixedTime(new Date('2026-10-15T04:00:00Z'))
   await page.addInitScript(() =>
     localStorage.setItem('1688-library-purchase-months', '[]')
   )

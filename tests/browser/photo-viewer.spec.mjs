@@ -42,6 +42,10 @@ async function openPhoto(extension, { sourceSize, photoEdit } = {}) {
   )
   expect(result.ok, result.error).toBe(true)
   const page = await extension.context.newPage()
+  await page.addInitScript(() => {
+    if (localStorage.getItem('1688-library-purchase-months') === null)
+      localStorage.setItem('1688-library-purchase-months', '[]')
+  })
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.goto(`${extension.extensionBaseUrl}/library.html`)
   const trigger = page
@@ -416,7 +420,6 @@ async function expectTagLayout(photo) {
 test('photo tags use the nearest corner in all quadrants and keep one or many chips free of horizontal scrolling', async ({
   extension,
 }) => {
-  test.setTimeout(60000)
   const { page, photo } = await openPhoto(extension)
   await startEditing(photo)
   const emptyHeight = await photo
@@ -1363,6 +1366,7 @@ for (const abortSave of [false, true])
       exact: true,
     })
     await expect(close).toBeEnabled()
+    await expect(close).toHaveAccessibleDescription('')
     const before = await extension.inspector.evaluate(
       async () =>
         (await chrome.runtime.sendMessage({ type: 'BACKUP_EXPORT' })).data
@@ -1427,6 +1431,7 @@ for (const abortSave of [false, true])
         'Photo saved. Original preserved.'
       )
     await expect(close).toBeEnabled()
+    await expect(close).toHaveAccessibleDescription('')
     const after = await extension.inspector.evaluate(
       async () =>
         (await chrome.runtime.sendMessage({ type: 'BACKUP_EXPORT' })).data
