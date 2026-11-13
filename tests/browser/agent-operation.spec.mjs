@@ -62,9 +62,13 @@ async function open(extension) {
     addEventListener('pagehide', stop, { once: true })
   })
   const page = await extension.context.newPage()
-  await page.addInitScript(() =>
+  await page.addInitScript(() => {
     localStorage.setItem('1688-library-purchase-months', '[]')
-  )
+    sessionStorage.setItem(
+      '1688-library-products-context',
+      JSON.stringify({ expandedMonths: ['2026-10'] })
+    )
+  })
   await page.goto(`${extension.extensionBaseUrl}/library.html`)
   await expect(page.locator('#order-count')).toHaveText('3')
   return page
@@ -86,12 +90,137 @@ async function downloads(extension, count) {
 const action = (page, name) => page.locator(`[data-action="${name}"]:visible`)
 const status = (page) => page.locator('#workspace-status')
 
+test('fill waits for its pending weight commit and still rejects a later edit', async ({
+  extension,
+}) => {
+  const page = await open(extension),
+    ref = { accountId: 'local', orderId: '900000000000000003' }
+  await page
+    .locator(
+      `[data-action="choose-order"][data-order-id="${ref.orderId}"] [data-action="open-order-cartons"]`
+    )
+    .click()
+  const grid = page.locator('#orders-cartons-view')
+  await action(page, 'select-grid-rows').click()
+  await grid
+    .getByRole('textbox', {
+      name: 'Paste carton or capacity cells',
+      exact: true,
+    })
+    .fill('10\n24\n80')
+  await action(page, 'preview-carton-paste').click()
+  await page.locator('[data-action="apply-carton-paste"]').click()
+  await expect(page.locator('.grid-paste-preview')).toBeHidden()
+  await action(page, 'reconciliation-cartons').click()
+  const weights = grid.locator('[data-grid-column="weight"]'),
+    preview = page.locator('.grid-paste-preview')
+  await expect(weights).toHaveCount(3)
+  await action(page, 'select-grid-rows').click()
+  const key = await weights
+    .first()
+    .evaluate((input) => input.closest('[data-grid-key]').dataset.gridKey)
+  await page.evaluate((key) => {
+    // Hold the actual recovery transaction, so blur's parsed field commit
+    // cannot finish before Fill captures its target on a fast test machine.
+    window.holdCartonWeightWrite = true
+    window.cartonWeightWriteStarted = false
+    window.cartonWeightWriteCompleted = false
+    const put = IDBObjectStore.prototype.put,
+      encoded = JSON.stringify([key, 'weight'])
+    window.releaseCartonWeightWrite = () => {
+      window.holdCartonWeightWrite = false
+      IDBObjectStore.prototype.put = put
+    }
+    IDBObjectStore.prototype.put = function (...args) {
+      const request = put.apply(this, args)
+      if (
+        this.name === 'orderCartonDrafts' &&
+        this.transaction.mode === 'readwrite' &&
+        args[0]?.value?.rawCells?.[encoded] === '9.5' &&
+        window.holdCartonWeightWrite
+      ) {
+        window.cartonWeightWriteStarted = true
+        this.transaction.addEventListener('complete', () => {
+          window.cartonWeightWriteCompleted = true
+        })
+        const keepAlive = () => {
+          if (window.holdCartonWeightWrite)
+            this.get(args[0].id).onsuccess = keepAlive
+        }
+        keepAlive()
+      }
+      return request
+    }
+  }, key)
+  try {
+    await weights.first().fill('9.5')
+    await expect
+      .poll(() => page.evaluate(() => window.cartonWeightWriteStarted))
+      .toBe(true)
+    // Clicking Fill blurs the field and starts its normal commit handler.
+    await action(page, 'fill-grid-range').click()
+    await page.evaluate(
+      () => new Promise((resolve) => requestAnimationFrame(resolve))
+    )
+    expect(await page.evaluate(() => window.cartonWeightWriteCompleted)).toBe(
+      false
+    )
+    await expect(preview).toHaveCount(0)
+    await page.evaluate(() => window.releaseCartonWeightWrite())
+    await expect(preview).toBeVisible()
+    expect(await page.evaluate(() => window.cartonWeightWriteCompleted)).toBe(
+      true
+    )
+    const draft = () =>
+      extension.inspector.evaluate(
+        async (ref) =>
+          (await (await window.testRepository).getOrderReconciliation(ref))
+            .draft.value,
+        ref
+      )
+    expect(
+      (await draft()).plannerDraft.cartons.find((row) => row.id === key)
+    ).toMatchObject({ weight: '9.5' })
+    await preview.locator('[data-action="apply-carton-paste"]').click()
+    await expect(preview).toBeHidden()
+    await expect
+      .poll(async () =>
+        (await draft()).plannerDraft.cartons.map((row) => row.weight)
+      )
+      .toEqual(['9.5', '9.5', '9.5'])
+
+    await action(page, 'fill-grid-range').click()
+    await expect(preview).toBeVisible()
+    // A late input event after capture must still invalidate the preview.
+    await weights.first().evaluate((input) => {
+      input.value = '12.75'
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await preview.locator('[data-action="apply-carton-paste"]').click()
+    await expect(grid.locator('p[role="status"]')).toHaveText(
+      'The paste target changed. Preview the alignment again.'
+    )
+    await expect(preview).toBeVisible()
+    await expect
+      .poll(
+        async () => (await draft()).rawCells[JSON.stringify([key, 'weight'])]
+      )
+      .toBe('12.75')
+    expect(
+      (await draft()).plannerDraft.cartons.map((row) => row.weight)
+    ).toEqual(['9.5', '9.5', '9.5'])
+    await preview.getByRole('button', { name: 'Cancel', exact: true }).click()
+  } finally {
+    await page.evaluate(() => window.releaseCartonWeightWrite())
+  }
+})
+
 test('an agent authors Orders, confirms one physical arrangement, seals a named container and exports/prints through stable actions', async ({
   extension,
 }, testInfo) => {
   const page = await open(extension)
   await expect(status(page)).toHaveAttribute('data-status', 'idle')
-  // Older months start collapsed; the current month's two orders are listed.
+  // The fixture's October orders are expanded; September stays collapsed.
   await expect(page.locator('[data-action="choose-order"]')).toHaveCount(2)
   const before = await extension.inspector.evaluate(() =>
       chrome.runtime.sendMessage({ type: 'BACKUP_EXPORT' })

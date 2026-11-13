@@ -2848,9 +2848,12 @@ export function mountOrderCartonGrid(
     visibleKeys.forEach((key) => selected.add(key))
     paintSelection()
   })
-  action('Fill selected rows', 'fill-grid-range', () => {
+  action('Fill selected rows', 'fill-grid-range', async () => {
     if (!active.key || !active.column)
       throw new Error('Choose an editable target column.')
+    // Blur may still be staging this field. Capture its acknowledged generation
+    // after our own commits; later edits still invalidate the preview normally.
+    await session.flush()
     const raw = session.rawCell(active.key, active.column)
     const plan = planGridFill(rows, target(), active.column, raw)
     return preview(plan)
