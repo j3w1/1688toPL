@@ -99,6 +99,7 @@ test('reviewed payment links preserve source totals, skip payment rows and expor
   )
   expect(restored.ok, restored.error).toBe(true)
   const page = await extension.context.newPage()
+  await page.clock.setFixedTime(new Date('2026-10-15T04:00:00Z'))
   await page.goto(`${extension.extensionBaseUrl}/library.html`)
   await page
     .locator('.order-card[data-order-id="7101"] .order-details-trigger')

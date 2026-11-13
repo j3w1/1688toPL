@@ -37,6 +37,7 @@ test('container export preserves advanced columns/order/layout and exact theme/m
   )
   expect(restored.ok, restored.error).toBe(true)
   const page = await extension.context.newPage()
+  await page.clock.setFixedTime(new Date('2026-10-15T04:00:00Z'))
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.goto(`${extension.extensionBaseUrl}/library.html`)
   await page.getByRole('button', { name: 'Settings', exact: true }).click()

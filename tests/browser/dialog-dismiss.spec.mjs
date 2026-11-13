@@ -31,6 +31,7 @@ async function openLibrary(extension, fallback = false) {
   )
   expect(result.ok, result.error).toBe(true)
   const page = await extension.context.newPage()
+  await page.clock.setFixedTime(new Date('2026-10-15T04:00:00Z'))
   if (fallback)
     await page.addInitScript(() => {
       delete HTMLDialogElement.prototype.closedBy

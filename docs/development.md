@@ -121,7 +121,7 @@ Retired recovery/editor code has no disabled actions or deprecated wrappers: sav
 
 ## Focused verification
 
-Use synthetic fixtures/temporary profiles; never modify supplier originals or the owner library. Bound large units with:
+Use synthetic fixtures/temporary profiles; never modify supplier originals or the owner library. Pin fixture purchase visibility with an explicit month selection or page clock before navigation. When expanding multiple month groups, re-query the first collapsed group after each click because rendering changes the matching list. Bound large units with:
 
 ```powershell
 node --test --test-concurrency=2 tests/*.test.mjs
