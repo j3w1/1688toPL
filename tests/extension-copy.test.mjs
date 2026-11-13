@@ -74,16 +74,48 @@ for (const linked of [false, true]) {
   })
 }
 
-test('nested file and directory links become isolated copies before test-only edits', async (t) => {
+test('nested directory links become isolated copies before test-only edits', async (t) => {
   const { root, source, destination } = await fixture(t)
   const build = path.join(root, 'dist')
   await mkdir(build)
   for (const name of ['manifest.json', 'background.js'])
-    await symlink(path.join(source, name), path.join(build, name), 'file')
+    await writeFile(path.join(build, name), originals.get(name))
   await symlink(
     path.join(source, 'assets'),
     path.join(build, 'assets'),
     'junction'
+  )
+  await copyExtension(build, destination)
+  await assertIsolatedEdits(source, destination)
+})
+
+test('nested file links become isolated copies when the host permits file symlinks', async (t) => {
+  const { root, source, destination } = await fixture(t)
+  const build = path.join(root, 'dist')
+  await mkdir(path.join(build, 'assets'), { recursive: true })
+  await writeFile(
+    path.join(build, 'assets/library.js'),
+    originals.get('assets/library.js')
+  )
+  try {
+    await symlink(
+      path.join(source, 'manifest.json'),
+      path.join(build, 'manifest.json'),
+      'file'
+    )
+  } catch (error) {
+    if (
+      process.platform !== 'win32' ||
+      !['EPERM', 'EACCES'].includes(error.code)
+    )
+      throw error
+    t.skip('Windows file symlinks require Developer Mode or symlink privilege')
+    return
+  }
+  await symlink(
+    path.join(source, 'background.js'),
+    path.join(build, 'background.js'),
+    'file'
   )
   await copyExtension(build, destination)
   await assertIsolatedEdits(source, destination)
