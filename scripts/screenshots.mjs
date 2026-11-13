@@ -5,6 +5,19 @@ import { startPreview } from './preview.mjs'
 import { workbookFile } from '../tests/fixtures/store-workbook-fixture.mjs'
 import { evenVariantWorkbook } from '../tests/fixtures/even-variant-split.mjs'
 
+function initializeScreenshotFixtures() {
+  localStorage.setItem('1688-library-purchase-months', '[]')
+  sessionStorage.setItem(
+    '1688-library-products-context',
+    JSON.stringify({ expandedMonths: ['2026-10'] })
+  )
+  // Disposable screenshot pages own only synthetic fixtures. Stable IDs keep
+  // carton-set ordering and the left-behind example reproducible.
+  let nextId = 0
+  crypto.randomUUID = () =>
+    `00000000-0000-4000-8000-${(++nextId).toString(16).padStart(12, '0')}`
+}
+
 async function waitForVisibleProductImages(page) {
   const images = page.locator(
     '#sheet-body tr[data-selection-key] .thumb-cell img'
@@ -70,9 +83,7 @@ try {
     deviceScaleFactor: 1,
     colorScheme: 'light',
   })
-  await page.addInitScript(() =>
-    localStorage.setItem('1688-library-purchase-months', '[]')
-  )
+  await page.addInitScript(initializeScreenshotFixtures)
   await page.goto(`${preview.url}/library.html`)
   await expect(
     page.locator('#sheet-body tr[data-selection-key]').nth(7)
@@ -275,6 +286,23 @@ try {
   await expect(
     exported.getByRole('radio', { name: 'Se quedó', exact: true })
   ).toBeVisible()
+  // Assets are prepared one product at a time after the table mounts, including
+  // rows below the clipped preview. Wait for every synthetic product photo.
+  const exportPhotos = exported.locator(
+    '.packing-export-preview tbody td[data-column="photo"]'
+  )
+  expect(await exportPhotos.count()).toBeGreaterThan(0)
+  for (const cell of await exportPhotos.all()) {
+    const image = cell.locator('img')
+    await expect(image).toHaveCount(1)
+    await image.evaluate((image) => image.decode())
+    expect(await image.evaluate((image) => image.naturalWidth)).toBeGreaterThan(
+      0
+    )
+  }
+  console.log(
+    `Packing export: decoded all ${await exportPhotos.count()} preview photos`
+  )
   await exported.screenshot({ path: 'screenshots/packing-export.png' })
   await exported
     .getByRole('button', { name: 'Close export', exact: true })
@@ -312,6 +340,7 @@ try {
     deviceScaleFactor: 1,
     colorScheme: 'light',
   })
+  await codesPage.addInitScript(initializeScreenshotFixtures)
   await codesPage.addInitScript(() =>
     localStorage.setItem('1688-workspace-language', 'en')
   )
@@ -356,6 +385,7 @@ try {
     deviceScaleFactor: 1,
     colorScheme: 'light',
   })
+  await discountPage.addInitScript(initializeScreenshotFixtures)
   await discountPage.goto(preview.url)
   const discountReview = await build({
     absWorkingDir: process.cwd(),
@@ -397,6 +427,7 @@ try {
     deviceScaleFactor: 1,
     colorScheme: 'light',
   })
+  await updatePage.addInitScript(initializeScreenshotFixtures)
   await updatePage.goto(`${preview.url}/library.html`)
   await expect(updatePage.locator('#view-orders')).toBeEnabled()
   const updateWorkbook = (updated = false) =>
