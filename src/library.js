@@ -257,14 +257,10 @@ async function confirmBulkResume(job) {
   })
 }
 
-export async function startLibrary(
-  transport = (message) => chrome.runtime.sendMessage(message),
-  repository = null
-) {
+let workspaceLanguageInitialized = false
+function initializeWorkspaceLanguage() {
+  if (workspaceLanguageInitialized) return
   localize(document)
-  installWorkspaceActionHelp(document)
-  installWorkspaceShortcuts(document)
-  setLanguage(getLanguage(), { persist: false })
   const languageButtons = [
     ...document.querySelectorAll('#language-toggle [data-language]'),
   ]
@@ -278,6 +274,19 @@ export async function startLibrary(
   updateLanguageButtons()
   for (const button of languageButtons)
     button.addEventListener('click', () => setLanguage(button.dataset.language))
+  onLanguageChange(updateLanguageButtons)
+  workspaceLanguageInitialized = true
+  setLanguage(getLanguage(), { persist: false })
+}
+
+export async function startLibrary(
+  transport = (message) => chrome.runtime.sendMessage(message),
+  repository = null
+) {
+  initializeWorkspaceLanguage()
+  installWorkspaceActionHelp(document)
+  installWorkspaceShortcuts(document)
+  setLanguage(getLanguage(), { persist: false })
   const progressStyle = node('style', importProgressStyles)
   document.head.append(progressStyle)
   for (const dialog of document.querySelectorAll('dialog'))
@@ -3646,7 +3655,6 @@ export async function startLibrary(
   )
   onLanguageChange(() => {
     productSearchMetadata = new WeakMap()
-    updateLanguageButtons()
     renderMonthOptions()
     const status = $('status-filter').value
     $('status-filter').replaceChildren(
@@ -3714,6 +3722,9 @@ export async function startLibrary(
 if (globalThis.chrome?.runtime?.id) {
   ;(async () => {
     try {
+      // Language controls do not depend on storage. Wire them before opening
+      // the database so an early user choice reaches every existing tab.
+      initializeWorkspaceLanguage()
       await startLibrary(undefined, await openDatabase())
     } catch (error) {
       showErrorNotice(error.message, { key: 'feedback' })

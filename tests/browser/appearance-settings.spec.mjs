@@ -413,26 +413,74 @@ test('Tags keeps both catalogs separate from Appearance and preserves drafts thr
     .getByLabel('Dark palette', { exact: true })
     .selectOption('terracotta')
   const other = await extension.context.newPage()
+  await other.addInitScript(() => {
+    // Hold delivery of the real initial open result. Language controls are
+    // independent of database readiness and must already handle user input.
+    const open = IDBFactory.prototype.open,
+      setSuccess = Object.getOwnPropertyDescriptor(
+        IDBRequest.prototype,
+        'onsuccess'
+      ).set
+    let held = false
+    window.languageStartupHeld = false
+    IDBFactory.prototype.open = function (...args) {
+      const request = open.apply(this, args)
+      if (args[0] === '1688-order-library' && !held) {
+        held = true
+        Object.defineProperty(request, 'onsuccess', {
+          configurable: true,
+          set(handler) {
+            setSuccess.call(request, (event) => {
+              window.languageStartupHeld = true
+              window.releaseLanguageStartup = () => {
+                window.languageStartupHeld = false
+                handler.call(request, event)
+              }
+            })
+          },
+        })
+      }
+      return request
+    }
+  })
   await other.goto(`${extension.extensionBaseUrl}/library.html`)
-  for (const [language, tabName, heading, helper] of [
-    [
-      'es',
-      'Etiquetas',
-      'Etiquetas de productos',
-      'Renombrar o eliminar etiquetas guardadas',
-    ],
-    ['zh', '标签', '商品标签', '重命名和删除已保存的标签'],
-  ]) {
-    await other.locator(`#language-toggle [data-language=${language}]`).click()
-    const tab = dialog.getByRole('tab', { name: tabName, exact: true })
-    await expect(tab).toBeVisible()
-    await tab.click()
-    await expect(
-      tags.getByRole('heading', { name: heading, exact: true })
-    ).toBeVisible()
-    await expect(tags).toContainText(helper)
-    await expect(name).toHaveValue('Renamed draft order')
+  await expect
+    .poll(() => other.evaluate(() => window.languageStartupHeld))
+    .toBe(true)
+  try {
+    for (const [language, tabName, heading, helper] of [
+      [
+        'es',
+        'Etiquetas',
+        'Etiquetas de productos',
+        'Renombrar o eliminar etiquetas guardadas',
+      ],
+      ['zh', '标签', '商品标签', '重命名和删除已保存的标签'],
+    ]) {
+      await other
+        .locator(`#language-toggle [data-language=${language}]`)
+        .click()
+      const tab = dialog.getByRole('tab', { name: tabName, exact: true })
+      await expect(tab).toBeVisible()
+      await tab.click()
+      await expect(
+        tags.getByRole('heading', { name: heading, exact: true })
+      ).toBeVisible()
+      await expect(tags).toContainText(helper)
+      await expect(name).toHaveValue('Renamed draft order')
+      await expect(
+        other.locator(`#language-toggle [data-language=${language}]`)
+      ).toHaveAttribute('aria-pressed', 'true')
+      expect(await other.evaluate(() => window.languageStartupHeld)).toBe(true)
+    }
+  } finally {
+    await other.evaluate(() => window.releaseLanguageStartup?.())
   }
+  await expect(other.locator('#view-orders')).toBeEnabled()
+  await expect(other.locator('html')).toHaveAttribute('lang', 'zh-CN')
+  await expect(
+    other.locator('#language-toggle [data-language=zh]')
+  ).toHaveAttribute('aria-pressed', 'true')
   await other.locator('#language-toggle [data-language=en]').click()
   await name.fill('')
   await dialog.getByRole('tab', { name: 'Appearance', exact: true }).click()
