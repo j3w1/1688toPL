@@ -30,13 +30,34 @@ test('preview navigation cannot consume an action before a real image has dimens
     '<div id="viewport" style="width:400px;height:300px;overflow:auto"><figure id="figure"><button id="toggle"><img id="image"></button></figure></div><div id="tools"></div>'
   )
   await page.addScriptTag({ content: await navigationSource() })
-  const data = await extension.inspector.evaluate(() => {
+  // Opaque, asymmetric source pixels catch blank, flipped, cropped or replaced
+  // images of the same dimensions as well as changes caused by navigation.
+  const pixels = []
+  for (let y = 0; y < 60; y++)
+    for (let x = 0; x < 80; x++)
+      pixels.push((17 * x + 3 * y) % 256, (5 * x + 11 * y) % 256, x + y, 255)
+  const data = await extension.inspector.evaluate((pixels) => {
     const canvas = document.createElement('canvas')
     canvas.width = 80
     canvas.height = 60
-    canvas.getContext('2d').fillRect(0, 0, 80, 60)
+    canvas
+      .getContext('2d')
+      .putImageData(new ImageData(new Uint8ClampedArray(pixels), 80, 60), 0, 0)
     return canvas.toDataURL('image/png')
-  })
+  }, pixels)
+  const expectSourcePixels = async () => {
+    const actual = await page.locator('#image').evaluate((image) => {
+      const canvas = document.createElement('canvas')
+      canvas.width = image.naturalWidth
+      canvas.height = image.naturalHeight
+      const context = canvas.getContext('2d')
+      context.drawImage(image, 0, 0)
+      return Array.from(
+        context.getImageData(0, 0, canvas.width, canvas.height).data
+      )
+    })
+    expect(actual).toEqual(pixels)
+  }
   let releaseImage, markRequested, markDelivered
   const held = new Promise((resolve) => {
     releaseImage = resolve
@@ -104,23 +125,25 @@ test('preview navigation cannot consume an action before a real image has dimens
     await delivered
   }
   await page.locator('#image').evaluate((image) => image.decode())
+  await expectSourcePixels()
   await expect(zoomIn).toBeEnabled()
   await expect(fit).toBeEnabled()
   await expect(toggle).toBeEnabled()
   await zoomIn.click()
   await expect(page.locator('output')).toHaveJSProperty('value', '125%')
   await expect(zoomOut).toBeEnabled()
+  await expectSourcePixels()
   await fit.click()
   await expect(page.locator('output')).toHaveJSProperty('value', '100%')
+  await expectSourcePixels()
   await toggle.click()
   await expect(page.locator('output')).toHaveJSProperty('value', '200%')
   expect(
-    await page
-      .locator('#image')
-      .evaluate((image) => ({
-        width: image.naturalWidth,
-        height: image.naturalHeight,
-      }))
+    await page.locator('#image').evaluate((image) => ({
+      width: image.naturalWidth,
+      height: image.naturalHeight,
+    }))
   ).toEqual({ width: 80, height: 60 })
+  await expectSourcePixels()
   await page.evaluate(() => window.releaseNavigation())
 })
