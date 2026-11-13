@@ -1014,8 +1014,11 @@ test('changed photos show saved and unsaved originals before any update is commi
   await expect(changedPhoto).toContainText('Current photo')
   await expect(changedPhoto).toContainText('Workbook photo')
   await expect(changedPhoto).toContainText('Result after update')
+  await changedPhoto.scrollIntoViewIfNeeded()
   for (const image of await images.all()) {
     await expect(image).toHaveAttribute('src', /^data:image\//)
+    await image.scrollIntoViewIfNeeded()
+    await expect(image).toHaveJSProperty('complete', true)
     await image.evaluate((node) => node.decode())
     expect(await image.evaluate((node) => node.naturalWidth)).toBeGreaterThan(0)
   }
@@ -1027,6 +1030,8 @@ test('changed photos show saved and unsaved originals before any update is commi
   )
   const added = review.locator('[data-incoming-row="3"] img').first()
   await expect(added).toHaveAttribute('src', /^data:image\//)
+  await added.scrollIntoViewIfNeeded()
+  await expect(added).toHaveJSProperty('complete', true)
   await added.evaluate((node) => node.decode())
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
   expect(await state(extension)).toEqual(before)

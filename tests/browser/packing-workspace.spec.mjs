@@ -12,6 +12,7 @@ import {
   libraryBackup as packingBackup,
   seedSmartOrder,
   openSmartLibrary,
+  revealOrderCard,
   openOrderReconciliation,
   productGridRow,
   realOrderContext,
@@ -1903,9 +1904,10 @@ test('Orders retains distinct original photos, purchase counts, custom date/stat
   await expect(rows(page)).toHaveCount(11)
   await assignAll(page)
   const before = await packingBackup(extension),
-    card = page.locator(
-      `.order-card[data-order-id="${single.snapshot.orderId}"]`
-    )
+    card = await revealOrderCard(page, {
+      accountId: single.accountId || single.snapshot.accountId || 'local',
+      orderId: single.snapshot.orderId,
+    })
   await expect(card.locator('.order-products')).toHaveText('1 product')
   await expect(
     page.locator(
