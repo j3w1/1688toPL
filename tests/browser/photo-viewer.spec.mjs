@@ -420,7 +420,6 @@ async function expectTagLayout(photo) {
 test('photo tags use the nearest corner in all quadrants and keep one or many chips free of horizontal scrolling', async ({
   extension,
 }) => {
-  test.setTimeout(60000)
   const { page, photo } = await openPhoto(extension)
   await startEditing(photo)
   const emptyHeight = await photo

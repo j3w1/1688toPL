@@ -62,6 +62,10 @@ test('saving a naming rule updates unprepared products and searches immediately'
 
 async function openSettings(extension) {
   const page = await extension.context.newPage()
+  await page.addInitScript(() => {
+    if (localStorage.getItem('1688-library-purchase-months') === null)
+      localStorage.setItem('1688-library-purchase-months', '[]')
+  })
   await page.goto(`${extension.extensionBaseUrl}/library.html`)
   await page.getByRole('button', { name: 'Settings', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Settings', exact: true })
@@ -74,40 +78,41 @@ async function openSettings(extension) {
   return { page, dialog }
 }
 
-test('Settings keeps the same frame, navigation and save position across every section', async ({
-  extension,
-}) => {
-  const { page, dialog } = await openSettings(extension)
-  const tabs = dialog.getByRole('tab')
-  await expect(tabs).toHaveCount(8)
-  const sectionCount = await tabs.count()
-  await expect(
-    dialog.getByRole('tab', { name: 'Tags', exact: true })
-  ).toBeVisible()
-  // Read each checkpoint together; the per-viewport baseline stays independent.
-  const readLayout = () =>
-    dialog.evaluate((node) => {
-      const bounds = (element) => {
-        const { x, y, width, height } = element.getBoundingClientRect()
-        return { x, y, width, height }
-      }
-      return {
-        frame: bounds(node),
-        navigation: bounds(node.querySelector('.settings-tabs')),
-        actions: bounds(node.querySelector('.settings-footer')),
-        panel: bounds(node.querySelector('.settings-panel:not([hidden])')),
-        dialogFits: node.scrollHeight <= node.clientHeight + 1,
-        pageFits: document.documentElement.scrollWidth <= innerWidth,
-      }
-    })
-  for (const viewport of [
-    { width: 1440, height: 1000 },
-    { width: 1024, height: 650 },
-    { width: 1280, height: 420 },
-    { width: 390, height: 844 },
-    { width: 320, height: 568 },
-    { width: 740, height: 390 },
-  ]) {
+for (const viewport of [
+  { width: 1440, height: 1000 },
+  { width: 1024, height: 650 },
+  { width: 1280, height: 420 },
+  { width: 390, height: 844 },
+  { width: 320, height: 568 },
+  { width: 740, height: 390 },
+])
+  test(`Settings keeps the same frame, navigation and save position across every section at ${viewport.width}×${viewport.height}`, async ({
+    extension,
+  }) => {
+    const { page, dialog } = await openSettings(extension)
+    const tabs = dialog.getByRole('tab')
+    await expect(tabs).toHaveCount(8)
+    const sectionCount = await tabs.count()
+    await expect(
+      dialog.getByRole('tab', { name: 'Tags', exact: true })
+    ).toBeVisible()
+    // Read each checkpoint together; the per-viewport baseline stays independent.
+    const readLayout = () =>
+      dialog.evaluate((node) => {
+        const bounds = (element) => {
+          const { x, y, width, height } = element.getBoundingClientRect()
+          return { x, y, width, height }
+        }
+        return {
+          frame: bounds(node),
+          navigation: bounds(node.querySelector('.settings-tabs')),
+          actions: bounds(node.querySelector('.settings-footer')),
+          panel: bounds(node.querySelector('.settings-panel:not([hidden])')),
+          dialogFits: node.scrollHeight <= node.clientHeight + 1,
+          pageFits: document.documentElement.scrollWidth <= innerWidth,
+        }
+      })
+
     await page.setViewportSize(viewport)
     await tabs.first().click()
     await expect(tabs.first()).toHaveAttribute('aria-selected', 'true')
@@ -150,8 +155,7 @@ test('Settings keeps the same frame, navigation and save position across every s
         dialog.getByRole('button', { name: 'Close settings', exact: true })
       ).toBeInViewport()
     }
-  }
-})
+  })
 
 test('Settings sections support the keyboard, preserve edits across searches, and persist naming rules without pagers', async ({
   extension,
