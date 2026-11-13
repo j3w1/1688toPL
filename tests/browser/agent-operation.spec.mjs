@@ -90,9 +90,7 @@ async function downloads(extension, count) {
 const action = (page, name) => page.locator(`[data-action="${name}"]:visible`)
 const status = (page) => page.locator('#workspace-status')
 
-test('fill waits for its pending weight commit and still rejects a later edit', async ({
-  extension,
-}) => {
+async function openCartonWeights(extension) {
   const page = await open(extension),
     ref = { accountId: 'local', orderId: '900000000000000003' }
   await page
@@ -116,6 +114,78 @@ test('fill waits for its pending weight commit and still rejects a later edit', 
     preview = page.locator('.grid-paste-preview')
   await expect(weights).toHaveCount(3)
   await action(page, 'select-grid-rows').click()
+  const reconciliation = () =>
+    extension.inspector.evaluate(
+      async (ref) => (await window.testRepository).getOrderReconciliation(ref),
+      ref
+    )
+  return { page, grid, weights, preview, reconciliation }
+}
+
+for (const invalidPaste of [false, true])
+  test(`fill repairs invalid ${invalidPaste ? 'paste alignment' : 'selected destination weights'} from a valid source`, async ({
+    extension,
+  }) => {
+    const { page, grid, weights, preview, reconciliation } =
+        await openCartonWeights(extension),
+      before = (await reconciliation()).batches,
+      destinationKey = await weights
+        .nth(1)
+        .evaluate((input) => input.closest('[data-grid-key]').dataset.gridKey)
+    if (invalidPaste) {
+      await weights.first().focus()
+      await grid
+        .getByRole('textbox', {
+          name: 'Paste carton or capacity cells',
+          exact: true,
+        })
+        .fill('9.5\n12..\n4')
+      await action(page, 'preview-carton-paste').click()
+      await expect(preview).toBeVisible()
+      await preview
+        .getByRole('button', { name: 'Keep invalid draft', exact: true })
+        .click()
+      await expect(preview).toBeHidden()
+      expect(
+        (await reconciliation()).draft.value.alignment.errors.length
+      ).toBeGreaterThan(0)
+    } else {
+      await weights.nth(1).fill('12..')
+      await weights.first().fill('9.5')
+    }
+    await expect(weights.nth(1)).toHaveValue('12..')
+    await weights.first().focus()
+    await expect
+      .poll(
+        async () =>
+          (await reconciliation()).draft.value.rawCells[
+            JSON.stringify([destinationKey, 'weight'])
+          ]
+      )
+      .toBe('12..')
+    await action(page, 'fill-grid-range').click()
+    await expect(preview).toBeVisible()
+    await preview.locator('[data-action="apply-carton-paste"]').click()
+    await expect(preview).toBeHidden()
+    await expect
+      .poll(async () =>
+        (await reconciliation()).draft.value.plannerDraft.cartons.map(
+          (row) => row.weight
+        )
+      )
+      .toEqual(['9.5', '9.5', '9.5'])
+    for (const weight of await weights.all())
+      await expect(weight).toHaveValue('9.5')
+    const after = await reconciliation()
+    expect(after.draft.value.alignment.errors).toEqual([])
+    expect(after.batches).toEqual(before)
+  })
+
+test('fill waits for its pending weight commit and still rejects a later edit', async ({
+  extension,
+}) => {
+  const { page, grid, weights, preview, reconciliation } =
+    await openCartonWeights(extension)
   const key = await weights
     .first()
     .evaluate((input) => input.closest('[data-grid-key]').dataset.gridKey)
@@ -171,13 +241,7 @@ test('fill waits for its pending weight commit and still rejects a later edit', 
     expect(await page.evaluate(() => window.cartonWeightWriteCompleted)).toBe(
       true
     )
-    const draft = () =>
-      extension.inspector.evaluate(
-        async (ref) =>
-          (await (await window.testRepository).getOrderReconciliation(ref))
-            .draft.value,
-        ref
-      )
+    const draft = async () => (await reconciliation()).draft.value
     expect(
       (await draft()).plannerDraft.cartons.find((row) => row.id === key)
     ).toMatchObject({ weight: '9.5' })

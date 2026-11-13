@@ -2188,6 +2188,16 @@ export async function createOrderCartonSession({
     }
     return values
   }
+  async function pendingCommitBarrier() {
+    clearTimeout(timer)
+    // Wait for field staging and durable recovery/acknowledgements, without
+    // validating destinations that the next reviewed operation may repair.
+    do {
+      if (cellWork) await cellWork
+      if (writeWork) await writeWork
+      await raw.flush()
+    } while (cellWork || writeWork)
+  }
   async function flush() {
     clearTimeout(timer)
     if (cellWork) await cellWork
@@ -2632,6 +2642,7 @@ export async function createOrderCartonSession({
     },
     cancelParse: () => raw.cancelParse(),
     changeView: () => raw.changeView(),
+    pendingCommitBarrier,
     flush,
     async undo() {
       raw.undo()
@@ -2853,7 +2864,7 @@ export function mountOrderCartonGrid(
       throw new Error('Choose an editable target column.')
     // Blur may still be staging this field. Capture its acknowledged generation
     // after our own commits; later edits still invalidate the preview normally.
-    await session.flush()
+    await session.pendingCommitBarrier()
     const raw = session.rawCell(active.key, active.column)
     const plan = planGridFill(rows, target(), active.column, raw)
     return preview(plan)
