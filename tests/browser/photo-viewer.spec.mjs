@@ -42,6 +42,10 @@ async function openPhoto(extension, { sourceSize, photoEdit } = {}) {
   )
   expect(result.ok, result.error).toBe(true)
   const page = await extension.context.newPage()
+  await page.addInitScript(() => {
+    if (localStorage.getItem('1688-library-purchase-months') === null)
+      localStorage.setItem('1688-library-purchase-months', '[]')
+  })
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.goto(`${extension.extensionBaseUrl}/library.html`)
   const trigger = page
