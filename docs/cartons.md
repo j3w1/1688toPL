@@ -51,7 +51,7 @@ Re-import reviews added, changed, removed and unchanged evidence. Stable confide
 
 A keyed rectangular paste matches codes only inside the selected purchase. Duplicate/ambiguous/foreign keys require review. A single-column capacity paste captures selected **visible** source keys in current order and previews each alignment. Changed filtering, sorting, scope or newer edits invalidate the preview; scrolling never changes identity. Derived totals are read-only.
 
-Tab/Shift+Tab and Enter/Shift+Enter reveal the next logical editable cell, including offscreen rows. Fill acts on the captured selected range. One paste/fill/remainder operation is one Undo/Redo step. Raw invalid drafts, generations and history persist separately from physical facts. Parsing is local/cancellable, and stale results/acknowledgements cannot replace newer typing. The table mounts a bounded window while totals and selection retain full logical scope.
+Tab/Shift+Tab and Enter/Shift+Enter reveal the next logical editable cell, including offscreen rows. Fill waits for the active field's pending commit, then previews its value over the captured selected range. Later edits still invalidate that preview and require a fresh review. One paste/fill/remainder operation is one Undo/Redo step. Raw invalid drafts, generations and history persist separately from physical facts. Parsing is local/cancellable, and stale results/acknowledgements cannot replace newer typing. The table mounts a bounded window while totals and selection retain full logical scope.
 
 ## Measurements and confirmations
 
