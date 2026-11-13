@@ -11,7 +11,7 @@ const lock = JSON.parse(
   readFileSync(new URL('../package-lock.json', import.meta.url), 'utf8')
 )
 
-test('both real CI browser jobs use the locked image and Chromium IPC option', () => {
+test('both real CI browser jobs use the locked image, init and Chromium IPC options', () => {
   validateCiBrowserImages(workflow, lock)
 })
 
@@ -43,5 +43,9 @@ test('a Playwright bump or either mismatched container fails before CI tests', (
         lock
       ),
     /requires --ipc=host/
+  )
+  assert.throws(
+    () => validateCiBrowserImages(workflow.replace(/--init\b\s*/g, ''), lock),
+    /requires --init/
   )
 })

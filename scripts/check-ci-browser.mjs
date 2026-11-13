@@ -22,13 +22,12 @@ export function validateCiBrowserImages(workflow, lock) {
       expected,
       `${job} container must match locked @playwright/test ${version}`
     )
-    assert.ok(
-      body
-        .match(/^      options: (.+)$/m)?.[1]
-        .split(/\s+/)
-        .includes('--ipc=host'),
-      `${job} Chromium container requires --ipc=host`
-    )
+    const options = body.match(/^      options: (.+)$/m)?.[1].split(/\s+/) || []
+    for (const flag of ['--init', '--ipc=host'])
+      assert.ok(
+        options.includes(flag),
+        `${job} Chromium container requires ${flag}`
+      )
   }
 }
 
