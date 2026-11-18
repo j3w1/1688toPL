@@ -39,6 +39,12 @@ function safeStorage() {
 
 /** Save `blob` as `filename`; returns the name used. */
 export function saveFile(blob, filename, doc = document) {
+  initiateFileDownload(blob, filename, doc)
+  return filename
+}
+
+/** Return the exact anchor URL after its click returns. */
+export function initiateFileDownload(blob, filename, doc = document) {
   const url = URL.createObjectURL(blob)
   const anchor = doc.createElement('a')
   anchor.href = url
@@ -46,12 +52,13 @@ export function saveFile(blob, filename, doc = document) {
   anchor.hidden = true
   doc.body.append(anchor)
   try {
+    const href = anchor.href
     anchor.click()
+    return href
   } finally {
     anchor.remove()
     setTimeout(() => URL.revokeObjectURL(url), 60000)
   }
-  return filename
 }
 
 /** Tell the workspace an export finished, for its readable status line. */

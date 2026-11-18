@@ -41,7 +41,12 @@ import { copySourceImages } from './source-image-copy.js'
 import { copyTable } from './clipboard.js'
 import { openPackingExportDialog } from './packing-export-dialog.js'
 import { createPackingWorkbookImages } from './packing-workbook-images.js'
-import { saveFile, announceExport, uniqueFileName } from './save-file.js'
+import {
+  announceExport,
+  initiateFileDownload,
+  saveFile,
+  uniqueFileName,
+} from './save-file.js'
 
 function freeze(value) {
   if (value && typeof value === 'object') {
@@ -850,7 +855,7 @@ export function createProductOutput({
             signal,
           })
         ).blob,
-      async onExport(_rows, options) {
+      async onExport(_rows, options, invocationId) {
         const summaryNeeded = options.includeAutomationJson === true
         if (summaryNeeded && !workbookAdapter.summary)
           throw new Error('The detailed revision summary is unavailable.')
@@ -875,12 +880,30 @@ export function createProductOutput({
             result.fileName ||
             `1688toPL-${context.containerId}-${context.revisionId}${context.draft ? '-DRAFT' : ''}.xlsx`
         )
-        saveFile(
+        const href = initiateFileDownload(
           new Blob([result.bytes || result], {
             type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
           }),
           file
         )
+        if (invocationId) {
+          const digest = await crypto.subtle.digest(
+            'SHA-256',
+            new TextEncoder().encode(href)
+          )
+          document.dispatchEvent(
+            new CustomEvent('packing-workbook-initiated', {
+              detail: {
+                invocation_id: invocationId,
+                container_id: context.containerId,
+                revision_id: context.revisionId,
+                blob_url_sha256: [...new Uint8Array(digest)]
+                  .map((byte) => byte.toString(16).padStart(2, '0'))
+                  .join(''),
+              },
+            })
+          )
+        }
         const files = [file]
         if (options.includeAutomationJson === true) {
           const name = file.replace(/\.xlsx$/i, '.json'),

@@ -63,6 +63,7 @@ export async function openPackingExportDialog({
   let options = readPackingExportOptions(),
     activeSheet = 'products',
     busy = false,
+    invocationId,
     storageFailed = false
   const prepareImages = createPackingWorkbookImages(loadImage, renderCartonMark)
   const imageUrls = new Set()
@@ -73,6 +74,18 @@ export async function openPackingExportDialog({
     imageUrls.clear()
   }
   const containerOutput = context?.kind === 'container-revision'
+  const sealedWorkbook =
+    containerOutput && context.status === 'sealed' && !context.draft
+  function setDownloadDisabled(disabled) {
+    download.disabled = disabled
+    if (disabled) {
+      invocationId = undefined
+      delete download.dataset.invocationId
+    } else if (sealedWorkbook && !invocationId) {
+      invocationId = crypto.randomUUID()
+      download.dataset.invocationId = invocationId
+    }
+  }
   if (!hasSelection || containerOutput) options.scope = 'all'
   // Detailed JSON requires a fresh deliberate choice for every export.
   options.includeAutomationJson = false
@@ -392,7 +405,7 @@ export async function openPackingExportDialog({
       ready =
         selectedPackingExportColumns(options).length &&
         selectedPackingExportColumns(options, 'cartons').length
-    download.disabled = busy || !ready || (!containerOutput && !rows.length)
+    setDownloadDisabled(busy || !ready || (!containerOutput && !rows.length))
     bindText(
       status,
       m('Products: {0} · Columns: {1}', { 0: rows.length, 1: selected.length })
@@ -579,14 +592,14 @@ export async function openPackingExportDialog({
           } catch (error) {
             if (version !== previewVersion) return
             bindText(status, m(error.message))
-            download.disabled = true
+            setDownloadDisabled(true)
             return
           }
         }
       })()
     } catch (error) {
       preview.append(el('p', local(error.message)))
-      download.disabled = true
+      setDownloadDisabled(true)
     }
   }
   search.oninput = renderChoices
@@ -598,14 +611,16 @@ export async function openPackingExportDialog({
     if (busy) event.preventDefault()
   })
   download.onclick = async () => {
-    if (download.disabled || busy) return
+    if (!modal.open || download.disabled || busy) return
+    const attemptId = invocationId
     busy = true
     content.inert = true
-    close.disabled = download.disabled = true
+    close.disabled = true
+    setDownloadDisabled(true)
     for (const button of languages.children) button.disabled = true
     bindText(status, m('Preparing packing workbook…'))
     try {
-      await onExport(getRows(options.scope), exportOptions())
+      await onExport(getRows(options.scope), exportOptions(), attemptId)
       modal.close('exported')
     } catch (error) {
       bindText(status, m(error.message))
@@ -614,9 +629,11 @@ export async function openPackingExportDialog({
       content.inert = false
       close.disabled = false
       for (const button of languages.children) button.disabled = false
-      download.disabled =
-        !selectedPackingExportColumns(options).length ||
-        !selectedPackingExportColumns(options, 'cartons').length
+      if (modal.open)
+        setDownloadDisabled(
+          !selectedPackingExportColumns(options).length ||
+            !selectedPackingExportColumns(options, 'cartons').length
+        )
     }
   }
   document.body.append(modal)
@@ -626,6 +643,7 @@ export async function openPackingExportDialog({
     modal.addEventListener(
       'close',
       () => {
+        setDownloadDisabled(true)
         stopLanguage()
         clearPreviewImages()
         modal.remove()
