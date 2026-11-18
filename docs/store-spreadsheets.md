@@ -42,7 +42,7 @@ The **Setup / Markers / Checks** sidebar supplies the same copyable guide availa
 
 Review cards identify source cells, groups, photos and arithmetic. **Check all** acknowledges eligible review items only. It does not resolve quantity allocations, missing pictures, financial errors, an unconfirmed date or final photo/total confirmation.
 
-After these checks, choose **Review products and codes**. This opens editable product details and code proposals without saving the order, photos or preparation and without reserving codes. Review one shared base per product group and the variant and size endings beneath it, then choose **Import and assign codes**. The final action saves the order, original photos, authored details, preparation, reviewed assignments and source carton facts together in one transaction. A failed validation saves none of them. Closing during parsing cancels the reader; saving locks dismissal.
+While the workbook is being read, choose a different file to replace it or close the dialog to cancel. After the workbook checks, choose **Review products and codes** to edit product details and code proposals. Review one shared base per product group and the variant and size endings beneath it. **Import and assign codes** saves the order, original photos, authored details, preparation, reviewed assignments and source carton facts together in one transaction. Saving locks dismissal. A failed validation saves none of them.
 
 Financial and quantity mismatches block import. Formula cells need saved results without Excel errors; the importer never runs formulas or macros. Recalculate and save the workbook when those results are absent.
 

@@ -27,7 +27,7 @@ await build({
     'list-content': 'src/list-content.js',
     background: 'src/background.js',
     library: 'src/library.js',
-    'store-workbook-worker': 'src/store-workbook-worker.js',
+    'store-workbook-sandbox': 'src/store-workbook-sandbox.js',
     'packing-report-worker': 'src/packing-report-worker.js',
     'excel-image-encoder': 'src/excel-image-encoder.js',
   },
@@ -46,6 +46,7 @@ await cp(path.join(root, 'src/assets'), path.join(output, 'assets'), {
 })
 for (const resource of [
   'library.html',
+  ...manifest.sandbox.pages,
   'library.css',
   'store-import.css',
   'order-charges.css',
@@ -72,7 +73,7 @@ await writeFile(
   JSON.stringify(manifest, null, 2) + '\n'
 )
 const resources = [
-  'store-workbook-worker.js',
+  ...manifest.sandbox.pages,
   'packing-report-worker.js',
   'excel-image-encoder.js',
   'store-import.css',
@@ -102,6 +103,11 @@ const resources = [
   'assets/casa-elida.png',
 ]
 for (const resource of resources) await readFile(path.join(output, resource))
+for (const page of manifest.sandbox.pages) {
+  const html = await readFile(path.join(output, page), 'utf8')
+  for (const [, script] of html.matchAll(/<script\b[^>]*\bsrc="([^"]+)"/g))
+    await readFile(path.join(output, path.dirname(page), script))
+}
 // Every linked workspace stylesheet must also reach the packaged extension.
 const workspaceHtml = await readFile(path.join(output, 'library.html'), 'utf8')
 for (const [, resource] of workspaceHtml.matchAll(
