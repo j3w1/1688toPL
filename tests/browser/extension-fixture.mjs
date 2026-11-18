@@ -20,7 +20,7 @@ import { copyExtension } from '../helpers/extension-copy.mjs'
 const repository = fileURLToPath(new URL('../../', import.meta.url))
 const syntheticOrderId = '1234567890123456789'
 
-async function startFixtureServer() {
+async function startFixtureServer(extensionPath) {
   const moduleBundles = new Map()
   let readerAttachment
   const server = createServer(async (request, response) => {
@@ -41,6 +41,14 @@ async function startFixtureServer() {
         response.writeHead(500)
         response.end('Synthetic reader was not attached')
       }
+      return
+    }
+    if (pathname === '/excel-image-encoder.js') {
+      const worker = await readFile(path.join(extensionPath, pathname.slice(1)))
+      response.writeHead(200, {
+        'Content-Type': 'text/javascript; charset=utf-8',
+      })
+      response.end(worker)
       return
     }
     // Native repository tests import source modules directly. Report decoding
@@ -255,7 +263,7 @@ export const test = base.extend({
           },
         })
       )
-      const local = await startFixtureServer()
+      const local = await startFixtureServer(extensionPath)
       server = local.server
       context = await chromium.launchPersistentContext(profilePath, {
         channel: process.env.EXTENSION_TEST_CHANNEL || 'chromium',
