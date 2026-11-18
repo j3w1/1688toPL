@@ -52,8 +52,10 @@ test('sealed workbook receipts join distinct Chromium downloads of the same froz
         this instanceof HTMLAnchorElement &&
         window.failDownloadSuffix &&
         this.download.endsWith(window.failDownloadSuffix)
-      )
+      ) {
+        window.failedDownloadName = this.download
         throw new Error('Synthetic download initiation failure')
+      }
       originalClick.call(this)
       if (this instanceof HTMLAnchorElement && this.download) {
         const control = document.querySelector(
@@ -61,8 +63,8 @@ test('sealed workbook receipts join distinct Chromium downloads of the same froz
         )
         returnedAnchors.push({
           href: this.href,
-          disabled: control.disabled,
-          invocationId: control.getAttribute('data-invocation-id'),
+          disabled: control?.disabled,
+          invocationId: control?.getAttribute('data-invocation-id'),
         })
       }
     }
@@ -75,7 +77,7 @@ test('sealed workbook receipts join distinct Chromium downloads of the same froz
   })
   await page.clock.setFixedTime(new Date('2026-10-15T04:00:00Z'))
   await page.goto(`${extension.extensionBaseUrl}/library.html`)
-  await openContainerOutput(page, containerId)
+  const view = await openContainerOutput(page, containerId)
 
   const cdp = await extension.context.newCDPSession(page)
   const starts = []
@@ -123,6 +125,41 @@ test('sealed workbook receipts join distinct Chromium downloads of the same froz
   )
   expect(manifest.status).toBe('sealed')
   expect(manifest.products.length).toBeGreaterThan(1)
+
+  await view.locator('[data-action="amend-container"]').click()
+  const amendment = page.locator('dialog[open]').last()
+  await amendment
+    .getByRole('textbox', { name: 'Reason for amendment', exact: true })
+    .fill('Leave one synthetic carton behind')
+  await amendment
+    .getByRole('button', { name: 'Begin amendment', exact: true })
+    .click()
+  await view.locator('[data-view="loading"]').click()
+  await view.locator('[data-action="expand-container-order"]').first().click()
+  await view
+    .locator('tr[data-container-row]')
+    .first()
+    .locator('[data-action="set-carton-loading"][data-state="left-behind"]')
+    .click()
+  await sealContainerThroughUI(page, { markAll: false })
+  const current = await extension.inspector.evaluate(
+    async (id) => (await window.testRepository).getContainerManifest({ id }),
+    containerId
+  )
+  expect(current.revisionId).not.toBe(manifest.revisionId)
+  expect(current.products.length).toBeLessThan(manifest.products.length)
+
+  const historicalUrl = new URL(`${extension.extensionBaseUrl}/library.html`)
+  historicalUrl.hash = new URLSearchParams({
+    workspace: 'packing',
+    view: 'packing-list',
+    containerId,
+    revisionId: manifest.revisionId,
+  }).toString()
+  await page.goto(historicalUrl.href)
+  await expect(view.locator('.container-heading code')).toHaveText(
+    manifest.revisionId
+  )
   await page
     .locator('tr[data-container-row] input[type="checkbox"]')
     .first()
@@ -130,8 +167,20 @@ test('sealed workbook receipts join distinct Chromium downloads of the same froz
 
   await openExport.click()
   const abandoned = await readInvocation()
+  const dismissedControl = await download.elementHandle()
   await close.click()
   await expect(dialog).toHaveCount(0)
+  expect(
+    await dismissedControl.evaluate((control) => {
+      const state = {
+        disabled: control.disabled,
+        invocationId: control.getAttribute('data-invocation-id'),
+      }
+      control.click()
+      return state
+    })
+  ).toEqual({ disabled: true, invocationId: null })
+  await dismissedControl.dispose()
   expect(await receipts()).toEqual([])
   expect(starts).toHaveLength(1)
 
@@ -143,6 +192,8 @@ test('sealed workbook receipts join distinct Chromium downloads of the same froz
   })
   await download.click()
   await expect(dialogStatus).toHaveText('Synthetic download initiation failure')
+  const initialFilename = await page.evaluate(() => window.failedDownloadName)
+  expect(initialFilename).toMatch(/^packing-list-.*-r1\.xlsx$/)
   const retry = await readInvocation()
   expect(retry).not.toBe(failed)
   expect(await receipts()).toEqual([])
@@ -201,6 +252,9 @@ test('sealed workbook receipts join distinct Chromium downloads of the same froz
       invocationId: null,
     })
     expect(match.suggestedFilename).toMatch(/^packing-list-.*\.xlsx$/)
+    expect(match.suggestedFilename).toBe(
+      initialFilename.replace(/\.xlsx$/, `-${observations.length + 2}.xlsx`)
+    )
     await expect.poll(() => progress.get(match.guid)?.state).toBe('completed')
     const bytes = await readFile(
       join(extension.downloadPath, match.suggestedFilename)
@@ -221,6 +275,19 @@ test('sealed workbook receipts join distinct Chromium downloads of the same froz
         .map((row) => row[quantityColumn])
         .sort()
     ).toEqual(manifest.products.map((row) => Number(row.quantity)).sort())
+    const detailsColumn = rows[4].indexOf('Details')
+    expect(detailsColumn).toBeGreaterThanOrEqual(0)
+    for (const product of manifest.products) {
+      const item = record.snapshot.items.find(
+        ({ entryId }) => entryId === product.entryId
+      )
+      const title = item.description.split('\n')[0]
+      expect(
+        rows.slice(5).find((row) => row[detailsColumn]?.includes(title))?.[
+          quantityColumn
+        ]
+      ).toBe(Number(product.quantity))
+    }
     observations.push({
       ...detail,
       guid: match.guid,
@@ -244,6 +311,12 @@ test('sealed workbook receipts join distinct Chromium downloads of the same froz
   expect(companion.suggestedFilename).toBe(
     observations.at(-1).filename.replace(/\.xlsx$/, '.json')
   )
+  await expect.poll(() => progress.get(companion.guid)?.state).toBe('completed')
+  await expect(status).toHaveAttribute(
+    'data-files',
+    JSON.stringify([observations.at(-1).filename, companion.suggestedFilename])
+  )
+  expect(await receipts()).toHaveLength(3)
   expect(
     observations.map(({ blob_url_sha256 }) => blob_url_sha256)
   ).not.toContain(urlHash(companion.url))

@@ -592,7 +592,7 @@ export async function openPackingExportDialog({
           } catch (error) {
             if (version !== previewVersion) return
             bindText(status, m(error.message))
-            download.disabled = true
+            setDownloadDisabled(true)
             return
           }
         }
@@ -611,7 +611,7 @@ export async function openPackingExportDialog({
     if (busy) event.preventDefault()
   })
   download.onclick = async () => {
-    if (download.disabled || busy) return
+    if (!modal.open || download.disabled || busy) return
     const attemptId = invocationId
     busy = true
     content.inert = true
@@ -643,6 +643,7 @@ export async function openPackingExportDialog({
     modal.addEventListener(
       'close',
       () => {
+        setDownloadDisabled(true)
         stopLanguage()
         clearPreviewImages()
         modal.remove()
