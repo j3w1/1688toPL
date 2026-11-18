@@ -173,11 +173,20 @@ test.describe('copy progress and recovery', () => {
       await navigator.clipboard.writeText(
         'Synthetic copy cancellation sentinel'
       )
-      const encode = HTMLCanvasElement.prototype.toBlob
-      HTMLCanvasElement.prototype.toBlob = function (...args) {
-        if (this.width > 1500)
-          window.finishCopyTableImage = () => encode.apply(this, args)
-        else return encode.apply(this, args)
+      const NativeWorker = window.Worker
+      window.Worker = class extends NativeWorker {
+        constructor(url, ...args) {
+          super(url, ...args)
+          if (url === 'excel-image-encoder.js')
+            this.addEventListener(
+              'message',
+              (event) => {
+                event.stopImmediatePropagation()
+                window.finishCopyTableImage = () => this.dispatchEvent(event)
+              },
+              { once: true }
+            )
+        }
       }
     })
     const button = page.locator('#copy-excel-image')

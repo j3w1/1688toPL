@@ -411,9 +411,10 @@ test('Excel output freezes selected rows with current-language headings, linked 
     }
     // Keep the actual canvas encoder pending while the visible filter changes.
     // The eventual PNG still passes through the real encoder and clipboard.
-    const encode = HTMLCanvasElement.prototype.toBlob
-    HTMLCanvasElement.prototype.toBlob = function (...args) {
-      if (this.width > 2000)
+    const encode = Worker.prototype.postMessage
+    Worker.prototype.postMessage = function (...args) {
+      const [bitmap] = args
+      if (bitmap instanceof ImageBitmap && bitmap.width > 2000)
         window.finishTableImage = () => encode.apply(this, args)
       else return encode.apply(this, args)
     }

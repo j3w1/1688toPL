@@ -23,6 +23,35 @@ import {
   excelOutputTitle,
 } from './excel-output-file-name.js'
 
+async function encodePreviewPng(canvas, signal) {
+  signal.throwIfAborted()
+  const bitmap = await createImageBitmap(canvas)
+  let worker, cancel
+  try {
+    signal.throwIfAborted()
+    // Chromium schedules main-thread canvas PNG encoding during idle time.
+    worker = new Worker('excel-image-encoder.js')
+    return await new Promise((resolve, reject) => {
+      const fail = () =>
+        reject(new Error('The Excel image could not be encoded.'))
+      cancel = () => reject(signal.reason)
+      signal.addEventListener('abort', cancel, { once: true })
+      worker.addEventListener(
+        'message',
+        ({ data }) => (data instanceof Blob ? resolve(data) : fail()),
+        { once: true }
+      )
+      worker.addEventListener('error', fail, { once: true })
+      worker.addEventListener('messageerror', fail, { once: true })
+      worker.postMessage(bitmap, [bitmap])
+    })
+  } finally {
+    if (cancel) signal.removeEventListener('abort', cancel)
+    worker?.terminate()
+    bitmap.close()
+  }
+}
+
 /** Capture output values only, never the attached live library records. */
 export async function openExcelOutput(
   rows,
@@ -138,6 +167,12 @@ export async function openExcelOutput(
       const result = await renderExcelImage(plan, {
         loadImage,
         renderCartonMark,
+        encodePng:
+          typeof Worker === 'function' &&
+          typeof OffscreenCanvas === 'function' &&
+          typeof createImageBitmap === 'function'
+            ? encodePreviewPng
+            : undefined,
         signal,
         onProgress: ({ completed, total }) =>
           onProgress(

@@ -48,6 +48,13 @@ export async function startPreview({ port = 0 } = {}) {
       ['text/javascript', reportWorker.outputFiles[0].contents],
     ],
     [
+      '/excel-image-encoder.js',
+      [
+        'text/javascript',
+        await readFile(path.join(root, 'src/excel-image-encoder.js')),
+      ],
+    ],
+    [
       '/icons/icon48.png',
       ['image/png', await readFile(path.join(root, 'icons/icon48.png'))],
     ],

@@ -29,6 +29,7 @@ await build({
     library: 'src/library.js',
     'store-workbook-worker': 'src/store-workbook-worker.js',
     'packing-report-worker': 'src/packing-report-worker.js',
+    'excel-image-encoder': 'src/excel-image-encoder.js',
   },
   outdir: output,
   bundle: true,
@@ -73,6 +74,7 @@ await writeFile(
 const resources = [
   'store-workbook-worker.js',
   'packing-report-worker.js',
+  'excel-image-encoder.js',
   'store-import.css',
   'order-charges.css',
   'operations.css',
