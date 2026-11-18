@@ -251,7 +251,7 @@ Preparation groups new 1688 rows automatically by source title; there is no rout
 | `edit-in-orders`                | Edit in Orders with retained container/revision return route.                                              |
 | `return-to-container`           | Edit in Orders with retained container/revision return route.                                              |
 | `export-packing-list`           | Configure / download the complete revision. Product selection/filtering cannot reduce it.                  |
-| `download-packing-list`         | Configure / download the complete revision. Product selection/filtering cannot reduce it.                  |
+| `download-packing-list`         | Download the complete revision. An enabled sealed-revision control exposes `data-invocation-id`.           |
 
 Packing product/carton/photo views are read-only except loading/amendment. Interchangeable-count input appears only when the domain explicitly permits it; it must never select arbitrary differently measured boxes. Se quedó is that container's historical remainder, while Backlog is current global inventory.
 
@@ -363,6 +363,14 @@ Browser downloads use local `YYYY-MM-DD-HHMMSS`, with `-2` for same-second repea
 | Calibration      | `CE-print-calibration-2026-10-23-153012.pdf`                         | None.                                                       |
 
 Packing summaries use `1688-export-summary` version 3 with `scope: "container-revision"`. They name the actual workbook/JSON files and identify the container and immutable revision, complete loaded logical membership, source-line costs and physical coverage. Se quedó uses that revision’s frozen included-order remainder; later purchases and shipments cannot rewrite it. Historical version 1/2 summary files remain readable evidence. A summary is not a restorable backup. Full cost evidence includes original/effective amounts, additional/feature/linked costs, reasons and IDs independently of workbook columns. [Workbook scope](exports.md#packing-workbook) follows the full loaded revision regardless of UI selection/filter; distinct physical cartons count once and purchases sharing codes remain separate financial rows. Detailed JSON is off for every newly opened export and includes full costs, reasons and identifiers independently of chosen workbook columns.
+
+### Sealed workbook download receipt
+
+Before clicking **Download Excel**, listen for `packing-workbook-initiated` on the workspace `document` and start collecting Chromium `Browser.downloadWillBegin` and `Browser.downloadProgress` events. With direct CDP access, `Browser.setDownloadBehavior` with `behavior: "default"` and `eventsEnabled: true` enables those events while retaining Chromium's normal save behavior. Read `data-invocation-id` from the enabled `[data-action="download-packing-list"]` button immediately before clicking it. The control consumes that UUID when the attempt starts and exposes a fresh UUID when a failed attempt can be retried. Closing the dialog before clicking discards the unused UUID.
+
+After the workbook anchor's `click()` returns, the document dispatches one transient `CustomEvent`. Its `detail` has `invocation_id`, `container_id`, `revision_id`, and `blob_url_sha256`. The IDs identify that attempt and the frozen workbook revision. The digest is lowercase SHA-256 hex of the exact UTF-8 `anchor.href`. The optional JSON can fail after the workbook has been initiated. Draft workbooks, JSON companions, and other downloads emit no receipt.
+
+Buffer both event streams because either event can arrive first. Match the receipt for the captured invocation and revision to the SHA-256 of the exact `Browser.downloadWillBegin.url`, preserving the URL string as reported. Require a single match and retain its Chromium `guid`. Track that GUID to `completed` and verify the saved file's bytes and expected workbook scope separately. An unmatched receipt, a filename, or `export-finished` alone leaves the download unverified. The receipt is neither written to the library nor replayed after navigation.
 
 Label/mark summaries use kind `labels` / `carton-marks`, pages/perPage, orders with orderId/seller and products with code/name/order IDs/requested/extra (labels)/total. Totals include orders, requested and printed. Quantities are JSON numbers or exact decimal strings beyond 2^53. Other-source orders additionally carry source/reference. File/summary format names are backward-compatible and do not follow display branding.
 
