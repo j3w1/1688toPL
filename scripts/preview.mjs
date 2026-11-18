@@ -81,6 +81,7 @@ export async function startPreview({ port = 0 } = {}) {
           'src="library.js"',
           'src="library-preview.js"'
         ),
+        { 'Content-Security-Policy': "frame-src 'self'" },
       ],
     ],
     [

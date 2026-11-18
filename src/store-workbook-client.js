@@ -1,5 +1,7 @@
 const cancelled = () => new DOMException('Import cancelled', 'AbortError')
 const unreadable = () => new Error('Spreadsheet could not be read.')
+const startupTimeout = 15_000
+const decodeTimeout = 5 * 60_000
 
 /** The frame and its private channel belong to this file selection alone. */
 export async function readStoreWorkbookAsync(
@@ -14,11 +16,11 @@ export async function readStoreWorkbookAsync(
   frame.src = 'store-workbook-sandbox.html'
 
   return new Promise((resolve, reject) => {
-    let port, settled
+    let port, settled, deadline
     const finish = (action, result) => {
       if (settled) return
       settled = true
-      clearTimeout(startup)
+      clearTimeout(deadline)
       signal?.removeEventListener('abort', abort)
       window.removeEventListener('message', ready)
       port?.close()
@@ -36,9 +38,10 @@ export async function readStoreWorkbookAsync(
       )
         return
       window.removeEventListener('message', ready)
-      clearTimeout(startup)
+      clearTimeout(deadline)
+      // A lost renderer can leave its port silent on stable Chromium.
+      deadline = setTimeout(fail, decodeTimeout)
       port = ports[0]
-      port.addEventListener('close', fail)
       port.onmessageerror = fail
       port.onmessage = ({ data: result }) => {
         if (typeof result?.error === 'string')
@@ -62,7 +65,7 @@ export async function readStoreWorkbookAsync(
       }
     }
     // Chromium can dispatch iframe load even when its script failed to start.
-    const startup = setTimeout(fail, 15_000)
+    deadline = setTimeout(fail, startupTimeout)
     signal?.addEventListener('abort', abort, { once: true })
     window.addEventListener('message', ready)
     try {

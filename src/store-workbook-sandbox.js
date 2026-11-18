@@ -20,7 +20,11 @@ if (parent !== window && window.origin === 'null') {
     },
     { once: true }
   )
-  port1.addEventListener('messageerror', () => port1.close(), { once: true })
+  port1.addEventListener(
+    'messageerror',
+    () => port1.postMessage({ error: 'Spreadsheet could not be read.' }),
+    { once: true }
+  )
   port1.start()
   parent.postMessage('store-workbook-ready', location.origin, [port2])
 }

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { once } from 'node:events'
 import test from 'node:test'
+import { receiveMessageOnPort } from 'node:worker_threads'
 import { readStoreWorkbookAsync } from '../src/store-workbook-client.js'
 
 test('Store sandbox preserves its request contract and disposes after success, error or cancellation', async (t) => {
@@ -29,11 +30,14 @@ test('Store sandbox preserves its request contract and disposes after success, e
   const connect = async (untouchedBuffer) => {
     const frame = frames.at(-1),
       { port1: sender, port2: receiver } = new MessageChannel(),
+      decoy = new MessageChannel(),
       closed = once(sender, 'close'),
       message = once(sender, 'message')
     t.after(() => {
       sender.close()
       receiver.close()
+      decoy.port1.close()
+      decoy.port2.close()
     })
     const ready = (overrides) =>
       window.dispatchEvent(
@@ -46,12 +50,14 @@ test('Store sandbox preserves its request contract and disposes after success, e
         })
       )
     if (untouchedBuffer) {
-      ready({ source: {} })
-      ready({ origin: 'https://example.invalid' })
+      ready({ source: {}, ports: [decoy.port2] })
+      ready({ origin: 'https://example.invalid', ports: [decoy.port2] })
       assert.equal(untouchedBuffer.byteLength, 1)
     }
     ready()
+    ready({ ports: [decoy.port2] })
     const [request] = await message
+    assert.equal(receiveMessageOnPort(decoy.port1), undefined)
     return { frame, sender, request, closed }
   }
 
@@ -63,6 +69,10 @@ test('Store sandbox preserves its request contract and disposes after success, e
   })
   const report = await connect()
   assert.equal(buffer.byteLength, 3)
+  assert.deepEqual(
+    new Uint8Array(report.request.buffer),
+    Uint8Array.of(1, 2, 3)
+  )
   assert.equal(report.request.reportEvidence, true)
   assert.deepEqual(report.request.limits, { sheets: 4 })
   report.sender.postMessage({ workbook: { filename: 'x.xlsx', sheets: [] } })
@@ -75,6 +85,11 @@ test('Store sandbox preserves its request contract and disposes after success, e
     filename: 'legacy.xls',
   })
   const legacySandbox = await connect(legacyBuffer)
+  assert.equal(legacyBuffer.byteLength, 0)
+  assert.deepEqual(
+    new Uint8Array(legacySandbox.request.buffer),
+    Uint8Array.of(1)
+  )
   assert.deepEqual(Object.keys(legacySandbox.request).sort(), [
     'buffer',
     'filename',

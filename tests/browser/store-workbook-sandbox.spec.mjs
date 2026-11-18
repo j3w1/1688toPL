@@ -310,6 +310,36 @@ test('Store replacement and close fence delayed file reads and late real decoder
   expect(await storeCounts(extension)).toEqual(before)
 })
 
+test('a decoder that accepts the file and never replies is disposed, and the next workbook still opens', async ({
+  extension,
+}) => {
+  const page = await newWorkspace(extension)
+  await page.clock.install()
+  const before = await storeCounts(extension)
+  const { dialog, file } = await openImport(page)
+  await interceptDecoding(page, ['4321.xlsx'])
+  await file.setInputFiles(workbookFile())
+  await completedDecode(page, '4321.xlsx')
+
+  const status = dialog.locator('.store-import-status')
+  await page.clock.fastForward(240_000)
+  await expect(status).toHaveText('Reading workbook and product photos…')
+  await expect(page.locator(sandboxFrame)).toHaveCount(1)
+  await page.clock.fastForward(60_000)
+  await expect(status).toHaveText(
+    'Could not read this workbook. Check the file and try again.'
+  )
+  await expect(page.locator(sandboxFrame)).toHaveCount(0)
+  await expect(dialog.locator('form')).toHaveAttribute('aria-busy', 'false')
+
+  await page.evaluate(() => window.storeDecodes['4321.xlsx'].release())
+  await expect(dialog.locator('.store-import-product')).toHaveCount(0)
+  await file.setInputFiles(workbookFile({ name: '4322.xlsx' }))
+  await expect(dialog.locator('.store-import-product')).toHaveCount(1)
+  await expect(dialog.locator('input[name="storeName"]')).toHaveValue('4322')
+  expect(await storeCounts(extension)).toEqual(before)
+})
+
 test('Orders renders a frame while the actual sandbox decoder is computing a large workbook', async ({
   extension,
 }) => {
@@ -381,6 +411,7 @@ test('Orders renders a frame while the actual sandbox decoder is computing a lar
       .length
   })
   expect(observation).toBeGreaterThan(0)
+  await completedDecode(page, '4321.xlsx')
   await page.evaluate(() => window.storeDecodes['4321.xlsx'].release())
   await expect(dialog.locator('.store-import-product')).toHaveCount(1)
   await expect(page.locator(sandboxFrame)).toHaveCount(0)
