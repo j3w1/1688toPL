@@ -541,10 +541,22 @@ test('Excel preview matches copied bytes, errors retry in place, columns refresh
       previewHash
     )
     if (!batch) {
+      // A busy Chromium renderer can leave its canvas PNG callback pending
+      // beyond the readiness budget even after drawing every row.
+      await page.evaluate(() => {
+        const encode = HTMLCanvasElement.prototype.toBlob
+        HTMLCanvasElement.prototype.toBlob = function (...args) {
+          if (this.width <= 2000) return encode.apply(this, args)
+        }
+        window.restoreMainThreadEncoding = () => {
+          HTMLCanvasElement.prototype.toBlob = encode
+        }
+      })
       await dialog
         .getByRole('button', { name: 'Next batch', exact: true })
         .click()
       await expect(primary).toBeEnabled()
+      await page.evaluate(() => window.restoreMainThreadEncoding())
       await expect(dialog.locator('.copy-preview-zoom')).toHaveAttribute(
         'aria-pressed',
         'false'
@@ -583,6 +595,54 @@ test('Excel preview matches copied bytes, errors retry in place, columns refresh
       }
     }, lastUrl)
   ).toBe(true)
+})
+
+test('Excel preview retries an encoding error and keeps the same raster with the canvas fallback', async ({
+  extension,
+}) => {
+  const { page } = await workspace(extension, 4)
+  await page.evaluate(() => {
+    const post = Worker.prototype.postMessage
+    Worker.prototype.postMessage = function (data, ...args) {
+      if (!(data instanceof ImageBitmap)) return post.call(this, data, ...args)
+      Worker.prototype.postMessage = post
+      this.dispatchEvent(new MessageEvent('message', { data: null }))
+    }
+  })
+  const open = page.locator('#copy-excel-image')
+  const dialog = page.locator('.image-copy-dialog')
+  const primary = dialog.locator('.image-copy-submit')
+  const image = dialog.locator('.copy-preview img')
+  const raster = () =>
+    image.evaluate(async (image) => {
+      await image.decode()
+      const canvas = document.createElement('canvas')
+      canvas.width = image.naturalWidth
+      canvas.height = image.naturalHeight
+      const context = canvas.getContext('2d')
+      context.drawImage(image, 0, 0)
+      const pixels = context.getImageData(0, 0, canvas.width, canvas.height)
+      const digest = await crypto.subtle.digest('SHA-256', pixels.data)
+      return [canvas.width, canvas.height, ...new Uint8Array(digest)]
+    })
+  await open.click()
+  await expect(dialog.getByRole('alert')).toContainText(
+    'The Excel image could not be encoded.'
+  )
+  await expect(primary).toBeDisabled()
+  await expect(image).toHaveCount(0)
+  await dialog.getByRole('button', { name: 'Retry', exact: true }).click()
+  await expect(primary).toBeEnabled()
+  await expect(dialog.getByRole('alert')).toHaveCount(0)
+  const workerRaster = await raster()
+  await dialog.getByRole('button', { name: 'Done', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  await page.evaluate(() => {
+    window.Worker = undefined
+  })
+  await open.click()
+  await expect(primary).toBeEnabled()
+  expect(await raster()).toEqual(workerRaster)
 })
 
 test('Excel preview preserves its image and zoom when style options toggle', async ({

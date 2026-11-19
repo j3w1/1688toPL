@@ -22,9 +22,9 @@ export async function startPreview({ port = 0 } = {}) {
     write: false,
     format: 'esm',
   })
-  const workbookWorker = await build({
+  const workbookSandbox = await build({
     absWorkingDir: root,
-    entryPoints: ['src/store-workbook-worker.js'],
+    entryPoints: ['src/store-workbook-sandbox.js'],
     bundle: true,
     write: false,
     format: 'iife',
@@ -38,14 +38,32 @@ export async function startPreview({ port = 0 } = {}) {
     format: 'iife',
     target: 'chrome120',
   })
+  const manifest = JSON.parse(
+    await readFile(path.join(root, 'manifest.json'), 'utf8')
+  )
   const assets = new Map([
     [
-      '/store-workbook-worker.js',
-      ['text/javascript', workbookWorker.outputFiles[0].contents],
+      '/store-workbook-sandbox.html',
+      [
+        'text/html; charset=utf-8',
+        await readFile(path.join(root, 'src/store-workbook-sandbox.html')),
+        { 'Content-Security-Policy': manifest.content_security_policy.sandbox },
+      ],
+    ],
+    [
+      '/store-workbook-sandbox.js',
+      ['text/javascript', workbookSandbox.outputFiles[0].contents],
     ],
     [
       '/packing-report-worker.js',
       ['text/javascript', reportWorker.outputFiles[0].contents],
+    ],
+    [
+      '/excel-image-encoder.js',
+      [
+        'text/javascript',
+        await readFile(path.join(root, 'src/excel-image-encoder.js')),
+      ],
     ],
     [
       '/icons/icon48.png',
@@ -63,6 +81,7 @@ export async function startPreview({ port = 0 } = {}) {
           'src="library.js"',
           'src="library-preview.js"'
         ),
+        { 'Content-Security-Policy': "frame-src 'self'" },
       ],
     ],
     [
@@ -142,6 +161,7 @@ export async function startPreview({ port = 0 } = {}) {
     response.writeHead(200, {
       'Content-Type': asset[0],
       'Cache-Control': 'no-store',
+      ...asset[2],
     })
     response.end(asset[1])
   })

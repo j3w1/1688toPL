@@ -1243,7 +1243,7 @@ test('import review cards show photos, source values and arithmetic comparisons 
   await page.close()
 })
 
-test('store import reads a real marked workbook in its worker, blocks bad totals/date, and refreshes Products immediately', async ({
+test('store import reads a real marked workbook, blocks bad totals/date, and refreshes Products immediately', async ({
   extension,
 }) => {
   const { page, dialog, file } = await openImport(extension)

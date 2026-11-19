@@ -9,7 +9,6 @@ import {
   runPackingReportAsync,
   createPackingReportClient,
 } from '../src/packing-report-client.js'
-import { readStoreWorkbookAsync } from '../src/store-workbook-client.js'
 
 const context = {
   accountId: 'local',
@@ -337,44 +336,6 @@ test('latest-generation client cancels source/sheet/order replacements and canno
     const pending = client.run({ operation: 'parse', input: { text: 'draft' } })
     client.cancel()
     await assert.rejects(pending, { name: 'AbortError' })
-  } finally {
-    globalThis.Worker = previous
-  }
-})
-
-test('shared workbook client opt-in preserves caller bytes/default message contract and terminates on cancellation', async () => {
-  const previous = globalThis.Worker
-  globalThis.Worker = FakeWorker
-  try {
-    const buffer = Uint8Array.from([1, 2, 3]).buffer
-    const read = readStoreWorkbookAsync(buffer, {
-      filename: 'x.xlsx',
-      reportEvidence: true,
-    })
-    const worker = FakeWorker.instances.at(-1)
-    assert.equal(buffer.byteLength, 3)
-    assert.equal(worker.sent.reportEvidence, true)
-    worker.emit('message', { workbook: { filename: 'x.xlsx' } })
-    assert.equal((await read).filename, 'x.xlsx')
-    assert(worker.terminated)
-    const legacy = readStoreWorkbookAsync(Uint8Array.from([1]).buffer, {
-      filename: 'legacy.xls',
-    })
-    const legacyWorker = FakeWorker.instances.at(-1)
-    assert.deepEqual(Object.keys(legacyWorker.sent).sort(), [
-      'buffer',
-      'filename',
-    ])
-    legacyWorker.emit('message', { workbook: {} })
-    await legacy
-    const controller = new AbortController()
-    const cancelled = readStoreWorkbookAsync(Uint8Array.from([1]).buffer, {
-      signal: controller.signal,
-    })
-    const cancelledWorker = FakeWorker.instances.at(-1)
-    controller.abort()
-    await assert.rejects(cancelled, { name: 'AbortError' })
-    assert(cancelledWorker.terminated)
   } finally {
     globalThis.Worker = previous
   }

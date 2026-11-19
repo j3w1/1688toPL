@@ -725,7 +725,7 @@ export function openStoreImportDialog({
     saveLocked = value && saving
     updateSubmit()
     close.disabled = saveLocked
-    file.disabled = value
+    file.disabled = value && !readingController
     sheet.disabled = value || !workbook
     storeName.disabled = purchaseDate.disabled =
       value || Boolean(targetPurchase())
@@ -1042,7 +1042,7 @@ export function openStoreImportDialog({
       result = await analyzeStoreSheet(workbook, sheet.value),
       records = await repository.listOrders({ accountId }),
       matches = await findMatchingStoreImports(result, records)
-    if (current !== generation || !dialog.isConnected) return
+    if (current !== generation || !dialog.open || !dialog.isConnected) return
     analysis = result
     purchases = records.filter(
       ({ snapshot }) =>
@@ -1089,13 +1089,22 @@ export function openStoreImportDialog({
   }
   file.addEventListener('change', async () => {
     const selected = file.files?.[0]
-    if (!selected) return
-    const current = ++generation
+    if (!selected || !dialog.open || saveLocked) return
+    const current = ++generation,
+      controller = new AbortController()
+    readingController?.abort()
+    readingController = controller
+    const isCurrent = () =>
+      current === generation &&
+      dialog.open &&
+      dialog.isConnected &&
+      !controller.signal.aborted
     purchaseDate.value = ''
     purchaseDate.removeAttribute('aria-invalid')
     storeName.removeAttribute('aria-invalid')
     analysis = undefined
     workbook = undefined
+    sheet.replaceChildren()
     purchases = []
     updateSetup.hidden = true
     updateContext.hidden = true
@@ -1105,12 +1114,13 @@ export function openStoreImportDialog({
     bindText(status, m('Reading workbook and product photos…'))
     status.classList.remove('is-error')
     try {
-      readingController = new AbortController()
-      const result = await readStoreWorkbookAsync(
-        await selected.arrayBuffer(),
-        { filename: selected.name, signal: readingController.signal }
-      )
-      if (current !== generation || !dialog.isConnected) return
+      const buffer = await selected.arrayBuffer()
+      if (!isCurrent()) return
+      const result = await readStoreWorkbookAsync(buffer, {
+        filename: selected.name,
+        signal: controller.signal,
+      })
+      if (!isCurrent()) return
       workbook = result
       sheet.replaceChildren(
         ...workbook.sheets.map((entry) => {
@@ -1121,7 +1131,7 @@ export function openStoreImportDialog({
       )
       await analyze()
     } catch (error) {
-      if (current === generation)
+      if (isCurrent())
         fail({
           message: [
             'The spreadsheet exceeds the 100 MB import limit.',
@@ -1131,7 +1141,10 @@ export function openStoreImportDialog({
             : 'Could not read this workbook. Check the file and try again.',
         })
     } finally {
-      if (current === generation) setBusy(false)
+      if (readingController === controller) {
+        readingController = undefined
+        if (isCurrent()) setBusy(false)
+      }
     }
   })
   sheet.addEventListener('change', async () => {
@@ -1454,6 +1467,7 @@ export function openStoreImportDialog({
     () => {
       generation++
       readingController?.abort()
+      readingController = undefined
       codeView?.destroy()
       updateView?.destroy()
       photoViewer.close()

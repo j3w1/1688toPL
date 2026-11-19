@@ -1317,7 +1317,7 @@ async function yieldUI() {
 /** Render one confirmed batch, with sequential photos and a bounded bitmap cache. */
 export async function renderExcelImage(
   plan,
-  { loadImage, renderCartonMark, onProgress, signal } = {}
+  { loadImage, renderCartonMark, encodePng, onProgress, signal } = {}
 ) {
   if (!plan?.rows?.length || !plan.columns?.length)
     throw new Error('Choose an Excel image batch.')
@@ -1696,15 +1696,17 @@ export async function renderExcelImage(
     context.strokeStyle = palette.grid
     context.strokeRect(0.5, 0.5, plan.cssWidth - 1, plan.cssHeight - 1)
     const encoded = await abortable(
-      new Promise((resolve, reject) => {
-        canvas.toBlob(
-          (blob) =>
-            blob
-              ? resolve(blob)
-              : reject(new Error('The Excel image could not be encoded.')),
-          'image/png'
-        )
-      }),
+      encodePng
+        ? encodePng(canvas, signal)
+        : new Promise((resolve, reject) => {
+            canvas.toBlob(
+              (blob) =>
+                blob
+                  ? resolve(blob)
+                  : reject(new Error('The Excel image could not be encoded.')),
+              'image/png'
+            )
+          }),
       signal
     )
     const blob = await pngWithDpi(encoded, DPI)

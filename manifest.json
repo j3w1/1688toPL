@@ -19,7 +19,11 @@
     "default_title": "Open Workspace"
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'"
+    "extension_pages": "script-src 'self'; object-src 'self'; frame-src 'self'",
+    "sandbox": "sandbox allow-scripts; default-src 'none'; script-src 'self'; connect-src 'none'; worker-src 'none'; form-action 'none'; base-uri 'none'"
+  },
+  "sandbox": {
+    "pages": ["store-workbook-sandbox.html"]
   },
   "content_scripts": [
     {
